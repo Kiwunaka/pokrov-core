@@ -8,7 +8,7 @@
     "sing_box": "1.13.0",
     "sing": "0.8.0-beta.12",
     "gomobile": "0.1.11",
-    "cronet_commit": "dc1cda1fe28740ba069934ab62aeb8ef85388332"
+    "cronet_distribution": "caller_supplied_sha256_pinned_binary"
   },
   "artifacts": {
     "android": "pokrov-core.aar",
@@ -18,8 +18,8 @@
   "local_build_evidence": {
     "date": "2026-07-23",
     "android": {
-      "size": 106832863,
-      "sha256": "0b4fdcf0a0a59664d776c4ed0b789d8a5ae7d70fba2949b8d2ce4a84cd5dd87d",
+      "size": 106833028,
+      "sha256": "ca3ee922ff10897545da86ea3aa6df942ecf36d7f687b2782b0bc285e9a15cb3",
       "abis": [
         "armeabi-v7a",
         "arm64-v8a",
@@ -29,8 +29,8 @@
       "reproducible": true
     },
     "windows": {
-      "size": 55117824,
-      "sha256": "1e1a35797dfa6f3f5d967f00eb05c3a42f2e50176d096dd9774b3d5bce9d53e3",
+      "size": 55118848,
+      "sha256": "4587448c7eec4bf9ec70508f698764a71dfa7318baeebc9598a41b79f7dc4e2d",
       "reproducible": true,
       "libcronet": {
         "size": 8596992,

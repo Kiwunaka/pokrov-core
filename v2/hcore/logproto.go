@@ -34,7 +34,7 @@ func Log(level LogLevel, typ LogType, message ...any) {
 		return
 	}
 	// if static.debug {
-	msg := fmt.Sprintf("H %v %v", typ, fmt.Sprint(message...))
+	msg := fmt.Sprintf("POKROV %v %v", typ, fmt.Sprint(message...))
 	logLevel(level, msg)
 	// fmt.Printf("%v %v %v\n", level, typ, fmt.Sprint(message...))
 	// os.Stderr.WriteString(fmt.Sprintf("%v %v %v\n", level, typ, fmt.Sprint(message...)))

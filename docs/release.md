@@ -9,3 +9,7 @@
 7. Commit the exact source, create an annotated `vX.Y.Z` tag, then publish artifacts from that commit.
 
 Release `1.0.0` has reproducible local Android and Windows builds. Their exact sizes and SHA-256 values are retained in `config/release.json`. Host integration and the Windows 100-cycle test must use those exact artifacts; Apple remains `MANUAL_OWNER_TEST`.
+
+The Windows build accepts `libcronet.dll` only when its size and SHA-256 match
+`config/release.json`. Pass it through `-CronetLibrary` on a clean checkout.
+The build does not fetch a mutable or unavailable revision implicitly.

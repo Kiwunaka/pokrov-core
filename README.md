@@ -35,7 +35,8 @@ Windows:
 ```powershell
 .\scripts\build-windows.ps1 `
   -GoExecutable C:\path\to\go.exe `
-  -CCompiler C:\path\to\x86_64-w64-mingw32-gcc.exe
+  -CCompiler C:\path\to\x86_64-w64-mingw32-gcc.exe `
+  -CronetLibrary C:\path\to\verified\libcronet.dll
 ```
 
 Android:

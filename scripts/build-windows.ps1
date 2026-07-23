@@ -78,24 +78,37 @@ try {
 }
 
 $cronetOutput = Join-Path $OutputDirectory "libcronet.dll"
+$expectedCronetSize = [int64]$release.local_build_evidence.windows.libcronet.size
+$expectedCronetSha256 = [string]$release.local_build_evidence.windows.libcronet.sha256
+
+function Test-CronetIdentity {
+  param([Parameter(Mandatory)][string]$Path)
+
+  if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+    return $false
+  }
+  $file = Get-Item -LiteralPath $Path
+  if ($file.Length -ne $expectedCronetSize) {
+    return $false
+  }
+  $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $Path).Hash.ToLowerInvariant()
+  return $hash -eq $expectedCronetSha256
+}
+
 if ($CronetLibrary) {
   $CronetLibrary = [System.IO.Path]::GetFullPath($CronetLibrary)
-  if (-not (Test-Path -LiteralPath $CronetLibrary -PathType Leaf)) {
-    throw "Cronet library not found: $CronetLibrary"
+  if (-not (Test-CronetIdentity -Path $CronetLibrary)) {
+    throw "Cronet library does not match the pinned size and SHA-256: $CronetLibrary"
   }
-  Copy-Item -Force -LiteralPath $CronetLibrary -Destination $cronetOutput
-} else {
-  $cronetCommit = $release.engine.cronet_commit
-  $previousToolchain = $env:GOTOOLCHAIN
-  try {
-    $env:GOTOOLCHAIN = "local"
-    & $goCommand.Source run "github.com/sagernet/cronet-go/cmd/build-naive@$cronetCommit" extract-lib --target windows/amd64 -o $OutputDirectory
-    if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $cronetOutput)) {
-      throw "Could not extract the pinned Windows Cronet library."
-    }
-  } finally {
-    $env:GOTOOLCHAIN = $previousToolchain
+  if ($CronetLibrary -ne $cronetOutput) {
+    Copy-Item -Force -LiteralPath $CronetLibrary -Destination $cronetOutput
   }
+} elseif (-not (Test-CronetIdentity -Path $cronetOutput)) {
+  throw "Pinned libcronet.dll is unavailable. Pass -CronetLibrary with the exact dependency recorded in config/release.json."
+}
+
+if (-not (Test-CronetIdentity -Path $cronetOutput)) {
+  throw "Windows Cronet dependency failed its final identity check."
 }
 
 Get-FileHash -Algorithm SHA256 -LiteralPath $outputPath, $cronetOutput |
