@@ -1,0 +1,31 @@
+syntax = "proto3";
+
+package pokrovoptions;
+
+option go_package = "github.com/Kiwunaka/POKROV-core/v2/config";
+option java_package = "space.pokrov.core.api.v2.config";
+
+message ParseConfigRequest {
+  string tempPath = 1;
+  string path = 2;
+  bool debug = 3;
+}
+
+message ParseConfigResponse {
+  optional string error = 1;
+}
+
+message GenerateConfigRequest {
+  string path = 1;
+  bool debug = 2;
+}
+
+message GenerateConfigResponse {
+  string config = 1;
+  optional string error = 2;
+}
+
+service CoreService {
+  rpc ParseConfig(ParseConfigRequest) returns (ParseConfigResponse);
+  rpc GenerateFullConfig(GenerateConfigRequest) returns (GenerateConfigResponse);
+}

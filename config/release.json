@@ -1,0 +1,44 @@
+{
+  "name": "POKROV Core",
+  "version": "1.0.0",
+  "go_toolchain": "go1.25.12",
+  "desktop_abi": 2,
+  "android_package": "space.pokrov.core",
+  "engine": {
+    "sing_box": "1.13.0",
+    "sing": "0.8.0-beta.12",
+    "gomobile": "0.1.11",
+    "cronet_commit": "dc1cda1fe28740ba069934ab62aeb8ef85388332"
+  },
+  "artifacts": {
+    "android": "pokrov-core.aar",
+    "windows": "pokrov-core.dll",
+    "apple": "PokrovCore.xcframework"
+  },
+  "local_build_evidence": {
+    "date": "2026-07-23",
+    "android": {
+      "size": 106832863,
+      "sha256": "0b4fdcf0a0a59664d776c4ed0b789d8a5ae7d70fba2949b8d2ce4a84cd5dd87d",
+      "abis": [
+        "armeabi-v7a",
+        "arm64-v8a",
+        "x86",
+        "x86_64"
+      ],
+      "reproducible": true
+    },
+    "windows": {
+      "size": 55117824,
+      "sha256": "1e1a35797dfa6f3f5d967f00eb05c3a42f2e50176d096dd9774b3d5bce9d53e3",
+      "reproducible": true,
+      "libcronet": {
+        "size": 8596992,
+        "sha256": "8ef1f8bbde77f954af1ae47bee1819ac8dc2354bb0e1d4baba3dad9e58d7a6f7"
+      }
+    },
+    "apple": {
+      "status": "MANUAL_OWNER_TEST"
+    }
+  }
+}

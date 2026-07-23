@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+package hcommon;
+
+option go_package = "github.com/Kiwunaka/POKROV-core/v2/hcommon";
+option java_package = "space.pokrov.core.api.v2.hcommon";
+message Empty {
+}
+
+enum ResponseCode {
+  OK = 0;
+  FAILED = 1;
+  AUTH_NEED = 2;
+}
+
+message Response {
+  ResponseCode code = 1;
+  string message = 2;
+}

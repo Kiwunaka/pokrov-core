@@ -1,0 +1,12 @@
+syntax = "proto3";
+
+package hello;
+option go_package = "github.com/Kiwunaka/POKROV-core/v2/hello";
+option java_package = "space.pokrov.core.api.v2.hello";
+message HelloRequest {
+  string name = 1;
+}
+
+message HelloResponse {
+  string message = 1;
+}

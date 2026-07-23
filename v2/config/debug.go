@@ -1,0 +1,39 @@
+package config
+
+import (
+	context "context"
+	"fmt"
+	"os"
+	"path/filepath"
+	"runtime/debug"
+	"time"
+
+	"github.com/Kiwunaka/POKROV-core/v2/hutils"
+	"github.com/sagernet/sing-box/option"
+)
+
+func SaveCurrentConfig(ctx context.Context, path string, options option.Options) error {
+	json, err := options.MarshalJSONContext(ctx)
+	if err != nil {
+		return err
+	}
+	p, err := filepath.Abs(path)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+		return err
+	}
+	if err := os.WriteFile(p, []byte(json), 0o600); err != nil {
+		return err
+	}
+	return hutils.Chmod(p, 0o600)
+}
+
+func DeferPanicToError(name string, err func(error)) {
+	if r := recover(); r != nil {
+		s := fmt.Errorf("%s panic: %s\n%s", name, r, string(debug.Stack()))
+		err(s)
+		<-time.After(5 * time.Second)
+	}
+}

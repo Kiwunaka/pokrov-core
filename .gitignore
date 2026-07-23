@@ -1,0 +1,13 @@
+/bin/
+/dist/
+/tmp/
+*.dll
+*.dylib
+*.so
+*.aar
+*.xcframework/
+*.exe
+*.test
+*.out
+.idea/
+.vscode/
