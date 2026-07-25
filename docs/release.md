@@ -13,3 +13,8 @@ Release `1.0.0` has reproducible local Android and Windows builds. Their exact s
 The Windows build accepts `libcronet.dll` only when its size and SHA-256 match
 `config/release.json`. Pass it through `-CronetLibrary` on a clean checkout.
 The build does not fetch a mutable or unavailable revision implicitly.
+
+Release `1.0.1` disables incidental Go VCS stamping in Android and Windows
+artifacts. Source identity is the annotated release tag and its GitHub release
+commit. This lets the final evidence-only commit retain exact artifact hashes
+without changing those artifacts on the required second build.

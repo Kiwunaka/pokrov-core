@@ -46,6 +46,7 @@ $previousToolchain = $env:GOTOOLCHAIN
 $previousAndroidHome = $env:ANDROID_HOME
 $previousAndroidSdkRoot = $env:ANDROID_SDK_ROOT
 $previousCgoLdflags = $env:CGO_LDFLAGS
+$previousGoFlags = $env:GOFLAGS
 $previousNativeArgumentPassing = $PSNativeCommandArgumentPassing
 try {
   $goBinDirectory = Split-Path -Parent $goCommand.Source
@@ -55,6 +56,7 @@ try {
   $env:ANDROID_HOME = $AndroidSdk
   $env:ANDROID_SDK_ROOT = $AndroidSdk
   $env:CGO_LDFLAGS = "-O2 -g -s -w -Wl,-z,max-page-size=16384"
+  $env:GOFLAGS = "-buildvcs=false"
   $PSNativeCommandArgumentPassing = "Standard"
 
   if (-not (Test-Path -LiteralPath $gomobile)) {
@@ -106,6 +108,7 @@ try {
   $env:ANDROID_HOME = $previousAndroidHome
   $env:ANDROID_SDK_ROOT = $previousAndroidSdkRoot
   $env:CGO_LDFLAGS = $previousCgoLdflags
+  $env:GOFLAGS = $previousGoFlags
   $PSNativeCommandArgumentPassing = $previousNativeArgumentPassing
 }
 

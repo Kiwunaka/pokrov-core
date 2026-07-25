@@ -47,12 +47,14 @@ $previousGoarch = $env:GOARCH
 $previousCgo = $env:CGO_ENABLED
 $previousCc = $env:CC
 $previousToolchain = $env:GOTOOLCHAIN
+$previousGoFlags = $env:GOFLAGS
 try {
   $env:GOOS = "windows"
   $env:GOARCH = "amd64"
   $env:CGO_ENABLED = "1"
   $env:CC = $compilerCommand.Source
   $env:GOTOOLCHAIN = "local"
+  $env:GOFLAGS = "-buildvcs=false"
 
   Push-Location $root
   try {
@@ -75,6 +77,7 @@ try {
   $env:CGO_ENABLED = $previousCgo
   $env:CC = $previousCc
   $env:GOTOOLCHAIN = $previousToolchain
+  $env:GOFLAGS = $previousGoFlags
 }
 
 $cronetOutput = Join-Path $OutputDirectory "libcronet.dll"
