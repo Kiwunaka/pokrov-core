@@ -22,20 +22,20 @@
   "local_build_evidence": {
     "date": "2026-07-25",
     "android": {
-      "size": null,
-      "sha256": null,
+      "size": 106831626,
+      "sha256": "25b96622f9ef6e648e1167847ef4205c63bad88c7c897e862bf36249830114e3",
       "abis": [
         "armeabi-v7a",
         "arm64-v8a",
         "x86",
         "x86_64"
       ],
-      "reproducible": false
+      "reproducible": true
     },
     "windows": {
-      "size": null,
-      "sha256": null,
-      "reproducible": false,
+      "size": 55117824,
+      "sha256": "8f4aa233054b78ac2e6dbcef7634b6f4829a9f27f4cd65674de80f6f3b299f9e",
+      "reproducible": true,
       "libcronet": {
         "size": 8596992,
         "sha256": "8ef1f8bbde77f954af1ae47bee1819ac8dc2354bb0e1d4baba3dad9e58d7a6f7"
