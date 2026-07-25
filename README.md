@@ -1,6 +1,8 @@
 # POKROV Core
 
-POKROV Core is the network runtime used by POKROV clients. Version `1.0.0` is the first independently versioned release.
+POKROV Core is the network runtime used by POKROV clients. Version `1.0.1` is
+the current patch release and replaces the provenance-exception build of
+`1.0.0`.
 
 The repository contains:
 

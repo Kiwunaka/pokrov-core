@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.1 — 2026-07-25
+
+- Rebuilt the Android AAR and Windows DLL as clean patch-release artifacts.
+- Disabled incidental Go VCS stamping so release builds remain reproducible
+  before and after recording their hashes.
+- Retained desktop ABI 2, Android package identity, embedded engine versions,
+  and the pinned `libcronet.dll` dependency.
+
 ## 1.0.0 — 2026-07-23
 
 - Established the independent POKROV Core release line.
