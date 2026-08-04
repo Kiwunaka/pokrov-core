@@ -1,8 +1,8 @@
 # POKROV Core
 
-POKROV Core is the network runtime used by POKROV clients. Version `1.0.1` is
-the current patch release and replaces the provenance-exception build of
-`1.0.0`.
+POKROV Core is the network runtime used by POKROV clients. Version `1.0.2` is
+the current patch release and moves the default selected-outbound URL test to
+the owned POKROV authenticated-egress marker.
 
 The repository contains:
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.2 — 2026-08-04
+
+- Replaced the inherited public URL-test default with the owned authenticated
+  POKROV egress marker.
+- Preserved explicit caller-provided URL-test targets and desktop ABI 2.
+- Added focused regression coverage for both default and explicit targets.
+
 ## 1.0.1 — 2026-07-25
 
 - Rebuilt the Android AAR and Windows DLL as clean patch-release artifacts.

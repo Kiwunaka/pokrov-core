@@ -103,9 +103,7 @@ func URLTest(ctx context.Context, link string, detour N.Dialer) (t uint16, err e
 		err = fmt.Errorf("urltest dialer is nil")
 		return
 	}
-	if link == "" {
-		link = "https://www.gstatic.com/generate_204"
-	}
+	link = resolveURLTestLink(link)
 	linkURL, err := url.Parse(link)
 	if err != nil {
 		return
@@ -183,4 +181,11 @@ func URLTest(ctx context.Context, link string, detour N.Dialer) (t uint16, err e
 		t = uint16(time.Since(second) / time.Millisecond) //to avid timeout in the second call
 	}
 	return
+}
+
+func resolveURLTestLink(link string) string {
+	if link != "" {
+		return link
+	}
+	return "https://api.pokrov.space/api/public/authenticated-egress-probe"
 }

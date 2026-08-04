@@ -27,3 +27,16 @@ The two pre-tag `1.0.1` builds matched byte-for-byte:
   SHA-256 `8f4aa233054b78ac2e6dbcef7634b6f4829a9f27f4cd65674de80f6f3b299f9e`;
 - Windows `libcronet.dll`: `8596992` bytes,
   SHA-256 `8ef1f8bbde77f954af1ae47bee1819ac8dc2354bb0e1d4baba3dad9e58d7a6f7`.
+
+Release `1.0.2` keeps the same toolchain, embedded engine, Android package,
+desktop ABI, and pinned Cronet dependency while changing only the default
+URL-test target. Explicit caller targets remain unchanged.
+
+The two pre-tag `1.0.2` builds matched byte-for-byte:
+
+- Android AAR: `106832036` bytes,
+  SHA-256 `e98861ec0b658304515c04af6ab98a60f3664f8b5eb7660b57e6f0baa0df385f`;
+- Windows DLL: `55122944` bytes,
+  SHA-256 `b6d4e28b5fb9d475acc623fed84d2009137a55972a841216a81ae6ac45f98305`;
+- Windows `libcronet.dll`: `8596992` bytes,
+  SHA-256 `8ef1f8bbde77f954af1ae47bee1819ac8dc2354bb0e1d4baba3dad9e58d7a6f7`.

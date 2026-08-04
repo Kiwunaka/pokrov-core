@@ -1,6 +1,6 @@
 {
   "name": "POKROV Core",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "go_toolchain": "go1.25.12",
   "desktop_abi": 2,
   "android_package": "space.pokrov.core",
@@ -20,10 +20,10 @@
     "source_identity": "annotated_release_tag_and_github_release_commit"
   },
   "local_build_evidence": {
-    "date": "2026-07-25",
+    "date": "2026-08-04",
     "android": {
-      "size": 106831626,
-      "sha256": "25b96622f9ef6e648e1167847ef4205c63bad88c7c897e862bf36249830114e3",
+      "size": 106832036,
+      "sha256": "e98861ec0b658304515c04af6ab98a60f3664f8b5eb7660b57e6f0baa0df385f",
       "abis": [
         "armeabi-v7a",
         "arm64-v8a",
@@ -33,8 +33,8 @@
       "reproducible": true
     },
     "windows": {
-      "size": 55117824,
-      "sha256": "8f4aa233054b78ac2e6dbcef7634b6f4829a9f27f4cd65674de80f6f3b299f9e",
+      "size": 55122944,
+      "sha256": "b6d4e28b5fb9d475acc623fed84d2009137a55972a841216a81ae6ac45f98305",
       "reproducible": true,
       "libcronet": {
         "size": 8596992,
