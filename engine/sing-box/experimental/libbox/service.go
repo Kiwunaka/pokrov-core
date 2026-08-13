@@ -26,6 +26,7 @@ var _ adapter.PlatformInterface = (*platformInterfaceWrapper)(nil)
 
 type platformInterfaceWrapper struct {
 	iif                    PlatformInterface
+	debugMessage           func(string)
 	useProcFS              bool
 	networkManager         adapter.NetworkManager
 	myTunName              string
@@ -48,6 +49,9 @@ func (w *platformInterfaceWrapper) UsePlatformAutoDetectInterfaceControl() bool 
 }
 
 func (w *platformInterfaceWrapper) AutoDetectInterfaceControl(fd int) error {
+	if w.debugMessage != nil {
+		w.debugMessage("platform_protect_invoked")
+	}
 	return w.iif.AutoDetectInterfaceControl(int32(fd))
 }
 

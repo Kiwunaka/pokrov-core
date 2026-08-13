@@ -54,6 +54,7 @@ func NewCommandServer(handler CommandServerHandler, platformInterface PlatformIn
 		platformInterface: platformInterface,
 		platformWrapper:   platformWrapper,
 	}
+	platformWrapper.debugMessage = server.handler.WriteDebugMessage
 	server.StartedService = daemon.NewStartedService(daemon.ServiceOptions{
 		Context: ctx,
 		// Platform:         platformWrapper,

@@ -2,14 +2,17 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"os"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/common/conntrack"
 	"github.com/sagernet/sing-box/common/urltest"
+	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/experimental/clashapi"
 	"github.com/sagernet/sing-box/experimental/clashapi/trafficontrol"
 	"github.com/sagernet/sing-box/experimental/deprecated"
@@ -593,10 +596,15 @@ func (s *StartedService) URLTest(ctx context.Context, request *URLTestRequest) (
 	groupTag := request.OutboundTag
 	abstractOutboundGroup, isLoaded := boxService.instance.Outbound().Outbound(groupTag)
 	if !isLoaded {
-		return nil, E.New("outbound group not found: ", groupTag)
+		return nil, E.New("outbound group or endpoint not found: ", groupTag)
 	}
 	outboundGroup, isOutboundGroup := abstractOutboundGroup.(adapter.OutboundGroup)
 	if !isOutboundGroup {
+		endpoint, isEndpoint := abstractOutboundGroup.(adapter.Endpoint)
+		if isEndpoint {
+			go s.testSelectedEndpoint(boxService, endpoint)
+			return &emptypb.Empty{}, nil
+		}
 		return nil, E.New("outbound is not a group: ", groupTag)
 	}
 	urlTest, isURLTest := abstractOutboundGroup.(*group.URLTest)
@@ -618,25 +626,172 @@ func (s *StartedService) URLTest(ctx context.Context, request *URLTestRequest) (
 			}
 			return true
 		})
-		b, _ := batch.New(boxService.ctx, batch.WithConcurrencyNum[any](10))
-		for _, detour := range outbounds {
-			outboundToTest := detour
+		selectedTag := outboundGroup.Now()
+		testOutbound := func(outboundToTest adapter.Outbound) {
 			outboundTag := outboundToTest.Tag()
-			b.Go(outboundTag, func() (any, error) {
-				t, err := urltest.URLTest(boxService.ctx, "", outboundToTest)
-				if err != nil {
-					historyStorage.DeleteURLTestHistory(outboundTag)
-				} else {
-					historyStorage.StoreURLTestHistory(outboundTag, &adapter.URLTestHistory{
-						Time:  time.Now(),
-						Delay: t,
-					})
+			probeContext, cancelProbe := context.WithTimeout(boxService.ctx, C.TCPTimeout)
+			defer cancelProbe()
+			type probeResult struct {
+				delay uint16
+				err   error
+			}
+			resultChannel := make(chan probeResult, 1)
+			go func() {
+				t, err := urltest.URLTest(probeContext, "", outboundToTest)
+				resultChannel <- probeResult{delay: t, err: err}
+			}()
+			var result probeResult
+			select {
+			case result = <-resultChannel:
+			case <-probeContext.Done():
+				result.err = context.Cause(probeContext)
+			}
+			t, err := result.delay, result.err
+			if err != nil {
+				if outboundTag == selectedTag {
+					category := urlTestErrorCategory(err)
+					s.WriteMessage(
+						log.LevelError,
+						"selected outbound URL test failed category="+category,
+					)
+					s.handler.WriteDebugMessage("selected_outbound_url_test:" + category)
 				}
+				historyStorage.DeleteURLTestHistory(outboundTag)
+			} else {
+				historyStorage.StoreURLTestHistory(outboundTag, &adapter.URLTestHistory{
+					Time:  time.Now(),
+					Delay: t,
+				})
+			}
+		}
+		remainingOutbounds := make([]adapter.Outbound, 0, len(outbounds))
+		for _, outboundToTest := range outbounds {
+			if outboundToTest.Tag() == selectedTag {
+				go testOutbound(outboundToTest)
+			} else {
+				remainingOutbounds = append(remainingOutbounds, outboundToTest)
+			}
+		}
+		b, _ := batch.New(boxService.ctx, batch.WithConcurrencyNum[any](9))
+		for _, detour := range remainingOutbounds {
+			outboundToTest := detour
+			b.Go(outboundToTest.Tag(), func() (any, error) {
+				testOutbound(outboundToTest)
 				return nil, nil
 			})
 		}
 	}
 	return &emptypb.Empty{}, nil
+}
+
+func (s *StartedService) testSelectedEndpoint(boxService *Instance, endpoint adapter.Endpoint) {
+	initializationContext, cancelInitialization := context.WithTimeout(
+		boxService.ctx,
+		selectedEndpointInitializationTimeout,
+	)
+	ready, failureCategory := waitForSelectedEndpoint(initializationContext, endpoint)
+	if !ready {
+		cancelInitialization()
+		s.writeSelectedEndpointProbeFailure(failureCategory)
+		return
+	}
+	cancelInitialization()
+
+	probeContext, cancelProbe := context.WithTimeout(boxService.ctx, C.TCPTimeout)
+	defer cancelProbe()
+	type probeResult struct {
+		delay uint16
+		err   error
+	}
+	resultChannel := make(chan probeResult, 1)
+	go func() {
+		delay, err := urltest.URLTest(probeContext, "", endpoint)
+		resultChannel <- probeResult{delay: delay, err: err}
+	}()
+	var result probeResult
+	select {
+	case result = <-resultChannel:
+	case <-probeContext.Done():
+		result.err = context.Cause(probeContext)
+	}
+	if result.err != nil {
+		s.writeSelectedEndpointProbeFailure(urlTestErrorCategory(result.err))
+		return
+	}
+	s.WriteMessage(log.LevelInfo, "selected endpoint URL test succeeded")
+	s.handler.WriteDebugMessage("selected_endpoint_url_test:healthy")
+}
+
+func waitForSelectedEndpoint(ctx context.Context, endpoint adapter.Endpoint) (bool, string) {
+	for {
+		if reporter, ok := endpoint.(interface{ InitializationError() error }); ok {
+			if err := reporter.InitializationError(); err != nil {
+				return false, "endpoint_initialization_" + urlTestErrorCategory(err)
+			}
+		}
+		readyChannel := make(chan bool, 1)
+		go func() {
+			readyChannel <- endpoint.IsReady()
+		}()
+		select {
+		case ready := <-readyChannel:
+			if ready {
+				return true, "none"
+			}
+			select {
+			case <-time.After(selectedEndpointReadinessPollInterval):
+			case <-ctx.Done():
+				return false, "endpoint_initialization_timeout"
+			}
+		case <-ctx.Done():
+			return false, "endpoint_initialization_timeout"
+		}
+	}
+}
+
+func (s *StartedService) writeSelectedEndpointProbeFailure(category string) {
+	s.WriteMessage(
+		log.LevelError,
+		"selected endpoint URL test failed category="+category,
+	)
+	s.handler.WriteDebugMessage("selected_endpoint_url_test:" + category)
+}
+
+const selectedEndpointInitializationTimeout = 30 * time.Second
+const selectedEndpointReadinessPollInterval = 250 * time.Millisecond
+
+func urlTestErrorCategory(err error) string {
+	if err == nil {
+		return "none"
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "deadline_exceeded"
+	}
+	if errors.Is(err, context.Canceled) {
+		return "context_canceled"
+	}
+	message := strings.ToLower(err.Error())
+	for _, category := range []struct {
+		name  string
+		terms []string
+	}{
+		{"dns_lookup", []string{"lookup", "no such host", "dns"}},
+		{"tls_certificate", []string{"x509", "certificate"}},
+		{"reality_handshake", []string{"reality", "handshake"}},
+		{"authentication_rejected", []string{"authentication", "unauthorized", "rejected"}},
+		{"http_rejected", []string{"returned status", "status code", "no result"}},
+		{"connection_refused", []string{"connection refused"}},
+		{"connection_reset", []string{"connection reset", "reset by peer"}},
+		{"network_unreachable", []string{"network is unreachable", "no route to host"}},
+		{"io_timeout", []string{"i/o timeout", "timeout"}},
+	} {
+		for _, term := range category.terms {
+			if strings.Contains(message, term) {
+				return category.name
+			}
+		}
+	}
+	return "transport_failure"
 }
 
 func (s *StartedService) SelectOutbound(ctx context.Context, request *SelectOutboundRequest) (*emptypb.Empty, error) {

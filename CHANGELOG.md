@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.3 — 2026-08-13
+
+- Fixed WARP endpoint initialization so registration failures are reported,
+  startup is bounded, and concurrent readiness checks cannot deadlock startup.
+- Added the Cloudflare client headers required by the current registration API
+  and validated malformed registration responses.
+- Made selected endpoint and selected outbound latency probes bounded and
+  observable without blocking the client command channel.
+- Routed Android socket-protection and probe diagnostics back to the client.
+
 ## 1.0.2 — 2026-08-04
 
 - Replaced the inherited public URL-test default with the owned authenticated

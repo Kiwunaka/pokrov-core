@@ -30,10 +30,14 @@ func RegisterWARPEndpoint(registry *endpoint.Registry) {
 
 type WARPEndpoint struct {
 	endpoint.Adapter
-	endpoint     adapter.Endpoint
-	startHandler func()
+	endpoint adapter.Endpoint
+	initErr  error
+	closed   bool
 
-	mtx sync.Mutex
+	startHandler func()
+	startOnce    sync.Once
+
+	mtx sync.RWMutex
 }
 
 func NewWARPEndpoint(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, options option.WireGuardWARPEndpointOptions) (adapter.Endpoint, error) {
@@ -51,9 +55,7 @@ func NewWARPEndpoint(ctx context.Context, router adapter.Router, logger log.Cont
 	if uniqueId == "" {
 		uniqueId = tag
 	}
-	warpEndpoint.mtx.Lock()
 	warpEndpoint.startHandler = func() {
-		defer warpEndpoint.mtx.Unlock()
 		cacheFile := service.FromContext[adapter.CacheFile](ctx)
 		var config *C.WARPConfig
 		var err error
@@ -62,6 +64,7 @@ func NewWARPEndpoint(ctx context.Context, router adapter.Router, logger log.Cont
 			if savedProfile != nil {
 				if err = json.Unmarshal(savedProfile.Content, &config); err != nil {
 					logger.ErrorContext(ctx, err)
+					warpEndpoint.finishInitialization(nil, err)
 					return
 				}
 			}
@@ -70,9 +73,12 @@ func NewWARPEndpoint(ctx context.Context, router adapter.Router, logger log.Cont
 			config = options.WARPConfig
 		}
 		if config == nil || config.PrivateKey == "" {
-			profile, err := GetWarpProfile(ctx, &options.Profile)
+			profileContext, cancelProfile := context.WithTimeout(ctx, warpProfileInitializationTimeout)
+			profile, err := GetWarpProfile(profileContext, &options.Profile)
+			cancelProfile()
 			if err != nil {
 				logger.ErrorContext(ctx, err)
+				warpEndpoint.finishInitialization(nil, err)
 				return
 			}
 			config = &profile.Config
@@ -81,6 +87,7 @@ func NewWARPEndpoint(ctx context.Context, router adapter.Router, logger log.Cont
 				content, err := json.Marshal(config)
 				if err != nil {
 					logger.ErrorContext(ctx, err)
+					warpEndpoint.finishInitialization(nil, err)
 					return
 				}
 				cacheFile.SaveBinary(uniqueId, &adapter.SavedBinary{
@@ -89,6 +96,12 @@ func NewWARPEndpoint(ctx context.Context, router adapter.Router, logger log.Cont
 					LastEtag:    "",
 				})
 			}
+		}
+		if len(config.Peers) == 0 || len(config.Peers[0].Endpoint.Ports) == 0 {
+			err = E.New("WARP profile contains no usable peer")
+			logger.ErrorContext(ctx, err)
+			warpEndpoint.finishInitialization(nil, err)
+			return
 		}
 		peer := config.Peers[0]
 		hostParts := strings.Split(peer.Endpoint.Host, ":")
@@ -100,7 +113,7 @@ func NewWARPEndpoint(ctx context.Context, router adapter.Router, logger log.Cont
 		if options.ServerOptions.ServerPort != 0 {
 			perrPort = options.ServerOptions.ServerPort
 		}
-		warpEndpoint.endpoint, err = NewEndpoint(
+		materializedEndpoint, err := NewEndpoint(
 			ctx,
 			router,
 			logger,
@@ -137,19 +150,28 @@ func NewWARPEndpoint(ctx context.Context, router adapter.Router, logger log.Cont
 		)
 		if err != nil {
 			logger.ErrorContext(ctx, err)
+			warpEndpoint.finishInitialization(nil, err)
 			return
 		}
-		if err = warpEndpoint.endpoint.Start(adapter.StartStateStart); err != nil {
+		if err = materializedEndpoint.Start(adapter.StartStateStart); err != nil {
 			logger.ErrorContext(ctx, err)
+			_ = common.Close(materializedEndpoint)
+			warpEndpoint.finishInitialization(nil, err)
 			return
 		}
-		if err = warpEndpoint.endpoint.Start(adapter.StartStatePostStart); err != nil {
+		if err = materializedEndpoint.Start(adapter.StartStatePostStart); err != nil {
 			logger.ErrorContext(ctx, err)
+			_ = common.Close(materializedEndpoint)
+			warpEndpoint.finishInitialization(nil, err)
 			return
 		}
+		warpEndpoint.finishInitialization(materializedEndpoint, nil)
 	}
 	return warpEndpoint, nil
 }
+
+const warpProfileInitializationTimeout = 28 * time.Second
+
 func GetWarpProfile(ctx context.Context, profile *option.WARPProfile) (*cloudflare.CloudflareProfile, error) {
 	var dialer N.Dialer
 	outmanager := service.FromContext[adapter.OutboundManager](ctx)
@@ -161,23 +183,7 @@ func GetWarpProfile(ctx context.Context, profile *option.WARPProfile) (*cloudfla
 		}
 
 	}
-	cf, err := GetWarpProfileDialer(ctx, dialer, profile)
-	if err == nil || outmanager == nil {
-		return cf, nil
-	}
-
-	for _, dialer := range outmanager.Outbounds() {
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		default:
-		}
-		if cf, err := GetWarpProfileDialer(ctx, dialer, profile); err == nil {
-			return cf, nil
-		}
-	}
-	return nil, err
-
+	return GetWarpProfileDialer(ctx, dialer, profile)
 }
 func GetWarpProfileDialer(ctx context.Context, dialer N.Dialer, profile *option.WARPProfile) (*cloudflare.CloudflareProfile, error) {
 	api := cloudflare.NewCloudflareApiDetour(dialer)
@@ -189,41 +195,69 @@ func GetWarpProfileDialer(ctx context.Context, dialer N.Dialer, profile *option.
 	}
 }
 func (w *WARPEndpoint) IsReady() bool {
-	if ok := w.isEndpointInitialized(); !ok {
+	initializedEndpoint := w.endpointSnapshot()
+	if initializedEndpoint == nil {
 		return false
 	}
-	return w.endpoint.IsReady()
+	return initializedEndpoint.IsReady()
 }
 func (w *WARPEndpoint) Start(stage adapter.StartStage) error {
 	if stage != adapter.StartStatePostStart {
 		return nil
 	}
-	go w.startHandler()
+	w.startOnce.Do(func() {
+		go w.startHandler()
+	})
 	return nil
 }
 
 func (w *WARPEndpoint) Close() error {
-	return common.Close(w.endpoint)
+	w.mtx.Lock()
+	w.closed = true
+	initializedEndpoint := w.endpoint
+	w.endpoint = nil
+	w.mtx.Unlock()
+	return common.Close(initializedEndpoint)
 }
 
 func (w *WARPEndpoint) DialContext(ctx context.Context, network string, destination M.Socksaddr) (net.Conn, error) {
-	if ok := w.isEndpointInitialized(); !ok {
+	initializedEndpoint := w.endpointSnapshot()
+	if initializedEndpoint == nil {
 		return nil, E.New("endpoint not initialized")
 	}
-	return w.endpoint.DialContext(ctx, network, destination)
+	return initializedEndpoint.DialContext(ctx, network, destination)
 }
 
 func (w *WARPEndpoint) ListenPacket(ctx context.Context, destination M.Socksaddr) (net.PacketConn, error) {
-	if ok := w.isEndpointInitialized(); !ok {
+	initializedEndpoint := w.endpointSnapshot()
+	if initializedEndpoint == nil {
 		return nil, E.New("endpoint not initialized")
 	}
-	return w.endpoint.ListenPacket(ctx, destination)
+	return initializedEndpoint.ListenPacket(ctx, destination)
 }
 
-func (w *WARPEndpoint) isEndpointInitialized() bool {
+func (w *WARPEndpoint) endpointSnapshot() adapter.Endpoint {
+	w.mtx.RLock()
+	defer w.mtx.RUnlock()
+	return w.endpoint
+}
+
+func (w *WARPEndpoint) InitializationError() error {
+	w.mtx.RLock()
+	defer w.mtx.RUnlock()
+	return w.initErr
+}
+
+func (w *WARPEndpoint) finishInitialization(initializedEndpoint adapter.Endpoint, err error) {
 	w.mtx.Lock()
-	defer w.mtx.Unlock()
-	return w.endpoint != nil
+	if w.closed {
+		w.mtx.Unlock()
+		_ = common.Close(initializedEndpoint)
+		return
+	}
+	w.endpoint = initializedEndpoint
+	w.initErr = err
+	w.mtx.Unlock()
 }
 
 func (w *WARPEndpoint) DisplayType() string {

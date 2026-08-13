@@ -1,6 +1,7 @@
 /bin/
 /dist/
 /tmp/
+/engine/sing-box/tmp/
 *.dll
 *.dylib
 *.so

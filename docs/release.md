@@ -40,3 +40,16 @@ The two pre-tag `1.0.2` builds matched byte-for-byte:
   SHA-256 `b6d4e28b5fb9d475acc623fed84d2009137a55972a841216a81ae6ac45f98305`;
 - Windows `libcronet.dll`: `8596992` bytes,
   SHA-256 `8ef1f8bbde77f954af1ae47bee1819ac8dc2354bb0e1d4baba3dad9e58d7a6f7`.
+
+Release `1.0.3` keeps the public ABI and embedded engine versions while fixing
+WARP initialization, Cloudflare registration compatibility, and bounded
+selected-endpoint diagnostics.
+
+The two pre-tag `1.0.3` builds matched byte-for-byte:
+
+- Android AAR: `106861671` bytes,
+  SHA-256 `6e6f3b688fe415c9392e19aa4f8660885316897cfc369cf8c3ff3d01100ee14f`;
+- Windows DLL: `55134208` bytes,
+  SHA-256 `7cc83854fc4022b759e9de3d0942b90a24c859cfd51e3231d04e7c7a6b7d5054`;
+- Windows `libcronet.dll`: `8596992` bytes,
+  SHA-256 `8ef1f8bbde77f954af1ae47bee1819ac8dc2354bb0e1d4baba3dad9e58d7a6f7`.

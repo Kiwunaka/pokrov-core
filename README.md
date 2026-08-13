@@ -1,8 +1,8 @@
 # POKROV Core
 
-POKROV Core is the network runtime used by POKROV clients. Version `1.0.2` is
-the current patch release and moves the default selected-outbound URL test to
-the owned POKROV authenticated-egress marker.
+POKROV Core is the network runtime used by POKROV clients. Version `1.0.3` is
+the current patch release and fixes WARP initialization, Cloudflare profile
+registration, and selected-endpoint latency diagnostics.
 
 The repository contains:
 

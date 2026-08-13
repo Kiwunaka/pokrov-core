@@ -102,6 +102,7 @@ const (
 	commandClientDialAttempts  = 10
 	commandClientDialBaseDelay = 100 * time.Millisecond
 	commandClientDialStepDelay = 50 * time.Millisecond
+	commandClientUnaryTimeout  = 5 * time.Second
 )
 
 func commandClientDialDelay(attempt int) time.Duration {
@@ -464,7 +465,9 @@ func (c *CommandClient) SelectOutbound(groupTag string, outboundTag string) erro
 
 func (c *CommandClient) URLTest(groupTag string) error {
 	_, err := callWithResult(c, func(client daemon.StartedServiceClient) (*emptypb.Empty, error) {
-		return client.URLTest(context.Background(), &daemon.URLTestRequest{
+		ctx, cancel := context.WithTimeout(context.Background(), commandClientUnaryTimeout)
+		defer cancel()
+		return client.URLTest(ctx, &daemon.URLTestRequest{
 			OutboundTag: groupTag,
 		})
 	})
@@ -512,7 +515,9 @@ func (c *CommandClient) ServiceClose() error {
 
 func (c *CommandClient) ClearLogs() error {
 	_, err := callWithResult(c, func(client daemon.StartedServiceClient) (*emptypb.Empty, error) {
-		return client.ClearLogs(context.Background(), &emptypb.Empty{})
+		ctx, cancel := context.WithTimeout(context.Background(), commandClientUnaryTimeout)
+		defer cancel()
+		return client.ClearLogs(ctx, &emptypb.Empty{})
 	})
 	return err
 }
