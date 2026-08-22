@@ -1,0 +1,105 @@
+{
+  "$schema": "./awg2-capability.schema.json",
+  "schema_version": 1,
+  "contract_id": "pokrov.awg2.endpoint.v1",
+  "status": "prototype_disabled_by_default",
+  "public_runtime_advertised": false,
+  "owner": {
+    "repository": "Kiwunaka/POKROV-core",
+    "layer": "engine/sing-box"
+  },
+  "engine": {
+    "type": "awg",
+    "build_tag": "with_awg",
+    "android_release_build": true,
+    "windows_release_build": true
+  },
+  "dependency": {
+    "module": "github.com/amnezia-vpn/amneziawg-go",
+    "version": "v0.2.16",
+    "module_sum": "h1:XY6HOq/xtqH8ZXMncRWkjFs85EKdN10NLNnw23kTpE0=",
+    "license": "MIT",
+    "notice": "third_party/licenses/amneziawg-go-MIT.txt"
+  },
+  "supported_platforms": [
+    "android",
+    "windows"
+  ],
+  "typed_endpoint": {
+    "type": "awg",
+    "use_integrated_tun": false,
+    "peer_count": 1,
+    "key_encoding": "base64",
+    "key_bytes": 32,
+    "address_prefix_count": {
+      "minimum": 1,
+      "maximum": 2
+    },
+    "peer_address_kind": "ip_literal",
+    "allowed_mtu": [
+      1280,
+      1400,
+      1408
+    ],
+    "required_awg2_fields": [
+      "jc",
+      "jmin",
+      "jmax",
+      "h1",
+      "h2",
+      "h3",
+      "h4"
+    ],
+    "optional_awg2_fields": [
+      "s1",
+      "s2",
+      "s3",
+      "s4"
+    ],
+    "unsupported_fields": [
+      "i1",
+      "i2",
+      "i3",
+      "i4",
+      "i5"
+    ],
+    "maximum_persistent_keepalive_seconds": 600
+  },
+  "fixture_policy": {
+    "synthetic_only": true,
+    "documentation_address_ranges": [
+      "192.0.2.0/24",
+      "2001:db8::/32"
+    ],
+    "real_keys_endpoints_or_provider_payloads": false
+  },
+  "telemetry": {
+    "allowed_dimensions": [
+      "transport_family",
+      "config_generation",
+      "endpoint_category",
+      "asn_category",
+      "app_version",
+      "core_version",
+      "network_type",
+      "outcome",
+      "error_code"
+    ],
+    "forbidden_dimensions": [
+      "private_key",
+      "preshared_key",
+      "public_key",
+      "raw_endpoint",
+      "raw_config",
+      "account_identifier",
+      "device_identifier"
+    ]
+  },
+  "evidence_ceiling": {
+    "source_and_synthetic_tests": "VERIFIED_LOCAL",
+    "exact_android_aar": "MANUAL_OWNER_TEST",
+    "exact_windows_dll": "MANUAL_OWNER_TEST",
+    "physical_device": "MANUAL_OWNER_TEST",
+    "ru_origin": "BLOCKED_BY_ACCESS"
+  }
+}

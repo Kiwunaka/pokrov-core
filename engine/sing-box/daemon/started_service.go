@@ -654,7 +654,7 @@ func (s *StartedService) URLTest(ctx context.Context, request *URLTestRequest) (
 						log.LevelError,
 						"selected outbound URL test failed category="+category,
 					)
-					s.handler.WriteDebugMessage("selected_outbound_url_test:" + category)
+					s.writeOperationalEvent("failed", "EGRESS-001")
 				}
 				historyStorage.DeleteURLTestHistory(outboundTag)
 			} else {
@@ -719,7 +719,7 @@ func (s *StartedService) testSelectedEndpoint(boxService *Instance, endpoint ada
 		return
 	}
 	s.WriteMessage(log.LevelInfo, "selected endpoint URL test succeeded")
-	s.handler.WriteDebugMessage("selected_endpoint_url_test:healthy")
+	s.writeOperationalEvent("succeeded", "")
 }
 
 func waitForSelectedEndpoint(ctx context.Context, endpoint adapter.Endpoint) (bool, string) {
@@ -754,7 +754,22 @@ func (s *StartedService) writeSelectedEndpointProbeFailure(category string) {
 		log.LevelError,
 		"selected endpoint URL test failed category="+category,
 	)
-	s.handler.WriteDebugMessage("selected_endpoint_url_test:" + category)
+	s.writeOperationalEvent("failed", "EGRESS-001")
+}
+
+func (s *StartedService) writeOperationalEvent(outcome string, errorCode string) {
+	handler, ok := s.handler.(OperationalEventHandler)
+	if !ok {
+		return
+	}
+	handler.WriteOperationalEvent(
+		"core.egress.probe",
+		"egress",
+		"verify",
+		outcome,
+		errorCode,
+		"egress",
+	)
 }
 
 const selectedEndpointInitializationTimeout = 30 * time.Second

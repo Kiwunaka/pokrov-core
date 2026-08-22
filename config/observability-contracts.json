@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "canonical_repository": "Kiwunaka/portal",
+  "contracts": [
+    {
+      "id": "error-catalog",
+      "version": "1.2.0",
+      "sha256": "7d3bf242777d5bf76bbebcf162e5969d3f83d7f68b2787051e1c4fddeadc3dc7"
+    },
+    {
+      "id": "observability-event",
+      "version": "1.0.0",
+      "sha256": "24ae72442f778d7f1334ae0a4bf4d774738e4de275707b29420ec733af65cc17"
+    }
+  ]
+}

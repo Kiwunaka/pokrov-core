@@ -32,6 +32,7 @@ type CommandServer struct {
 	grpcServer        *grpc.Server
 	listener          net.Listener
 	endPauseTimer     *time.Timer
+	operationalEvents *operationalEventEmitter
 }
 
 type CommandServerHandler interface {
@@ -53,6 +54,7 @@ func NewCommandServer(handler CommandServerHandler, platformInterface PlatformIn
 		handler:           handler,
 		platformInterface: platformInterface,
 		platformWrapper:   platformWrapper,
+		operationalEvents: newOperationalEventEmitter(),
 	}
 	platformWrapper.debugMessage = server.handler.WriteDebugMessage
 	server.StartedService = daemon.NewStartedService(daemon.ServiceOptions{
@@ -160,6 +162,7 @@ func (s *CommandServer) Close() {
 		s.grpcServer.Stop()
 	}
 	common.Close(s.listener)
+	s.operationalEvents.close()
 }
 
 type OverrideOptions struct {
@@ -169,15 +172,43 @@ type OverrideOptions struct {
 }
 
 func (s *CommandServer) StartOrReloadService(configContent string, options *OverrideOptions) error {
-	return s.StartedService.StartOrReloadService(configContent, &daemon.OverrideOptions{
+	s.operationalEvents.emit("core.runtime.start", "start", "core_start", "started", "")
+	err := s.StartedService.StartOrReloadService(configContent, &daemon.OverrideOptions{
 		AutoRedirect:   options.AutoRedirect,
 		IncludePackage: iteratorToArray(options.IncludePackage),
 		ExcludePackage: iteratorToArray(options.ExcludePackage),
 	})
+	if err != nil {
+		s.operationalEvents.emit(
+			"core.runtime.start",
+			"start",
+			"core_start",
+			"failed",
+			classifyOperationalStartError(err),
+		)
+		return err
+	}
+	s.operationalEvents.emit("core.runtime.start", "start", "core_start", "succeeded", "")
+	return nil
 }
 
 func (s *CommandServer) CloseService() error {
-	return s.StartedService.CloseService()
+	s.operationalEvents.emit("core.runtime.stop", "stop", "stop", "started", "")
+	err := s.StartedService.CloseService()
+	if err != nil {
+		s.operationalEvents.emit("core.runtime.stop", "stop", "stop", "failed", "CORE-008")
+		return err
+	}
+	s.operationalEvents.emit("core.runtime.stop", "stop", "stop", "succeeded", "")
+	return nil
+}
+
+func (s *CommandServer) SetOperationalEventHandler(handler OperationalEventHandler) {
+	s.operationalEvents.setHandler(handler)
+}
+
+func (s *CommandServer) SetOperationalEventContext(runID string, attemptID string, generation int64) error {
+	return s.operationalEvents.configure(runID, attemptID, generation)
 }
 
 func (s *CommandServer) WriteMessage(level int32, message string) {
@@ -272,4 +303,12 @@ func (h *platformHandler) SetSystemProxyEnabled(enabled bool) error {
 
 func (h *platformHandler) WriteDebugMessage(message string) {
 	(*CommandServer)(h).handler.WriteDebugMessage(message)
+}
+
+func (h *platformHandler) WriteOperationalEvent(name string, subsystem string, stage string, outcome string, errorCode string, phase string) {
+	server := (*CommandServer)(h)
+	if subsystem != "core" && subsystem != "egress" {
+		return
+	}
+	server.operationalEvents.emit(name, stage, phase, outcome, errorCode)
 }

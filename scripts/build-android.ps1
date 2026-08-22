@@ -8,6 +8,7 @@ param(
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 $release = Get-Content -Raw -LiteralPath (Join-Path $root "config\release.json") | ConvertFrom-Json
+& (Join-Path $PSScriptRoot "verify-awg2-contract.ps1")
 if (-not $OutputDirectory) {
   $OutputDirectory = Join-Path $root "dist\android"
 }
@@ -16,7 +17,7 @@ New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
 
 $goCommand = Get-Command $GoExecutable -ErrorAction SilentlyContinue
 if (-not $goCommand) {
-  throw "Go 1.25.12 is required."
+  throw "Go 1.25.13 is required."
 }
 $goVersion = (& $goCommand.Source env GOVERSION).Trim()
 if ($LASTEXITCODE -ne 0 -or $goVersion -ne $release.go_toolchain) {
@@ -32,12 +33,13 @@ if (-not $AndroidSdk -or -not (Test-Path -LiteralPath $AndroidSdk -PathType Cont
 $AndroidSdk = [System.IO.Path]::GetFullPath($AndroidSdk)
 
 if (-not $GomobileBinDirectory) {
-  $GomobileBinDirectory = Join-Path $root "tmp\gomobile-go1.25.12"
+  $GomobileBinDirectory = Join-Path $root "tmp\gomobile-go1.25.13"
 }
 $GomobileBinDirectory = [System.IO.Path]::GetFullPath($GomobileBinDirectory)
 New-Item -ItemType Directory -Force -Path $GomobileBinDirectory | Out-Null
-$gomobile = Join-Path $GomobileBinDirectory "gomobile.exe"
-$gobind = Join-Path $GomobileBinDirectory "gobind.exe"
+$goExecutableSuffix = if ($IsWindows) { ".exe" } else { "" }
+$gomobile = Join-Path $GomobileBinDirectory "gomobile$goExecutableSuffix"
+$gobind = Join-Path $GomobileBinDirectory "gobind$goExecutableSuffix"
 $outputPath = Join-Path $OutputDirectory $release.artifacts.android
 
 $previousPath = $env:PATH

@@ -1,5 +1,32 @@
 # Changelog
 
+## 1.1.0 — unreleased (`PRE_CANDIDATE_LOCAL`)
+
+- Added the backward-compatible structured operational-event ABI to desktop
+  and Android hosts, with typed lifecycle events and fail-closed negotiation.
+- Added the stable Windows `POKROV` TUN ownership name required by service
+  crash/reboot recovery.
+- Raised the pinned Go/dependency floor after reachable-vulnerability review.
+- Added the pinned `pokrov.awg2.endpoint.v1` capability contract, schema,
+  synthetic fixture, dependency/license gate and focused typed-endpoint tests.
+- Made the AWG endpoint fail closed before device creation and fixed bind
+  context plus partial-start cleanup while keeping the host as the sole TUN
+  owner.
+- Disabled raw AWG legacy conversion so AWG material cannot silently become
+  vanilla WireGuard.
+- Kept AWG2 non-advertised and disabled by default pending exact Android,
+  Windows, physical-device and RU-origin evidence.
+- Expanded release CI to full-module tests, focused vet/race/vulnerability and
+  bounded Staticcheck gates, parser fuzzing and deterministic CycloneDX source
+  SBOM generation.
+- Added clean-source two-build comparison and bounded provenance for Android,
+  Windows and Apple outputs, including Android ABI checks, Windows export
+  validation and the active client's 100-cycle proxy backtest.
+- Kept Linux explicitly outside the POKROV 1.2.0 shipped artifact matrix and
+  kept CI evidence separate from signing, candidate creation and publication.
+- This section names source intent only. No `1.1.0` artifact, tag or candidate
+  exists until the exact release gates complete.
+
 ## 1.0.3 — 2026-08-13
 
 - Fixed WARP endpoint initialization so registration failures are reported,

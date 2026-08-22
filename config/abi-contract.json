@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "desktop_abi": {
+    "version": 2,
+    "marker_symbol": "pokrovCoreAbiVersion",
+    "capabilities_symbol": "pokrovCoreCapabilities",
+    "string_release_symbol": "freeString",
+    "legacy_compatible_without_capabilities_symbol": [
+      2
+    ],
+    "client_required_exports": [
+      "pokrovCoreAbiVersion",
+      "pokrovSecureFile",
+      "setup",
+      "start",
+      "stop",
+      "freeString"
+    ],
+    "exports": [
+      "AddGrpcClientPublicKey",
+      "GetServerPublicKey",
+      "StartCoreGrpcServer",
+      "cleanup",
+      "closeGrpc",
+      "freeString",
+      "pokrovCoreAbiVersion",
+      "pokrovCoreCapabilities",
+      "pokrovCoreSetEventCallback",
+      "pokrovCoreSetEventContext",
+      "pokrovSecureFile",
+      "restart",
+      "setup",
+      "start",
+      "stop"
+    ]
+  },
+  "descriptor": {
+    "schema_version": 1,
+    "desktop_abi": 2,
+    "event_abi": 1,
+    "capabilities": [
+      "bounded_stop_reason",
+      "core_start_stop",
+      "materialized_profile",
+      "secure_profile_file",
+      "structured_operational_events",
+      "typed_lifecycle_events"
+    ],
+    "lifecycle_events": [
+      "initialization",
+      "profile",
+      "core_start",
+      "tun",
+      "routes",
+      "dns",
+      "egress",
+      "recovery",
+      "stop"
+    ],
+    "operational_events": {
+      "contract": "config/core-event-abi.json",
+      "schema_version": 1,
+      "event_abi": 1,
+      "callback_symbol": "pokrovCoreSetEventCallback",
+      "context_symbol": "pokrovCoreSetEventContext",
+      "maximum_pending_events": 128
+    }
+  }
+}

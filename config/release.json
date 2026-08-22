@@ -1,8 +1,12 @@
 {
   "name": "POKROV Core",
-  "version": "1.0.3",
-  "go_toolchain": "go1.25.12",
+  "version": "1.1.0",
+  "state": "PRE_CANDIDATE_LOCAL",
+  "candidate_created": false,
+  "go_toolchain": "go1.25.13",
   "desktop_abi": 2,
+  "abi_contract": "config/abi-contract.json",
+  "core_event_abi_contract": "config/core-event-abi.json",
   "android_package": "space.pokrov.core",
   "engine": {
     "sing_box": "1.13.0",
@@ -19,30 +23,35 @@
     "vcs_stamp": "disabled_for_reproducible_release_artifacts",
     "source_identity": "annotated_release_tag_and_github_release_commit"
   },
-  "local_build_evidence": {
-    "date": "2026-08-13",
-    "android": {
-      "size": 106861671,
-      "sha256": "6e6f3b688fe415c9392e19aa4f8660885316897cfc369cf8c3ff3d01100ee14f",
-      "abis": [
-        "armeabi-v7a",
-        "arm64-v8a",
-        "x86",
-        "x86_64"
-      ],
-      "reproducible": true
-    },
-    "windows": {
-      "size": 55134208,
-      "sha256": "7cc83854fc4022b759e9de3d0942b90a24c859cfd51e3231d04e7c7a6b7d5054",
-      "reproducible": true,
-      "libcronet": {
-        "size": 8596992,
-        "sha256": "8ef1f8bbde77f954af1ae47bee1819ac8dc2354bb0e1d4baba3dad9e58d7a6f7"
+  "retained_public_release": {
+    "version": "1.0.3",
+    "release_tag": "v1.0.3",
+    "source_commit": "69a74545101708e56183c92e31f2b4c7b2509884",
+    "local_build_evidence": {
+      "date": "2026-08-13",
+      "android": {
+        "size": 106861671,
+        "sha256": "6e6f3b688fe415c9392e19aa4f8660885316897cfc369cf8c3ff3d01100ee14f",
+        "abis": [
+          "armeabi-v7a",
+          "arm64-v8a",
+          "x86",
+          "x86_64"
+        ],
+        "reproducible": true
+      },
+      "windows": {
+        "size": 55134208,
+        "sha256": "7cc83854fc4022b759e9de3d0942b90a24c859cfd51e3231d04e7c7a6b7d5054",
+        "reproducible": true,
+        "libcronet": {
+          "size": 8596992,
+          "sha256": "8ef1f8bbde77f954af1ae47bee1819ac8dc2354bb0e1d4baba3dad9e58d7a6f7"
+        }
+      },
+      "apple": {
+        "status": "MANUAL_OWNER_TEST"
       }
-    },
-    "apple": {
-      "status": "MANUAL_OWNER_TEST"
     }
   }
 }

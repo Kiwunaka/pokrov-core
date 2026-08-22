@@ -10,6 +10,68 @@ POKROV Core is one client runtime with three layers:
 
 The application supplies a materialized sing-box JSON profile for normal operation. Legacy builder APIs remain internal and are not the public POKROV app contract.
 
-The desktop ABI version is `2`. C strings returned by the library are caller-owned and must be released through `freeString`.
+The AWG2 experiment remains inside the same embedded sing-box graph. Its
+machine owner is `config/awg2-capability.json`, contract ID
+`pokrov.awg2.endpoint.v1`. Android and Windows release builds include the
+`with_awg` tag, but the public ABI does not advertise AWG readiness. A host may
+accept an `awg` endpoint only from the digest-bound managed owner-lab path and
+only with `useIntegratedTun=false`; Android `VpnService` or the Windows
+privileged service remains the single system TUN and route owner. The endpoint
+validator runs before device creation and rejects unsupported MTU, keys,
+peers, header/junk fields, instruction chains and integrated TUN ownership.
+
+`ray2sing` is not an AWG authority. Raw `awg://` and WireGuard-style
+`[Interface]` AWG inputs fail closed instead of being rewritten as ordinary
+WireGuard. Synthetic documentation-address fixtures may test the typed
+endpoint; real endpoint, key and provider material must not enter source,
+logs, fixtures or retained public evidence.
+
+The desktop ABI version is `2`. `config/abi-contract.json` is the
+machine-readable owner for its exported symbols and additive capability/event
+descriptor. `pokrovCoreCapabilities` returns that descriptor as UTF-8 JSON.
+C strings returned by the library, including the descriptor, are caller-owned
+and must be released through `freeString`.
+
+Released ABI 2 binaries that predate `pokrovCoreCapabilities` remain compatible
+with the ABI 2 client binding. A present descriptor is mandatory to parse and
+must match the supported descriptor and event ABI. Unknown schema/event
+versions and unknown lifecycle event identifiers fail closed. ABI 3 is not
+declared by this contract and cannot be enabled by an additive descriptor.
+
+`config/observability-contracts.json` is a compatibility snapshot of the
+platform-owned operational event schema and error catalog. It records only the
+canonical versions and exact SHA-256 values; it is not an independent catalog.
+`scripts/verify-observability-contracts.ps1` validates the local snapshot and,
+when given a platform checkout, fails on cross-repository drift.
+
+`config/core-event-abi.json` owns the additive structured Core event ABI. Its
+event ABI version is `1`; it does not change desktop ABI `2`. Before a runtime
+start, the host registers `pokrovCoreSetEventCallback` and supplies the current
+`run_id`, `attempt_id`, and generation through `pokrovCoreSetEventContext`.
+Core then emits only the closed lifecycle and egress event definitions and
+error codes declared by that contract. Delivery is bounded, asynchronous, and
+non-blocking. The callback arguments contain primitive safe fields only; raw
+Core log lines, configuration, destinations, URLs, credentials, and upstream
+error text are not part of the ABI.
+
+The Android gomobile surface exposes the same event ABI through
+`OperationalEventHandler`, `SetOperationalEventHandler`, and
+`SetOperationalEventContext`. Windows uses the two C callback exports. Hosts
+must reject unknown schema/event versions, names, outcomes and error codes, as
+well as stale run, attempt, generation, or sequence values. Arbitrary upstream
+debug lines are not release evidence and must not be promoted into the
+operational event stream.
+
+On Windows, the current source materializes the auto-route TUN inbound with the
+exact interface name `POKROV`. The privileged client service uses that stable
+ownership identifier to snapshot and restore only Core-owned addresses,
+routes, DNS and interface settings after stop or crash. Android and other
+platforms keep their platform-owned naming behavior. Source target `1.1.0` is
+`PRE_CANDIDATE_LOCAL`; published `1.0.3` artifact hashes predate this source
+change and do not prove it until a new exact DLL and Android AAR are built and
+retained. The retained `1.0.3`
+artifacts also predate the structured event surfaces; clients may recognize
+that exact legacy identity for compatibility, but release `1.2.0` requires
+replacement artifacts with the structured event capability.
 
 Server inbounds, panel state, provisioning, and traffic accounting remain outside POKROV Core.

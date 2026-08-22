@@ -50,8 +50,8 @@ var endpointParsers = map[string]EndpointParserFunc{
 	"wg://":        AWGSingbox,
 	"wireguard://": AWGSingbox,
 	"warp://":      WarpSingbox,
-	"awg://":       AWGSingbox,
-	"[Interface]":  AWGSingboxTxt,
+	"awg://":       rejectLegacyAWGConfig,
+	"[Interface]":  rejectLegacyAWGTextConfig,
 }
 var xrayConfigTypes = map[string]ParserFunc{
 	"vmess://":  VmessXray,

@@ -11,11 +11,14 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-go@v5
         with:
-          go-version: 1.25.12
+          go-version: 1.25.13
           cache-dependency-path: |
             go.sum
             engine/sing-box/go.sum
@@ -24,3 +27,294 @@ jobs:
       - name: Test
         shell: pwsh
         run: ./scripts/test.ps1
+
+      - name: Vet supported runtime packages
+        run: go vet ./internal/observability ./v2/config ./v2/hcore ./v2/hutils ./ray2sing/ray2sing
+
+      - name: Race-test supported runtime packages
+        run: go test -race ./internal/observability ./v2/config ./v2/hcore ./v2/hutils ./ray2sing/ray2sing
+
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
+
+      - name: Scan supported runtime packages for reachable vulnerabilities
+        run: govulncheck ./internal/observability ./v2/config ./v2/hcore ./v2/hutils ./ray2sing/ray2sing
+
+      - name: Vet and race-test mobile Core event bridge
+        working-directory: engine/sing-box
+        run: |
+          go vet ./daemon ./experimental/libbox
+          go test -race ./daemon ./experimental/libbox
+
+      - name: Scan mobile Core event bridge for reachable vulnerabilities
+        working-directory: engine/sing-box
+        run: govulncheck ./daemon ./experimental/libbox
+
+      - name: Install pinned static analysis and SBOM tools
+        run: |
+          go install honnef.co/go/tools/cmd/staticcheck@v0.7.0
+          go install github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.10.0
+
+      - name: Staticcheck supported release packages
+        run: |
+          staticcheck -checks='SA2*,SA5*,SA6*' ./internal/observability ./v2/config ./v2/hcore ./v2/hutils ./v2/hcore/tunnelservice ./ray2sing/ray2sing ./ray2sing/cmd
+          cd engine/sing-box
+          staticcheck -checks='SA2*,SA5*,SA6*' ./daemon ./experimental/libbox ./protocol/awg
+
+      - name: Fuzz the config and profile parser
+        run: go test -run=^$ -fuzz=FuzzParseConfigDoesNotPanic -fuzztime=30s ./v2/config
+
+      - name: Generate deterministic dependency and license SBOMs
+        run: |
+          mkdir -p "$RUNNER_TEMP/core-source-sbom"
+          cyclonedx-gomod mod -licenses -std -json -notimestamp -noserial -output "$RUNNER_TEMP/core-source-sbom/pokrov-core.cdx.json" .
+          cyclonedx-gomod mod -licenses -std -json -notimestamp -noserial -output "$RUNNER_TEMP/core-source-sbom/sing-box.cdx.json" ./engine/sing-box
+
+      - name: Retain source SBOM evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: core-source-sbom
+          path: ${{ runner.temp }}/core-source-sbom/*.json
+          if-no-files-found: error
+          retention-days: 14
+
+  release-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Core candidate
+        uses: actions/checkout@v4
+        with:
+          path: POKROV-core
+
+      - name: Checkout active client promotion line
+        uses: actions/checkout@v4
+        with:
+          repository: Kiwunaka/POKROV-app
+          ref: main
+          path: client
+          persist-credentials: false
+
+      - name: Checkout platform promotion line
+        uses: actions/checkout@v4
+        with:
+          repository: Kiwunaka/portal
+          ref: master
+          path: platform
+          persist-credentials: false
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Validate client, Core, and release-handoff v2 parity
+        shell: pwsh
+        working-directory: client
+        run: >-
+          ./scripts/validate-seed.ps1
+          -PlatformRoot "${{ github.workspace }}/platform"
+          -CoreRoot "${{ github.workspace }}/POKROV-core"
+
+  android-artifact-reproducibility:
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout Core source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 1.25.13
+          cache-dependency-path: |
+            go.sum
+            engine/sing-box/go.sum
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Download source SBOM evidence
+        uses: actions/download-artifact@v4
+        with:
+          name: core-source-sbom
+          path: ${{ runner.temp }}/core-source-sbom
+
+      - name: Build Android AAR first pass
+        shell: pwsh
+        run: >-
+          ./scripts/build-android.ps1
+          -AndroidSdk "$env:ANDROID_SDK_ROOT"
+          -GomobileBinDirectory "$env:RUNNER_TEMP/gomobile"
+          -OutputDirectory "$env:RUNNER_TEMP/core-android-a"
+
+      - name: Build Android AAR second pass
+        shell: pwsh
+        run: >-
+          ./scripts/build-android.ps1
+          -AndroidSdk "$env:ANDROID_SDK_ROOT"
+          -GomobileBinDirectory "$env:RUNNER_TEMP/gomobile"
+          -OutputDirectory "$env:RUNNER_TEMP/core-android-b"
+
+      - name: Compare Android builds and write bounded provenance
+        shell: pwsh
+        run: >-
+          ./scripts/new-release-artifact-evidence.ps1
+          -Lane android
+          -FirstBuildRoot "$env:RUNNER_TEMP/core-android-a"
+          -SecondBuildRoot "$env:RUNNER_TEMP/core-android-b"
+          -Sbom "$env:RUNNER_TEMP/core-source-sbom/pokrov-core.cdx.json","$env:RUNNER_TEMP/core-source-sbom/sing-box.cdx.json"
+          -Output "$env:RUNNER_TEMP/core-android-evidence.json"
+          -RequireCleanSource
+
+      - name: Retain Android pre-candidate evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: core-android-pre-candidate-evidence
+          path: ${{ runner.temp }}/core-android-evidence.json
+          if-no-files-found: error
+          retention-days: 14
+
+  windows-artifact-reproducibility:
+    needs: test
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      - name: Checkout Core source
+        uses: actions/checkout@v4
+        with:
+          path: POKROV-core
+          fetch-depth: 0
+
+      - name: Checkout active client for pinned Cronet and 100-cycle backtest
+        uses: actions/checkout@v4
+        with:
+          repository: Kiwunaka/POKROV-app
+          ref: main
+          path: client
+          persist-credentials: false
+          lfs: true
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 1.25.13
+          cache-dependency-path: |
+            POKROV-core/go.sum
+            POKROV-core/engine/sing-box/go.sum
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: "3.38.5"
+          cache: true
+
+      - name: Install pinned MinGW-w64
+        shell: pwsh
+        run: choco install mingw --version=13.2.0 --yes --no-progress
+
+      - name: Download source SBOM evidence
+        uses: actions/download-artifact@v4
+        with:
+          name: core-source-sbom
+          path: ${{ runner.temp }}/core-source-sbom
+
+      - name: Build Windows DLL first pass
+        shell: pwsh
+        working-directory: POKROV-core
+        run: |
+          $compiler = Get-ChildItem -LiteralPath C:\ProgramData\chocolatey\lib\mingw\tools -Filter gcc.exe -Recurse | Select-Object -First 1
+          if (-not $compiler) { throw "Pinned MinGW-w64 compiler was not installed." }
+          $cronet = "${{ github.workspace }}\client\apps\windows_shell\windows\runner\resources\runtime\libcronet.dll"
+          ./scripts/build-windows.ps1 -CCompiler $compiler.FullName -CronetLibrary $cronet -OutputDirectory "$env:RUNNER_TEMP/core-windows-a"
+
+      - name: Build Windows DLL second pass
+        shell: pwsh
+        working-directory: POKROV-core
+        run: |
+          $compiler = Get-ChildItem -LiteralPath C:\ProgramData\chocolatey\lib\mingw\tools -Filter gcc.exe -Recurse | Select-Object -First 1
+          if (-not $compiler) { throw "Pinned MinGW-w64 compiler was not installed." }
+          $cronet = "${{ github.workspace }}\client\apps\windows_shell\windows\runner\resources\runtime\libcronet.dll"
+          ./scripts/build-windows.ps1 -CCompiler $compiler.FullName -CronetLibrary $cronet -OutputDirectory "$env:RUNNER_TEMP/core-windows-b"
+
+      - name: Run the current-source DLL 100-cycle proxy backtest
+        shell: pwsh
+        working-directory: client
+        run: ./scripts/test-windows-core-proxy-only.ps1 -CoreRoot "$env:RUNNER_TEMP/core-windows-a"
+
+      - name: Compare Windows builds and write bounded provenance
+        shell: pwsh
+        working-directory: POKROV-core
+        run: >-
+          ./scripts/new-release-artifact-evidence.ps1
+          -Lane windows
+          -FirstBuildRoot "$env:RUNNER_TEMP/core-windows-a"
+          -SecondBuildRoot "$env:RUNNER_TEMP/core-windows-b"
+          -Sbom "$env:RUNNER_TEMP/core-source-sbom/pokrov-core.cdx.json","$env:RUNNER_TEMP/core-source-sbom/sing-box.cdx.json"
+          -Output "$env:RUNNER_TEMP/core-windows-evidence.json"
+          -RequireCleanSource
+
+      - name: Retain Windows pre-candidate evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: core-windows-pre-candidate-evidence
+          path: ${{ runner.temp }}/core-windows-evidence.json
+          if-no-files-found: error
+          retention-days: 14
+
+  apple-source-build:
+    needs: test
+    runs-on: macos-15
+    timeout-minutes: 120
+    steps:
+      - name: Checkout Core source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 1.25.13
+          cache-dependency-path: |
+            go.sum
+            engine/sing-box/go.sum
+
+      - name: Download source SBOM evidence
+        uses: actions/download-artifact@v4
+        with:
+          name: core-source-sbom
+          path: ${{ runner.temp }}/core-source-sbom
+
+      - name: Build Apple XCFramework first pass
+        shell: bash
+        run: bash ./scripts/build-apple.sh "$RUNNER_TEMP/core-apple-a"
+
+      - name: Build Apple XCFramework second pass
+        shell: bash
+        run: bash ./scripts/build-apple.sh "$RUNNER_TEMP/core-apple-b"
+
+      - name: Compare Apple builds and write bounded provenance
+        shell: pwsh
+        run: >-
+          ./scripts/new-release-artifact-evidence.ps1
+          -Lane apple
+          -FirstBuildRoot "$env:RUNNER_TEMP/core-apple-a"
+          -SecondBuildRoot "$env:RUNNER_TEMP/core-apple-b"
+          -Sbom "$env:RUNNER_TEMP/core-source-sbom/pokrov-core.cdx.json","$env:RUNNER_TEMP/core-source-sbom/sing-box.cdx.json"
+          -Output "$env:RUNNER_TEMP/core-apple-evidence.json"
+          -RequireCleanSource
+
+      - name: Retain Apple source-build evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: core-apple-pre-candidate-evidence
+          path: ${{ runner.temp }}/core-apple-evidence.json
+          if-no-files-found: error
+          retention-days: 14

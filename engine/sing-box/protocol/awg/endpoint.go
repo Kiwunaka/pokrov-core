@@ -43,6 +43,13 @@ func NewEndpoint(ctx context.Context, router adapter.Router, logger log.ContextL
 	if options.MTU == 0 {
 		options.MTU = 1408
 	}
+	if err := validateEndpointOptions(options); err != nil {
+		return nil, err
+	}
+	ipc, err := genIpcConfig(options)
+	if err != nil {
+		return nil, err
+	}
 
 	options.UDPFragmentDefault = true
 	dial, err := dialer.NewWithOptions(dialer.Options{
@@ -71,11 +78,6 @@ func NewEndpoint(ctx context.Context, router adapter.Router, logger log.ContextL
 		return nil, err
 	}
 	excludedIps, err := excludedPrefixBuilder.IPSet()
-	if err != nil {
-		return nil, err
-	}
-
-	ipc, err := genIpcConfig(options)
 	if err != nil {
 		return nil, err
 	}

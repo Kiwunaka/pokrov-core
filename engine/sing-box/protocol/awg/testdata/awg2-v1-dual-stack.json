@@ -1,0 +1,36 @@
+{
+  "contract_id": "pokrov.awg2.endpoint.v1",
+  "synthetic": true,
+  "endpoint": {
+    "useIntegratedTun": false,
+    "private_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+    "address": [
+      "10.66.0.2/32",
+      "fd66::2/128"
+    ],
+    "mtu": 1408,
+    "jc": 4,
+    "jmin": 40,
+    "jmax": 70,
+    "s1": 0,
+    "s2": 0,
+    "s3": 0,
+    "s4": 0,
+    "h1": "1000001",
+    "h2": "1000002",
+    "h3": "1000003",
+    "h4": "1000004",
+    "peers": [
+      {
+        "address": "192.0.2.10",
+        "port": 51820,
+        "public_key": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=",
+        "allowed_ips": [
+          "0.0.0.0/0",
+          "::/0"
+        ],
+        "persistent_keepalive_interval": 25
+      }
+    ]
+  }
+}

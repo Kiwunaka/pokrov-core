@@ -1,0 +1,70 @@
+{
+  "schema_version": 1,
+  "event_abi": 1,
+  "desktop_abi": 2,
+  "callback_symbol": "pokrovCoreSetEventCallback",
+  "context_symbol": "pokrovCoreSetEventContext",
+  "maximum_pending_events": 128,
+  "fields": [
+    "schema_version",
+    "event_abi",
+    "occurred_at_utc",
+    "run_id",
+    "attempt_id",
+    "generation",
+    "sequence",
+    "name",
+    "subsystem",
+    "stage",
+    "severity",
+    "outcome",
+    "error_code",
+    "phase"
+  ],
+  "events": [
+    {
+      "name": "core.runtime.initialize",
+      "subsystem": "core",
+      "stage": "initialize",
+      "phase": "initialization"
+    },
+    {
+      "name": "core.runtime.start",
+      "subsystem": "core",
+      "stage": "start",
+      "phase": "core_start"
+    },
+    {
+      "name": "core.runtime.stop",
+      "subsystem": "core",
+      "stage": "stop",
+      "phase": "stop"
+    },
+    {
+      "name": "core.egress.probe",
+      "subsystem": "egress",
+      "stage": "verify",
+      "phase": "egress"
+    }
+  ],
+  "severities": [
+    "info",
+    "error"
+  ],
+  "outcomes": [
+    "started",
+    "succeeded",
+    "failed"
+  ],
+  "error_codes": [
+    "CORE-003",
+    "CORE-005",
+    "CORE-006",
+    "CORE-008",
+    "EGRESS-001",
+    "TRANSPORT-001",
+    "TRANSPORT-002",
+    "TRANSPORT-003",
+    "TRANSPORT-004"
+  ]
+}
