@@ -51,6 +51,9 @@ foreach ($forbidden in @(
 if (-not $androidBuild.Contains('if ($IsWindows) { ".exe" } else { "" }')) {
   throw "Android release build must resolve gomobile names on Windows and Unix runners."
 }
+if (-not $androidBuild.Contains('[System.IO.Path]::PathSeparator')) {
+  throw "Android release build must use the runner-native PATH separator."
+}
 if (-not $appleBuild.Contains('OUTPUT_DIRECTORY="${1:-$ROOT/dist/apple}"')) {
   throw "Apple release build must accept isolated output roots for two-build comparison."
 }

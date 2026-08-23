@@ -52,7 +52,8 @@ $previousGoFlags = $env:GOFLAGS
 $previousNativeArgumentPassing = $PSNativeCommandArgumentPassing
 try {
   $goBinDirectory = Split-Path -Parent $goCommand.Source
-  $env:PATH = "$goBinDirectory;$GomobileBinDirectory;$previousPath"
+  $pathSeparator = [System.IO.Path]::PathSeparator
+  $env:PATH = @($goBinDirectory, $GomobileBinDirectory, $previousPath) -join $pathSeparator
   $env:GOBIN = $GomobileBinDirectory
   $env:GOTOOLCHAIN = "local"
   $env:ANDROID_HOME = $AndroidSdk
