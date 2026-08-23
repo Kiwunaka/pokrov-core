@@ -31,3 +31,29 @@ gomobile bind \
   -o "$OUTPUT_DIRECTORY/PokrovCore.xcframework" \
   github.com/sagernet/sing-box/experimental/libbox \
   ./platform/mobile
+
+python3 - "$OUTPUT_DIRECTORY/PokrovCore.xcframework/Info.plist" <<'PY'
+import plistlib
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+with path.open("rb") as source:
+    document = plistlib.load(source)
+
+libraries = document.get("AvailableLibraries")
+if not isinstance(libraries, list) or not all(
+    isinstance(library, dict) and library.get("LibraryIdentifier")
+    for library in libraries
+):
+    raise SystemExit("XCFramework Info.plist has no canonical library identities")
+
+libraries.sort(key=lambda library: str(library["LibraryIdentifier"]))
+with path.open("wb") as destination:
+    plistlib.dump(
+        document,
+        destination,
+        fmt=plistlib.FMT_XML,
+        sort_keys=False,
+    )
+PY

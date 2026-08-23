@@ -21,6 +21,7 @@ $required = @(
   "new-release-artifact-evidence.ps1",
   "test-windows-core-proxy-only.ps1",
   "diagnose-apple-reproducibility.sh",
+  "actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065",
   "POKROV_MINGW_GCC",
   "C:\ProgramData\mingw64",
   "actions/upload-artifact@v4",
@@ -68,8 +69,11 @@ if ($release.engine.android_ndk -ne "29.0.14206865" -or -not $androidBuild.Conta
 if (-not $appleBuild.Contains('OUTPUT_DIRECTORY="${1:-$ROOT/dist/apple}"')) {
   throw "Apple release build must accept isolated output roots for two-build comparison."
 }
-if (-not $appleBuild.Contains('-extldflags=-Wl,-no_uuid') -or -not $appleBuild.Contains('ZERO_AR_DATE=1')) {
-  throw "Apple release build must suppress random Mach-O UUIDs and archive timestamps."
+if (-not $appleBuild.Contains('-extldflags=-Wl,-no_uuid') -or
+    -not $appleBuild.Contains('ZERO_AR_DATE=1') -or
+    -not $appleBuild.Contains('AvailableLibraries') -or
+    -not $appleBuild.Contains('LibraryIdentifier')) {
+  throw "Apple release build must suppress random binary metadata and canonicalize the XCFramework library order."
 }
 if (-not $appleDiagnostic.Contains("diff -u") -or -not $appleDiagnostic.Contains("dwarfdump --uuid")) {
   throw "Apple release CI must retain plist and Mach-O UUID diagnostics before comparison."
