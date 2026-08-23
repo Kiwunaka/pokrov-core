@@ -8,6 +8,16 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 $root = Split-Path -Parent $PSScriptRoot
+
+function Get-CanonicalTextSha256 {
+  param([Parameter(Mandatory = $true)][string]$Path)
+
+  $canonical = [IO.File]::ReadAllText($Path).Replace("`r`n", "`n").Replace("`r", "`n")
+  $bytes = [Text.Encoding]::UTF8.GetBytes($canonical)
+  return [Convert]::ToHexString(
+    [Security.Cryptography.SHA256]::HashData($bytes)
+  ).ToLowerInvariant()
+}
 if ([string]::IsNullOrWhiteSpace($SnapshotPath)) {
   $SnapshotPath = Join-Path $root "config\observability-contracts.json"
 }
@@ -77,7 +87,7 @@ if (-not [string]::IsNullOrWhiteSpace($PlatformRoot)) {
     if (-not (Test-Path -LiteralPath $canonicalPath -PathType Leaf)) {
       throw "Canonical platform observability contract is missing."
     }
-    $actualHash = (Get-FileHash -LiteralPath $canonicalPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    $actualHash = Get-CanonicalTextSha256 -Path $canonicalPath
     if ($actualHash -ne [string]$contract.sha256) {
       throw "Core observability snapshot disagrees with the canonical platform contract."
     }
