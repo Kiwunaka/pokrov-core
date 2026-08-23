@@ -143,13 +143,11 @@ try {
   $PSNativeCommandArgumentPassing = $previousNativeArgumentPassing
 }
 
-$tarCommand = Get-Command tar -ErrorAction SilentlyContinue
-if (-not $tarCommand) {
-  throw "tar is required to inspect the Android artifact."
-}
-$aarEntries = @(& $tarCommand.Source -tf $outputPath)
-if ($LASTEXITCODE -ne 0) {
-  throw "Could not inspect Android artifact."
+$archive = [System.IO.Compression.ZipFile]::OpenRead($outputPath)
+try {
+  $aarEntries = @($archive.Entries | ForEach-Object { $_.FullName })
+} finally {
+  $archive.Dispose()
 }
 foreach ($abi in @("armeabi-v7a", "arm64-v8a", "x86", "x86_64")) {
   if ($aarEntries -notcontains "jni/$abi/libpokrov-core.so") {

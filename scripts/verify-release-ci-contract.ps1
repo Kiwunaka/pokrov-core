@@ -59,8 +59,8 @@ if (-not $androidBuild.Contains('if ($IsWindows) { ".exe" } else { "" }')) {
 if (-not $androidBuild.Contains('[System.IO.Path]::PathSeparator')) {
   throw "Android release build must use the runner-native PATH separator."
 }
-if ($androidBuild.Contains("tar.exe") -or -not $androidBuild.Contains("Get-Command tar")) {
-  throw "Android release build must resolve tar from PATH on Windows and Unix runners."
+if ($androidBuild.Contains("tar.exe") -or $androidBuild.Contains("Get-Command tar") -or -not $androidBuild.Contains("[System.IO.Compression.ZipFile]::OpenRead")) {
+  throw "Android release build must inspect the AAR through the cross-platform ZIP API."
 }
 if ($release.engine.android_ndk -ne "29.0.14206865" -or -not $androidBuild.Contains('ANDROID_NDK_HOME')) {
   throw "Android release build must pin and select NDK 29.0.14206865."
