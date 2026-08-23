@@ -92,6 +92,7 @@ jobs:
           repository: Kiwunaka/POKROV-app
           ref: main
           path: client
+          ssh-key: ${{ secrets.POKROV_RELEASE_CLIENT_DEPLOY_KEY }}
           persist-credentials: false
 
       - name: Checkout platform promotion line
@@ -100,6 +101,7 @@ jobs:
           repository: Kiwunaka/portal
           ref: master
           path: platform
+          ssh-key: ${{ secrets.POKROV_RELEASE_PLATFORM_DEPLOY_KEY }}
           persist-credentials: false
 
       - name: Setup Python
@@ -197,6 +199,7 @@ jobs:
           repository: Kiwunaka/POKROV-app
           ref: main
           path: client
+          ssh-key: ${{ secrets.POKROV_RELEASE_CLIENT_DEPLOY_KEY }}
           persist-credentials: false
           lfs: true
 
