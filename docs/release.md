@@ -50,7 +50,9 @@ file trees before writing bounded provenance:
   and `x86_64`;
 - Windows uses pinned MinGW-w64, verifies every desktop export and runs the
   active client's current-source 100-cycle proxy backtest;
-- macOS builds and compares the Apple XCFramework as source-build evidence.
+- macOS builds and compares the Apple XCFramework as source-build evidence,
+  suppresses random Mach-O UUID/archive timestamps and logs bounded plist/UUID
+  diagnostics before the byte comparison.
 
 `scripts/new-release-artifact-evidence.ps1` records source, release-contract,
 SBOM and artifact hashes and rejects dirty source or mismatched build trees.

@@ -305,6 +305,13 @@ jobs:
         shell: bash
         run: bash ./scripts/build-apple.sh "$RUNNER_TEMP/core-apple-b"
 
+      - name: Diagnose Apple reproducibility inputs
+        shell: bash
+        run: >-
+          bash ./scripts/diagnose-apple-reproducibility.sh
+          "$RUNNER_TEMP/core-apple-a"
+          "$RUNNER_TEMP/core-apple-b"
+
       - name: Compare Apple builds and write bounded provenance
         shell: pwsh
         run: >-

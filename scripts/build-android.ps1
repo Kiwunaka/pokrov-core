@@ -143,7 +143,11 @@ try {
   $PSNativeCommandArgumentPassing = $previousNativeArgumentPassing
 }
 
-$aarEntries = @(& tar.exe -tf $outputPath)
+$tarCommand = Get-Command tar -ErrorAction SilentlyContinue
+if (-not $tarCommand) {
+  throw "tar is required to inspect the Android artifact."
+}
+$aarEntries = @(& $tarCommand.Source -tf $outputPath)
 if ($LASTEXITCODE -ne 0) {
   throw "Could not inspect Android artifact."
 }

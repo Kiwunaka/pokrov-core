@@ -6,6 +6,7 @@ $root = Split-Path -Parent $PSScriptRoot
 $workflow = Get-Content -Raw -LiteralPath (Join-Path $root ".github\workflows\ci.yml")
 $androidBuild = Get-Content -Raw -LiteralPath (Join-Path $root "scripts\build-android.ps1")
 $appleBuild = Get-Content -Raw -LiteralPath (Join-Path $root "scripts\build-apple.sh")
+$appleDiagnostic = Get-Content -Raw -LiteralPath (Join-Path $root "scripts\diagnose-apple-reproducibility.sh")
 $release = Get-Content -Raw -LiteralPath (Join-Path $root "config\release.json") | ConvertFrom-Json
 
 $required = @(
@@ -19,6 +20,7 @@ $required = @(
   "FuzzParseConfigDoesNotPanic",
   "new-release-artifact-evidence.ps1",
   "test-windows-core-proxy-only.ps1",
+  "diagnose-apple-reproducibility.sh",
   "POKROV_MINGW_GCC",
   "C:\ProgramData\mingw64",
   "actions/upload-artifact@v4",
@@ -57,11 +59,20 @@ if (-not $androidBuild.Contains('if ($IsWindows) { ".exe" } else { "" }')) {
 if (-not $androidBuild.Contains('[System.IO.Path]::PathSeparator')) {
   throw "Android release build must use the runner-native PATH separator."
 }
+if ($androidBuild.Contains("tar.exe") -or -not $androidBuild.Contains("Get-Command tar")) {
+  throw "Android release build must resolve tar from PATH on Windows and Unix runners."
+}
 if ($release.engine.android_ndk -ne "29.0.14206865" -or -not $androidBuild.Contains('ANDROID_NDK_HOME')) {
   throw "Android release build must pin and select NDK 29.0.14206865."
 }
 if (-not $appleBuild.Contains('OUTPUT_DIRECTORY="${1:-$ROOT/dist/apple}"')) {
   throw "Apple release build must accept isolated output roots for two-build comparison."
+}
+if (-not $appleBuild.Contains('-extldflags=-Wl,-no_uuid') -or -not $appleBuild.Contains('ZERO_AR_DATE=1')) {
+  throw "Apple release build must suppress random Mach-O UUIDs and archive timestamps."
+}
+if (-not $appleDiagnostic.Contains("diff -u") -or -not $appleDiagnostic.Contains("dwarfdump --uuid")) {
+  throw "Apple release CI must retain plist and Mach-O UUID diagnostics before comparison."
 }
 if (-not (Test-Path -LiteralPath (Join-Path $root "v2\config\parser_fuzz_test.go") -PathType Leaf)) {
   throw "The config/profile parser fuzz target is missing."
