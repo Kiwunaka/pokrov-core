@@ -5,7 +5,13 @@ package main
 #include <signal.h>
 #include "stdint.h"
 
-typedef void (__cdecl *pokrov_core_event_callback_v1)(
+#if defined(_WIN32)
+#define POKROV_CALL __cdecl
+#else
+#define POKROV_CALL
+#endif
+
+typedef void (POKROV_CALL *pokrov_core_event_callback_v1)(
     int schema_version,
     int event_abi,
     const char* occurred_at_utc,
