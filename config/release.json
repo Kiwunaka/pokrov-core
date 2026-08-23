@@ -12,6 +12,7 @@
     "sing_box": "1.13.0",
     "sing": "0.8.0-beta.12",
     "gomobile": "0.1.11",
+    "android_ndk": "29.0.14206865",
     "cronet_distribution": "caller_supplied_sha256_pinned_binary"
   },
   "artifacts": {

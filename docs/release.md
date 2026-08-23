@@ -67,6 +67,9 @@ and retained.
 Post-`1.0.3` working source requires Go `1.25.13` and the remediated dependency
 floor recorded in both Go modules: gRPC `1.82.1`, CIRCL `1.6.3`,
 `golang.org/x/crypto` `0.53.0`, `x/net` `0.56.0`, and `x/text` `0.39.0`.
+Android source builds also pin NDK `29.0.14206865` in `config/release.json`.
+The build validates that exact `source.properties` revision and selects it
+through `ANDROID_NDK_HOME` before `gomobile` links the pinned Cronet archive.
 The floor was selected from reachable `govulncheck` findings; lowering any of
 these versions requires a new vulnerability review. It changes source/build
 inputs only and does not relabel the retained `1.0.3` artifacts.

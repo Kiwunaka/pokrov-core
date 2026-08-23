@@ -6,6 +6,7 @@ $root = Split-Path -Parent $PSScriptRoot
 $workflow = Get-Content -Raw -LiteralPath (Join-Path $root ".github\workflows\ci.yml")
 $androidBuild = Get-Content -Raw -LiteralPath (Join-Path $root "scripts\build-android.ps1")
 $appleBuild = Get-Content -Raw -LiteralPath (Join-Path $root "scripts\build-apple.sh")
+$release = Get-Content -Raw -LiteralPath (Join-Path $root "config\release.json") | ConvertFrom-Json
 
 $required = @(
   "android-artifact-reproducibility:",
@@ -18,6 +19,8 @@ $required = @(
   "FuzzParseConfigDoesNotPanic",
   "new-release-artifact-evidence.ps1",
   "test-windows-core-proxy-only.ps1",
+  "POKROV_MINGW_GCC",
+  "C:\ProgramData\mingw64",
   "actions/upload-artifact@v4",
   "RequireCleanSource"
 )
@@ -53,6 +56,9 @@ if (-not $androidBuild.Contains('if ($IsWindows) { ".exe" } else { "" }')) {
 }
 if (-not $androidBuild.Contains('[System.IO.Path]::PathSeparator')) {
   throw "Android release build must use the runner-native PATH separator."
+}
+if ($release.engine.android_ndk -ne "29.0.14206865" -or -not $androidBuild.Contains('ANDROID_NDK_HOME')) {
+  throw "Android release build must pin and select NDK 29.0.14206865."
 }
 if (-not $appleBuild.Contains('OUTPUT_DIRECTORY="${1:-$ROOT/dist/apple}"')) {
   throw "Apple release build must accept isolated output roots for two-build comparison."

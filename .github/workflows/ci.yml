@@ -220,7 +220,11 @@ jobs:
 
       - name: Install pinned MinGW-w64
         shell: pwsh
-        run: choco install mingw --version=13.2.0 --yes --no-progress
+        run: |
+          choco install mingw --version=13.2.0 --yes --no-progress
+          $compiler = Get-ChildItem -LiteralPath C:\ProgramData\mingw64 -Filter gcc.exe -File -Recurse | Select-Object -First 1
+          if (-not $compiler) { throw "Pinned MinGW-w64 compiler was not installed." }
+          "POKROV_MINGW_GCC=$($compiler.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Download source SBOM evidence
         uses: actions/download-artifact@v4
@@ -232,19 +236,17 @@ jobs:
         shell: pwsh
         working-directory: POKROV-core
         run: |
-          $compiler = Get-ChildItem -LiteralPath C:\ProgramData\chocolatey\lib\mingw\tools -Filter gcc.exe -Recurse | Select-Object -First 1
-          if (-not $compiler) { throw "Pinned MinGW-w64 compiler was not installed." }
+          if (-not $env:POKROV_MINGW_GCC -or -not (Test-Path -LiteralPath $env:POKROV_MINGW_GCC -PathType Leaf)) { throw "Pinned MinGW-w64 compiler was not resolved." }
           $cronet = "${{ github.workspace }}\client\apps\windows_shell\windows\runner\resources\runtime\libcronet.dll"
-          ./scripts/build-windows.ps1 -CCompiler $compiler.FullName -CronetLibrary $cronet -OutputDirectory "$env:RUNNER_TEMP/core-windows-a"
+          ./scripts/build-windows.ps1 -CCompiler $env:POKROV_MINGW_GCC -CronetLibrary $cronet -OutputDirectory "$env:RUNNER_TEMP/core-windows-a"
 
       - name: Build Windows DLL second pass
         shell: pwsh
         working-directory: POKROV-core
         run: |
-          $compiler = Get-ChildItem -LiteralPath C:\ProgramData\chocolatey\lib\mingw\tools -Filter gcc.exe -Recurse | Select-Object -First 1
-          if (-not $compiler) { throw "Pinned MinGW-w64 compiler was not installed." }
+          if (-not $env:POKROV_MINGW_GCC -or -not (Test-Path -LiteralPath $env:POKROV_MINGW_GCC -PathType Leaf)) { throw "Pinned MinGW-w64 compiler was not resolved." }
           $cronet = "${{ github.workspace }}\client\apps\windows_shell\windows\runner\resources\runtime\libcronet.dll"
-          ./scripts/build-windows.ps1 -CCompiler $compiler.FullName -CronetLibrary $cronet -OutputDirectory "$env:RUNNER_TEMP/core-windows-b"
+          ./scripts/build-windows.ps1 -CCompiler $env:POKROV_MINGW_GCC -CronetLibrary $cronet -OutputDirectory "$env:RUNNER_TEMP/core-windows-b"
 
       - name: Run the current-source DLL 100-cycle proxy backtest
         shell: pwsh

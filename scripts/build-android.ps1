@@ -1,6 +1,7 @@
 param(
   [string]$GoExecutable = "go",
   [string]$AndroidSdk,
+  [string]$AndroidNdk,
   [string]$GomobileBinDirectory,
   [string]$OutputDirectory
 )
@@ -31,6 +32,24 @@ if (-not $AndroidSdk -or -not (Test-Path -LiteralPath $AndroidSdk -PathType Cont
   throw "Pass -AndroidSdk or set ANDROID_SDK_ROOT."
 }
 $AndroidSdk = [System.IO.Path]::GetFullPath($AndroidSdk)
+if (-not $AndroidNdk) {
+  $AndroidNdk = Join-Path (Join-Path $AndroidSdk "ndk") $release.engine.android_ndk
+}
+if (-not (Test-Path -LiteralPath $AndroidNdk -PathType Container)) {
+  throw "Pinned Android NDK $($release.engine.android_ndk) is required: $AndroidNdk"
+}
+$AndroidNdk = [System.IO.Path]::GetFullPath($AndroidNdk)
+$ndkPropertiesPath = Join-Path $AndroidNdk "source.properties"
+if (-not (Test-Path -LiteralPath $ndkPropertiesPath -PathType Leaf)) {
+  throw "Pinned Android NDK source.properties is missing."
+}
+$ndkRevisionMatch = [regex]::Match(
+  [IO.File]::ReadAllText($ndkPropertiesPath),
+  '(?m)^Pkg\.Revision\s*=\s*([^\r\n]+)\s*$'
+)
+if (-not $ndkRevisionMatch.Success -or $ndkRevisionMatch.Groups[1].Value.Trim() -ne $release.engine.android_ndk) {
+  throw "Expected Android NDK $($release.engine.android_ndk)."
+}
 
 if (-not $GomobileBinDirectory) {
   $GomobileBinDirectory = Join-Path $root "tmp\gomobile-go1.25.13"
@@ -47,6 +66,9 @@ $previousGobin = $env:GOBIN
 $previousToolchain = $env:GOTOOLCHAIN
 $previousAndroidHome = $env:ANDROID_HOME
 $previousAndroidSdkRoot = $env:ANDROID_SDK_ROOT
+$previousAndroidNdk = $env:ANDROID_NDK
+$previousAndroidNdkHome = $env:ANDROID_NDK_HOME
+$previousAndroidNdkRoot = $env:ANDROID_NDK_ROOT
 $previousCgoLdflags = $env:CGO_LDFLAGS
 $previousGoFlags = $env:GOFLAGS
 $previousNativeArgumentPassing = $PSNativeCommandArgumentPassing
@@ -58,6 +80,9 @@ try {
   $env:GOTOOLCHAIN = "local"
   $env:ANDROID_HOME = $AndroidSdk
   $env:ANDROID_SDK_ROOT = $AndroidSdk
+  $env:ANDROID_NDK = $AndroidNdk
+  $env:ANDROID_NDK_HOME = $AndroidNdk
+  $env:ANDROID_NDK_ROOT = $AndroidNdk
   $env:CGO_LDFLAGS = "-O2 -g -s -w -Wl,-z,max-page-size=16384"
   $env:GOFLAGS = "-buildvcs=false"
   $PSNativeCommandArgumentPassing = "Standard"
@@ -110,6 +135,9 @@ try {
   $env:GOTOOLCHAIN = $previousToolchain
   $env:ANDROID_HOME = $previousAndroidHome
   $env:ANDROID_SDK_ROOT = $previousAndroidSdkRoot
+  $env:ANDROID_NDK = $previousAndroidNdk
+  $env:ANDROID_NDK_HOME = $previousAndroidNdkHome
+  $env:ANDROID_NDK_ROOT = $previousAndroidNdkRoot
   $env:CGO_LDFLAGS = $previousCgoLdflags
   $env:GOFLAGS = $previousGoFlags
   $PSNativeCommandArgumentPassing = $previousNativeArgumentPassing
