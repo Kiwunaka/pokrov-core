@@ -4,6 +4,56 @@ package main
 #include <stdlib.h>
 #include <signal.h>
 #include "stdint.h"
+
+#if defined(_WIN32)
+#define POKROV_CALL __cdecl
+#else
+#define POKROV_CALL
+#endif
+
+typedef void (POKROV_CALL *pokrov_core_event_callback_v1)(
+    int schema_version,
+    int event_abi,
+    const char* occurred_at_utc,
+    const char* run_id,
+    const char* attempt_id,
+    long long generation,
+    long long sequence,
+    const char* name,
+    const char* subsystem,
+    const char* stage,
+    const char* severity,
+    const char* outcome,
+    const char* error_code,
+    const char* phase);
+
+static int pokrov_core_event_callback_is_null(
+    pokrov_core_event_callback_v1 callback) {
+  return callback == NULL;
+}
+
+static void pokrov_core_emit_event_v1(
+    pokrov_core_event_callback_v1 callback,
+    int schema_version,
+    int event_abi,
+    const char* occurred_at_utc,
+    const char* run_id,
+    const char* attempt_id,
+    long long generation,
+    long long sequence,
+    const char* name,
+    const char* subsystem,
+    const char* stage,
+    const char* severity,
+    const char* outcome,
+    const char* error_code,
+    const char* phase) {
+  if (callback != NULL) {
+    callback(schema_version, event_abi, occurred_at_utc, run_id, attempt_id,
+             generation, sequence, name, subsystem, stage, severity, outcome,
+             error_code, phase);
+  }
+}
 */
 import "C"
 
@@ -75,10 +125,70 @@ func emptyOrErrorC(err error) *C.char {
 }
 
 const pokrovDesktopABIVersion = 2
+const pokrovCoreCapabilitiesJSON = `{"schema_version":1,"desktop_abi":2,"event_abi":1,"capabilities":["bounded_stop_reason","core_start_stop","materialized_profile","secure_profile_file","structured_operational_events","typed_lifecycle_events"],"lifecycle_events":["initialization","profile","core_start","tun","routes","dns","egress","recovery","stop"],"operational_events":{"contract":"config/core-event-abi.json","schema_version":1,"event_abi":1,"callback_symbol":"pokrovCoreSetEventCallback","context_symbol":"pokrovCoreSetEventContext","maximum_pending_events":128}}`
 
 //export pokrovCoreAbiVersion
 func pokrovCoreAbiVersion() C.int {
 	return C.int(pokrovDesktopABIVersion)
+}
+
+//export pokrovCoreCapabilities
+func pokrovCoreCapabilities() *C.char {
+	return C.CString(pokrovCoreCapabilitiesJSON)
+}
+
+//export pokrovCoreSetEventCallback
+func pokrovCoreSetEventCallback(callback C.pokrov_core_event_callback_v1) {
+	if C.pokrov_core_event_callback_is_null(callback) != 0 {
+		hcore.SetOperationalEventSink(nil)
+		return
+	}
+	hcore.SetOperationalEventSink(func(event hcore.OperationalEvent) {
+		occurredAt := C.CString(event.OccurredAtRFC3339())
+		runID := C.CString(event.RunID)
+		attemptID := C.CString(event.AttemptID)
+		name := C.CString(event.Name)
+		subsystem := C.CString(event.Subsystem)
+		stage := C.CString(event.Stage)
+		severity := C.CString(string(event.Severity))
+		outcome := C.CString(string(event.Outcome))
+		errorCode := C.CString(event.ErrorCode)
+		phase := C.CString(event.Phase)
+		defer func() {
+			for _, value := range []*C.char{
+				occurredAt, runID, attemptID, name, subsystem, stage,
+				severity, outcome, errorCode, phase,
+			} {
+				C.free(unsafe.Pointer(value))
+			}
+		}()
+		C.pokrov_core_emit_event_v1(
+			callback,
+			C.int(event.SchemaVersion),
+			C.int(event.EventABI),
+			occurredAt,
+			runID,
+			attemptID,
+			C.longlong(event.Generation),
+			C.longlong(event.Sequence),
+			name,
+			subsystem,
+			stage,
+			severity,
+			outcome,
+			errorCode,
+			phase,
+		)
+	})
+}
+
+//export pokrovCoreSetEventContext
+func pokrovCoreSetEventContext(runID *C.char, attemptID *C.char, generation C.longlong) *C.char {
+	return emptyOrErrorC(hcore.ConfigureOperationalEventContext(
+		C.GoString(runID),
+		C.GoString(attemptID),
+		int64(generation),
+	))
 }
 
 //export pokrovSecureFile

@@ -20,6 +20,7 @@ import (
 	sync "sync"
 	"time"
 
+	"github.com/Kiwunaka/POKROV-core/internal/observability"
 	"github.com/Kiwunaka/POKROV-core/v2/config"
 	"github.com/Kiwunaka/POKROV-core/v2/db"
 	hcommon "github.com/Kiwunaka/POKROV-core/v2/hcommon"
@@ -37,9 +38,19 @@ type CoreService struct {
 	UnimplementedCoreServer
 }
 
-func Setup(params *SetupRequest, platformInterface libbox.PlatformInterface) error {
-	defer config.DeferPanicToError("setup", func(err error) {
-		Log(LogLevel_FATAL, LogType_CORE, err.Error())
+func Setup(params *SetupRequest, platformInterface libbox.PlatformInterface) (err error) {
+	emitOperationalEvent(observability.RuntimeInitialize, observability.OutcomeStarted, "")
+	defer func() {
+		if err != nil {
+			emitOperationalEvent(observability.RuntimeInitialize, observability.OutcomeFailed, "CORE-005")
+			return
+		}
+		emitOperationalEvent(observability.RuntimeInitialize, observability.OutcomeSucceeded, "")
+	}()
+	defer config.DeferPanicToError("setup", func(recovered error) {
+		// Keep the internal diagnostic path separate from the structured ABI.
+		err = recovered
+		Log(LogLevel_FATAL, LogType_CORE, recovered.Error())
 		<-time.After(5 * time.Second)
 	})
 	if params.Debug {
@@ -105,7 +116,7 @@ func Setup(params *SetupRequest, platformInterface libbox.PlatformInterface) err
 		statusPropagationPort = int64(params.FlutterStatusPort)
 	// case SetupMode_GRPC_BACKGROUND_INSECURE:
 	default:
-		_, err := StartGrpcServerByMode(params.Listen, params.Mode)
+		_, err = StartGrpcServerByMode(params.Listen, params.Mode)
 		if err != nil {
 			return err
 		}

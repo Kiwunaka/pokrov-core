@@ -24,9 +24,10 @@ type bind_adapter struct {
 	mutex  sync.Mutex
 }
 
-func newBind(dial N.Dialer) conn.Bind {
+func newBind(ctx context.Context, dial N.Dialer) conn.Bind {
 	return &bind_adapter{
 		dialer: dial,
+		ctx:    ctx,
 	}
 }
 

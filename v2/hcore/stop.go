@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/Kiwunaka/POKROV-core/internal/observability"
 	"github.com/Kiwunaka/POKROV-core/v2/config"
 	hcommon "github.com/Kiwunaka/POKROV-core/v2/hcommon"
 )
@@ -13,6 +14,14 @@ func (s *CoreService) Stop(ctx context.Context, empty *hcommon.Empty) (*CoreInfo
 }
 
 func Stop() (coreResponse *CoreInfoResponse, err error) {
+	emitOperationalEvent(observability.RuntimeStop, observability.OutcomeStarted, "")
+	defer func() {
+		if err != nil {
+			emitOperationalEvent(observability.RuntimeStop, observability.OutcomeFailed, "CORE-008")
+			return
+		}
+		emitOperationalEvent(observability.RuntimeStop, observability.OutcomeSucceeded, "")
+	}()
 	defer config.DeferPanicToError("stop", func(recovered_err error) {
 		coreResponse, err = errorWrapper(MessageType_UNEXPECTED_ERROR, recovered_err)
 	})

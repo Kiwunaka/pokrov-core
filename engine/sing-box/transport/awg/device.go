@@ -63,7 +63,7 @@ func NewDevice(ctx context.Context, logger logger.ContextLogger, dial network.Di
 
 	return &Device{
 		tun:       tun,
-		bind:      newBind(dial),
+		bind:      newBind(ctx, dial),
 		logger:    awgLogger,
 		ipcConfig: ipcConfig,
 	}, nil
@@ -76,18 +76,31 @@ func (d *Device) Start(stage adapter.StartStage) error {
 
 	d.awgDevice = device.NewDevice(d.tun, d.bind, d.logger)
 	if err := d.awgDevice.IpcSet(d.ipcConfig); err != nil {
+		d.awgDevice.Close()
+		d.awgDevice = nil
 		return E.Cause(err, "set ipc config")
 	}
 
 	if err := d.tun.Start(); err != nil {
+		d.awgDevice.Close()
+		d.awgDevice = nil
 		return E.Cause(err, "tun start")
 	}
 
-	return d.awgDevice.Up()
+	if err := d.awgDevice.Up(); err != nil {
+		d.awgDevice.Close()
+		d.awgDevice = nil
+		return err
+	}
+	return nil
 }
 
 func (d *Device) Close() error {
+	if d.awgDevice == nil {
+		return nil
+	}
 	d.awgDevice.Close()
+	d.awgDevice = nil
 	return nil
 }
 

@@ -144,10 +144,10 @@ func AWGSingboxTxt(content string) (*T.Endpoint, error) {
 			})
 		}
 	}
-	isAwg := jc+jmin+jmax+s1+s2+s3+s4 == 0 && h1+h2+h3+h4+i1+i2+i3+i4 == ""
+	isPlainWireGuard := jc+jmin+jmax+s1+s2+s3+s4 == 0 && h1+h2+h3+h4+i1+i2+i3+i4 == ""
 	noise := defaultWireguardNoiseOptions()
-	noise.FakePacket.Enabled = isAwg
-	if true || isAwg {
+	noise.FakePacket.Enabled = isPlainWireGuard
+	if isPlainWireGuard {
 		// fmt.Println(">>out", C.TypeAwg)
 		return &T.Endpoint{
 			Type: C.TypeWireGuard,
@@ -206,6 +206,9 @@ func AWGSingboxTxt(content string) (*T.Endpoint, error) {
 
 func AWGSingbox(raw string) (*T.Endpoint, error) {
 	splt := strings.SplitN(raw, "://", 2)
+	if len(splt) == 2 && strings.EqualFold(splt[0], "awg") {
+		return nil, errLegacyAWGConverterDisabled
+	}
 	if len(splt) == 2 {
 		d, _ := decodeBase64IfNeeded(splt[1])
 		raw = splt[0] + "://" + d
@@ -318,9 +321,9 @@ func AWGSingbox(raw string) (*T.Endpoint, error) {
 		}
 	}
 	var out *T.Endpoint
-	isAwg := opts.Jc+opts.Jmin+opts.Jmax+opts.S1+opts.S2+opts.S3+opts.S4 == 0 && opts.H1+opts.H2+opts.H3+opts.H4+opts.I1+opts.I2+opts.I3+opts.I4 == ""
+	isPlainWireGuard := opts.Jc+opts.Jmin+opts.Jmax+opts.S1+opts.S2+opts.S3+opts.S4 == 0 && opts.H1+opts.H2+opts.H3+opts.H4+opts.I1+opts.I2+opts.I3+opts.I4 == ""
 
-	if true || isAwg {
+	if isPlainWireGuard {
 		wgopts := T.WireGuardEndpointOptions{
 			PrivateKey: opts.PrivateKey,
 			Address:    opts.Address,
@@ -335,7 +338,7 @@ func AWGSingbox(raw string) (*T.Endpoint, error) {
 				},
 			},
 			MTU:   uint32(toInt(getOneOfN(u.Params, "1280", "mtu"))),
-			Noise: getWireGuardNoise(u.Params, isAwg),
+			Noise: getWireGuardNoise(u.Params, isPlainWireGuard),
 		}
 		if reservedStr, ok := u.Params["reserved"]; ok {
 			reservedParts := strings.Split(reservedStr, ",")

@@ -49,9 +49,6 @@ func (w *platformInterfaceWrapper) UsePlatformAutoDetectInterfaceControl() bool 
 }
 
 func (w *platformInterfaceWrapper) AutoDetectInterfaceControl(fd int) error {
-	if w.debugMessage != nil {
-		w.debugMessage("platform_protect_invoked")
-	}
 	return w.iif.AutoDetectInterfaceControl(int32(fd))
 }
 

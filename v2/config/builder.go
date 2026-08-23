@@ -47,11 +47,12 @@ const (
 
 	WARPConfigTag = "🔒 WARP"
 
-	InboundTUNTag    = "tun-in"
-	InboundMixedTag  = "mixed-in"
-	InboundTProxy    = "tproxy-in"
-	InboundRedirect  = "redirect-in"
-	InboundDirectTag = "dns-in"
+	InboundTUNTag           = "tun-in"
+	InboundMixedTag         = "mixed-in"
+	InboundTProxy           = "tproxy-in"
+	InboundRedirect         = "redirect-in"
+	InboundDirectTag        = "dns-in"
+	WindowsTUNInterfaceName = "POKROV"
 )
 
 var (
@@ -449,6 +450,9 @@ func setInbound(options *option.Options, hopt *PokrovOptions) {
 			// EndpointIndependentNat: true,
 			// GSO:                    runtime.GOOS != "windows",
 
+		}
+		if C.IsWindows {
+			opts.InterfaceName = WindowsTUNInterfaceName
 		}
 		tunInbound := option.Inbound{
 			Type: C.TypeTun,

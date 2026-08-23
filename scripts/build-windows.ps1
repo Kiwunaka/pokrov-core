@@ -8,6 +8,9 @@ param(
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 $release = Get-Content -Raw -LiteralPath (Join-Path $root "config\release.json") | ConvertFrom-Json
+$abiContract = Get-Content -Raw -LiteralPath (Join-Path $root "config\abi-contract.json") | ConvertFrom-Json
+& (Join-Path $PSScriptRoot "verify-abi-contract.ps1")
+& (Join-Path $PSScriptRoot "verify-awg2-contract.ps1")
 if (-not $OutputDirectory) {
   $OutputDirectory = Join-Path $root "dist\windows"
 }
@@ -16,7 +19,7 @@ New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
 
 $goCommand = Get-Command $GoExecutable -ErrorAction SilentlyContinue
 if (-not $goCommand) {
-  throw "Go 1.25.12 is required."
+  throw "Go 1.25.13 is required."
 }
 $goVersion = (& $goCommand.Source env GOVERSION).Trim()
 if ($LASTEXITCODE -ne 0 -or $goVersion -ne $release.go_toolchain) {
@@ -25,6 +28,19 @@ if ($LASTEXITCODE -ne 0 -or $goVersion -ne $release.go_toolchain) {
 $compilerCommand = Get-Command $CCompiler -ErrorAction SilentlyContinue
 if (-not $compilerCommand) {
   throw "MinGW-w64 compiler '$CCompiler' was not found."
+}
+$toolchainDirectory = Split-Path -Parent $compilerCommand.Source
+$objdumpNames = if ($IsWindows) {
+  @("x86_64-w64-mingw32-objdump.exe", "objdump.exe")
+} else {
+  @("x86_64-w64-mingw32-objdump", "objdump")
+}
+$objdumpPath = $objdumpNames |
+  ForEach-Object { Join-Path $toolchainDirectory $_ } |
+  Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } |
+  Select-Object -First 1
+if (-not $objdumpPath) {
+  throw "MinGW-w64 objdump is required to verify the built DLL exports."
 }
 
 $outputPath = Join-Path $OutputDirectory $release.artifacts.windows
@@ -80,9 +96,27 @@ try {
   $env:GOFLAGS = $previousGoFlags
 }
 
+$objdumpOutput = @(& $objdumpPath -p $outputPath 2>&1)
+if ($LASTEXITCODE -ne 0) {
+  throw "Could not inspect Windows runtime exports."
+}
+$exportText = $objdumpOutput -join "`n"
+$exportMatches = [regex]::Matches(
+  $exportText,
+  '(?m)^\s*\[\s*[0-9]+\](?:\s+\+base\[\s*[0-9]+\]\s+[0-9A-Fa-f]+)?\s+([A-Za-z_][A-Za-z0-9_]*)\s*$'
+)
+$actualExports = @($exportMatches | ForEach-Object { $_.Groups[1].Value })
+foreach ($symbol in @($abiContract.desktop_abi.exports)) {
+  if ($actualExports -notcontains [string]$symbol) {
+    throw "Windows runtime is missing required export '$symbol'."
+  }
+}
+Write-Host "Windows ABI exports verified: $(@($abiContract.desktop_abi.exports).Count) required symbols." -ForegroundColor Green
+
 $cronetOutput = Join-Path $OutputDirectory "libcronet.dll"
-$expectedCronetSize = [int64]$release.local_build_evidence.windows.libcronet.size
-$expectedCronetSha256 = [string]$release.local_build_evidence.windows.libcronet.sha256
+$retainedEvidence = $release.retained_public_release.local_build_evidence
+$expectedCronetSize = [int64]$retainedEvidence.windows.libcronet.size
+$expectedCronetSha256 = [string]$retainedEvidence.windows.libcronet.sha256
 
 function Test-CronetIdentity {
   param([Parameter(Mandatory)][string]$Path)

@@ -1,0 +1,112 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pokrov.space/contracts/core/awg2-capability.schema.json",
+  "title": "POKROV Core AWG2 capability contract",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "contract_id",
+    "status",
+    "public_runtime_advertised",
+    "owner",
+    "engine",
+    "dependency",
+    "supported_platforms",
+    "typed_endpoint",
+    "fixture_policy",
+    "telemetry",
+    "evidence_ceiling"
+  ],
+  "properties": {
+    "$schema": { "type": "string" },
+    "schema_version": { "const": 1 },
+    "contract_id": { "const": "pokrov.awg2.endpoint.v1" },
+    "status": { "const": "prototype_disabled_by_default" },
+    "public_runtime_advertised": { "const": false },
+    "owner": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "layer"],
+      "properties": {
+        "repository": { "const": "Kiwunaka/POKROV-core" },
+        "layer": { "const": "engine/sing-box" }
+      }
+    },
+    "engine": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "build_tag", "android_release_build", "windows_release_build"],
+      "properties": {
+        "type": { "const": "awg" },
+        "build_tag": { "const": "with_awg" },
+        "android_release_build": { "const": true },
+        "windows_release_build": { "const": true }
+      }
+    },
+    "dependency": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["module", "version", "module_sum", "license", "notice"],
+      "properties": {
+        "module": { "const": "github.com/amnezia-vpn/amneziawg-go" },
+        "version": { "type": "string", "pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+$" },
+        "module_sum": { "type": "string", "pattern": "^h1:[A-Za-z0-9+/]{43}=$" },
+        "license": { "const": "MIT" },
+        "notice": { "type": "string", "minLength": 1 }
+      }
+    },
+    "supported_platforms": {
+      "type": "array",
+      "prefixItems": [{ "const": "android" }, { "const": "windows" }],
+      "items": false
+    },
+    "typed_endpoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "use_integrated_tun",
+        "peer_count",
+        "key_encoding",
+        "key_bytes",
+        "address_prefix_count",
+        "peer_address_kind",
+        "allowed_mtu",
+        "required_awg2_fields",
+        "optional_awg2_fields",
+        "unsupported_fields",
+        "maximum_persistent_keepalive_seconds"
+      ],
+      "properties": {
+        "type": { "const": "awg" },
+        "use_integrated_tun": { "const": false },
+        "peer_count": { "const": 1 },
+        "key_encoding": { "const": "base64" },
+        "key_bytes": { "const": 32 },
+        "address_prefix_count": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["minimum", "maximum"],
+          "properties": {
+            "minimum": { "const": 1 },
+            "maximum": { "const": 2 }
+          }
+        },
+        "peer_address_kind": { "const": "ip_literal" },
+        "allowed_mtu": {
+          "type": "array",
+          "prefixItems": [{ "const": 1280 }, { "const": 1400 }, { "const": 1408 }],
+          "items": false
+        },
+        "required_awg2_fields": { "type": "array", "minItems": 7, "uniqueItems": true, "items": { "type": "string" } },
+        "optional_awg2_fields": { "type": "array", "minItems": 4, "uniqueItems": true, "items": { "type": "string" } },
+        "unsupported_fields": { "type": "array", "minItems": 5, "uniqueItems": true, "items": { "type": "string" } },
+        "maximum_persistent_keepalive_seconds": { "const": 600 }
+      }
+    },
+    "fixture_policy": { "type": "object" },
+    "telemetry": { "type": "object" },
+    "evidence_ceiling": { "type": "object" }
+  }
+}

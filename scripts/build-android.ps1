@@ -1,6 +1,7 @@
 param(
   [string]$GoExecutable = "go",
   [string]$AndroidSdk,
+  [string]$AndroidNdk,
   [string]$GomobileBinDirectory,
   [string]$OutputDirectory
 )
@@ -8,6 +9,7 @@ param(
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 $release = Get-Content -Raw -LiteralPath (Join-Path $root "config\release.json") | ConvertFrom-Json
+& (Join-Path $PSScriptRoot "verify-awg2-contract.ps1")
 if (-not $OutputDirectory) {
   $OutputDirectory = Join-Path $root "dist\android"
 }
@@ -16,7 +18,7 @@ New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
 
 $goCommand = Get-Command $GoExecutable -ErrorAction SilentlyContinue
 if (-not $goCommand) {
-  throw "Go 1.25.12 is required."
+  throw "Go 1.25.13 is required."
 }
 $goVersion = (& $goCommand.Source env GOVERSION).Trim()
 if ($LASTEXITCODE -ne 0 -or $goVersion -ne $release.go_toolchain) {
@@ -30,14 +32,33 @@ if (-not $AndroidSdk -or -not (Test-Path -LiteralPath $AndroidSdk -PathType Cont
   throw "Pass -AndroidSdk or set ANDROID_SDK_ROOT."
 }
 $AndroidSdk = [System.IO.Path]::GetFullPath($AndroidSdk)
+if (-not $AndroidNdk) {
+  $AndroidNdk = Join-Path (Join-Path $AndroidSdk "ndk") $release.engine.android_ndk
+}
+if (-not (Test-Path -LiteralPath $AndroidNdk -PathType Container)) {
+  throw "Pinned Android NDK $($release.engine.android_ndk) is required: $AndroidNdk"
+}
+$AndroidNdk = [System.IO.Path]::GetFullPath($AndroidNdk)
+$ndkPropertiesPath = Join-Path $AndroidNdk "source.properties"
+if (-not (Test-Path -LiteralPath $ndkPropertiesPath -PathType Leaf)) {
+  throw "Pinned Android NDK source.properties is missing."
+}
+$ndkRevisionMatch = [regex]::Match(
+  [IO.File]::ReadAllText($ndkPropertiesPath),
+  '(?m)^Pkg\.Revision\s*=\s*([^\r\n]+)\s*$'
+)
+if (-not $ndkRevisionMatch.Success -or $ndkRevisionMatch.Groups[1].Value.Trim() -ne $release.engine.android_ndk) {
+  throw "Expected Android NDK $($release.engine.android_ndk)."
+}
 
 if (-not $GomobileBinDirectory) {
-  $GomobileBinDirectory = Join-Path $root "tmp\gomobile-go1.25.12"
+  $GomobileBinDirectory = Join-Path $root "tmp\gomobile-go1.25.13"
 }
 $GomobileBinDirectory = [System.IO.Path]::GetFullPath($GomobileBinDirectory)
 New-Item -ItemType Directory -Force -Path $GomobileBinDirectory | Out-Null
-$gomobile = Join-Path $GomobileBinDirectory "gomobile.exe"
-$gobind = Join-Path $GomobileBinDirectory "gobind.exe"
+$goExecutableSuffix = if ($IsWindows) { ".exe" } else { "" }
+$gomobile = Join-Path $GomobileBinDirectory "gomobile$goExecutableSuffix"
+$gobind = Join-Path $GomobileBinDirectory "gobind$goExecutableSuffix"
 $outputPath = Join-Path $OutputDirectory $release.artifacts.android
 
 $previousPath = $env:PATH
@@ -45,16 +66,23 @@ $previousGobin = $env:GOBIN
 $previousToolchain = $env:GOTOOLCHAIN
 $previousAndroidHome = $env:ANDROID_HOME
 $previousAndroidSdkRoot = $env:ANDROID_SDK_ROOT
+$previousAndroidNdk = $env:ANDROID_NDK
+$previousAndroidNdkHome = $env:ANDROID_NDK_HOME
+$previousAndroidNdkRoot = $env:ANDROID_NDK_ROOT
 $previousCgoLdflags = $env:CGO_LDFLAGS
 $previousGoFlags = $env:GOFLAGS
 $previousNativeArgumentPassing = $PSNativeCommandArgumentPassing
 try {
   $goBinDirectory = Split-Path -Parent $goCommand.Source
-  $env:PATH = "$goBinDirectory;$GomobileBinDirectory;$previousPath"
+  $pathSeparator = [System.IO.Path]::PathSeparator
+  $env:PATH = @($goBinDirectory, $GomobileBinDirectory, $previousPath) -join $pathSeparator
   $env:GOBIN = $GomobileBinDirectory
   $env:GOTOOLCHAIN = "local"
   $env:ANDROID_HOME = $AndroidSdk
   $env:ANDROID_SDK_ROOT = $AndroidSdk
+  $env:ANDROID_NDK = $AndroidNdk
+  $env:ANDROID_NDK_HOME = $AndroidNdk
+  $env:ANDROID_NDK_ROOT = $AndroidNdk
   $env:CGO_LDFLAGS = "-O2 -g -s -w -Wl,-z,max-page-size=16384"
   $env:GOFLAGS = "-buildvcs=false"
   $PSNativeCommandArgumentPassing = "Standard"
@@ -107,14 +135,19 @@ try {
   $env:GOTOOLCHAIN = $previousToolchain
   $env:ANDROID_HOME = $previousAndroidHome
   $env:ANDROID_SDK_ROOT = $previousAndroidSdkRoot
+  $env:ANDROID_NDK = $previousAndroidNdk
+  $env:ANDROID_NDK_HOME = $previousAndroidNdkHome
+  $env:ANDROID_NDK_ROOT = $previousAndroidNdkRoot
   $env:CGO_LDFLAGS = $previousCgoLdflags
   $env:GOFLAGS = $previousGoFlags
   $PSNativeCommandArgumentPassing = $previousNativeArgumentPassing
 }
 
-$aarEntries = @(& tar.exe -tf $outputPath)
-if ($LASTEXITCODE -ne 0) {
-  throw "Could not inspect Android artifact."
+$archive = [System.IO.Compression.ZipFile]::OpenRead($outputPath)
+try {
+  $aarEntries = @($archive.Entries | ForEach-Object { $_.FullName })
+} finally {
+  $archive.Dispose()
 }
 foreach ($abi in @("armeabi-v7a", "arm64-v8a", "x86", "x86_64")) {
   if ($aarEntries -notcontains "jni/$abi/libpokrov-core.so") {

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/Kiwunaka/POKROV-core/internal/observability"
 	"github.com/Kiwunaka/POKROV-core/v2/config"
 	"github.com/Kiwunaka/POKROV-core/v2/db"
 	hcommon "github.com/Kiwunaka/POKROV-core/v2/hcommon"
@@ -76,6 +77,18 @@ func loadLastStartRequestIfNeeded(in *StartRequest) (*StartRequest, error) {
 }
 
 func StartService(ctx context.Context, in *StartRequest) (coreResponse *CoreInfoResponse, err error) {
+	emitOperationalEvent(observability.RuntimeStart, observability.OutcomeStarted, "")
+	defer func() {
+		if err != nil {
+			emitOperationalEvent(
+				observability.RuntimeStart,
+				observability.OutcomeFailed,
+				observability.ClassifyStartError(err),
+			)
+			return
+		}
+		emitOperationalEvent(observability.RuntimeStart, observability.OutcomeSucceeded, "")
+	}()
 	defer config.DeferPanicToError("startmobile", func(recovered_err error) {
 		coreResponse, err = errorWrapper(MessageType_UNEXPECTED_ERROR, recovered_err)
 	})
