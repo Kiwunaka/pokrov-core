@@ -85,6 +85,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           path: POKROV-core
+          fetch-depth: 0
 
       - name: Checkout active client promotion line
         uses: actions/checkout@v4
@@ -92,6 +93,7 @@ jobs:
           repository: Kiwunaka/POKROV-app
           ref: main
           path: client
+          lfs: true
           ssh-key: ${{ secrets.POKROV_RELEASE_CLIENT_DEPLOY_KEY }}
           persist-credentials: false
 
@@ -109,13 +111,39 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Materialize bound Core source authority
+        shell: pwsh
+        run: |
+          $candidateRoot = Join-Path "${{ github.workspace }}" "POKROV-core"
+          $authorityRoot = Join-Path "${{ github.workspace }}" "POKROV-core-authority"
+          $seedPath = Join-Path "${{ github.workspace }}" "client/config/runtime-artifacts.seed.json"
+          $boundCore = (Get-Content -Raw -LiteralPath $seedPath | ConvertFrom-Json).core.source_commit
+          if ($boundCore -notmatch "^[0-9a-f]{40}$") {
+            throw "Client runtime seed does not contain a full Core source commit."
+          }
+
+          & git -C $candidateRoot cat-file -e "$boundCore^{commit}"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Bound Core source commit is unavailable in the candidate checkout."
+          }
+
+          & git -C $candidateRoot diff --quiet $boundCore HEAD -- . ":(exclude).github/**"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Core candidate changes bound source outside .github while client/main still pins $boundCore."
+          }
+
+          & git -C $candidateRoot worktree add --detach $authorityRoot $boundCore
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to materialize the bound Core source authority."
+          }
+
       - name: Validate client, Core, and release-handoff v2 parity
         shell: pwsh
         working-directory: client
         run: >-
           ./scripts/validate-seed.ps1
           -PlatformRoot "${{ github.workspace }}/platform"
-          -CoreRoot "${{ github.workspace }}/POKROV-core"
+          -CoreRoot "${{ github.workspace }}/POKROV-core-authority"
 
   android-artifact-reproducibility:
     needs: test
