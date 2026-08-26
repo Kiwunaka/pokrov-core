@@ -10,20 +10,28 @@ POKROV Core is one client runtime with three layers:
 
 The application supplies a materialized sing-box JSON profile for normal operation. Legacy builder APIs remain internal and are not the public POKROV app contract.
 
-The AWG2 experiment remains inside the same embedded sing-box graph. Its
-machine owner is `config/awg2-capability.json`, contract ID
-`pokrov.awg2.endpoint.v1`. Android and Windows release builds include the
-`with_awg` tag, but the public ABI does not advertise AWG readiness. A host may
-accept an `awg` endpoint only from the digest-bound managed owner-lab path and
-only with `useIntegratedTun=false`; Android `VpnService` or the Windows
-privileged service remains the single system TUN and route owner. The endpoint
-validator runs before device creation and rejects unsupported MTU, keys,
-peers, header/junk fields, instruction chains and integrated TUN ownership.
+The AWG2 and AWG 3.1 experiments remain inside the same embedded sing-box
+graph. Their machine owners are `config/awg2-capability.json` and
+`config/awg31-capability.json`, with distinct `pokrov.awg2.endpoint.v1` and
+`pokrov.awg31.endpoint.v1` contract IDs. The engine uses the official pinned
+`amneziawg-go/v3` module for both modes; POKROV adds only typed configuration,
+validation and host integration, not custom cryptography. AWG 3.1 requires an
+explicit contract ID and remains wire-incompatible with AWG2.
+
+Android and Windows release builds include the `with_awg` tag, but the public
+ABI does not advertise either AWG lab. A host may accept an `awg` endpoint only
+from the digest-bound managed owner-lab path and only with
+`useIntegratedTun=false`; Android `VpnService` or the Windows privileged
+service remains the single system TUN and route owner. The endpoint validator
+runs before device creation and rejects unsupported MTU, keys, peers,
+header/junk fields, instruction chains, timing/padding bounds and integrated
+TUN ownership. AWG2 rejects every AWG 3.1-only field instead of silently
+upgrading a profile.
 
 `ray2sing` is not an AWG authority. Raw `awg://` and WireGuard-style
 `[Interface]` AWG inputs fail closed instead of being rewritten as ordinary
 WireGuard. Synthetic documentation-address fixtures may test the typed
-endpoint; real endpoint, key and provider material must not enter source,
+endpoints; real endpoint, key and provider material must not enter source,
 logs, fixtures or retained public evidence.
 
 The desktop ABI version is `2`. `config/abi-contract.json` is the

@@ -1,0 +1,46 @@
+{
+  "contract_id": "pokrov.awg31.endpoint.v1",
+  "synthetic": true,
+  "endpoint": {
+    "useIntegratedTun": false,
+    "contract_id": "pokrov.awg31.endpoint.v1",
+    "private_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+    "address": [
+      "10.67.0.2/32",
+      "fd67::2/128"
+    ],
+    "mtu": 1408,
+    "jc": 6,
+    "jmin": 48,
+    "jmax": 96,
+    "s1": 16,
+    "s2": 16,
+    "s3": 16,
+    "s4": 16,
+    "h1": "1100001-1100099",
+    "h2": "1200001-1200099",
+    "h3": "1300001-1300099",
+    "h4": "1400001-1400099",
+    "i1": "<t><r 16><b 0xdeadbeef>",
+    "header_protection_key": "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI=",
+    "content_padding_addition": "16-96",
+    "rekey_after_time": "90-150",
+    "rekey_timeout": "4-8",
+    "reject_after_time": "180-240",
+    "keepalive_timeout": "8-14",
+    "max_handshake_attempts": "12-24",
+    "random_trailers": true,
+    "peers": [
+      {
+        "address": "192.0.2.31",
+        "port": 51831,
+        "public_key": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=",
+        "allowed_ips": [
+          "0.0.0.0/0",
+          "::/0"
+        ],
+        "persistent_keepalive_interval_range": "22-30"
+      }
+    ]
+  }
+}

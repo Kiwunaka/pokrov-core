@@ -11,8 +11,8 @@ The repository contains:
 - an embedded sing-box engine with POKROV fixes;
 - Android and desktop bindings;
 - WARP/WireGuard support;
-- a disabled-by-default, typed AWG2 owner-lab endpoint behind the
-  `pokrov.awg2.endpoint.v1` contract;
+- disabled-by-default, typed AWG2 and AWG 3.1 owner-lab endpoints behind
+  separate digest-bound contracts;
 - reproducible build and verification scripts.
 
 The server remains a separate Xray-based system. This repository builds client outbounds only.
@@ -85,8 +85,8 @@ license/notice review before release approval.
 - `v2/` — POKROV configuration, lifecycle, resolver, WARP, and service code.
 - `engine/sing-box/` — embedded transport engine.
 - `ray2sing/` — profile-to-sing-box conversion.
-- `config/awg2-capability.json` — pinned AWG2 prototype schema, dependency,
-  build-tag and evidence ceiling.
+- `config/awg2-capability.json` and `config/awg31-capability.json` — pinned AWG
+  lab schemas, official dependency, build-tag and evidence ceilings.
 - `third_party/warp-plus/` — pinned WARP helper.
 - `scripts/` — deterministic builds and focused checks.
 - `docs/` — architecture and release policy.

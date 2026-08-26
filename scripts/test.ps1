@@ -35,6 +35,7 @@ if ($LASTEXITCODE -ne 0 -or $goVersion -ne $release.go_toolchain) {
 & (Join-Path $PSScriptRoot "verify-abi-contract.ps1")
 & (Join-Path $PSScriptRoot "verify-observability-contracts.ps1")
 & (Join-Path $PSScriptRoot "verify-awg2-contract.ps1")
+& (Join-Path $PSScriptRoot "verify-awg31-contract.ps1")
 & (Join-Path $PSScriptRoot "verify-release-ci-contract.ps1")
 
 $previousToolchain = $env:GOTOOLCHAIN

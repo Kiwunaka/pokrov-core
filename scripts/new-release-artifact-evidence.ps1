@@ -109,6 +109,7 @@ foreach ($relative in @(
   "config/abi-contract.json",
   "config/core-event-abi.json",
   "config/awg2-capability.json",
+  "config/awg31-capability.json",
   "go.sum",
   "engine/sing-box/go.sum"
 )) {

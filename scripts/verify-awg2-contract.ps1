@@ -38,7 +38,10 @@ if (
   $contract.typed_endpoint.key_encoding -ne "base64" -or
   $contract.typed_endpoint.key_bytes -ne 32 -or
   (@($contract.typed_endpoint.allowed_mtu) -join ',') -ne '1280,1400,1408' -or
-  (@($contract.typed_endpoint.unsupported_fields) -join ',') -ne 'i1,i2,i3,i4,i5'
+  $contract.typed_endpoint.maximum_junk_packet_count -ne 128 -or
+  $contract.typed_endpoint.maximum_junk_packet_size -ne 65535 -or
+  $contract.typed_endpoint.maximum_padding_size -ne 65535 -or
+  (@($contract.typed_endpoint.unsupported_fields) -join ',') -ne 'i1,i2,i3,i4,i5,header_protection_key,content_padding_addition,rekey_after_time,rekey_timeout,reject_after_time,keepalive_timeout,max_handshake_attempts,random_trailers,persistent_keepalive_interval_range'
 ) {
   throw "AWG2 typed endpoint subset is invalid."
 }
@@ -59,7 +62,11 @@ foreach ($path in @("go.sum", "engine\sing-box\go.sum")) {
 }
 foreach ($path in @("scripts\build-android.ps1", "scripts\build-windows.ps1")) {
   $content = Get-Content -Raw -LiteralPath (Join-Path $root $path)
-  if (-not $content.Contains('"with_awg"') -or -not $content.Contains('verify-awg2-contract.ps1')) {
+  if (
+    -not $content.Contains('"with_awg"') -or
+    -not $content.Contains('verify-awg2-contract.ps1') -or
+    -not $content.Contains('verify-awg31-contract.ps1')
+  ) {
     throw "$path does not bind the AWG2 contract and build tag."
   }
 }
