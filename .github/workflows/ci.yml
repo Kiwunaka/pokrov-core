@@ -92,6 +92,7 @@ jobs:
           repository: Kiwunaka/POKROV-app
           ref: main
           path: client
+          lfs: true
           ssh-key: ${{ secrets.POKROV_RELEASE_CLIENT_DEPLOY_KEY }}
           persist-credentials: false
 
