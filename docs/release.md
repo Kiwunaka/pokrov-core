@@ -20,13 +20,15 @@ capability descriptor embedded in the library. Adding, removing or renaming an
 export or event identifier requires an explicit compatibility decision; it
 cannot be hidden in an artifact rebuild.
 
-The same gate verifies `config/awg2-capability.json`, its schema, the exact
-`amneziawg-go v0.2.16` module sum and MIT notice, both release build tags, the
-typed endpoint tests and the fail-closed legacy-converter tests. Passing these
-checks proves source and build-command consistency only. AWG2 remains
-`prototype_disabled_by_default`; exact AAR/DLL network interop, physical-device
-behavior, battery/thermal measurements and RU-origin results require retained
-evidence for the exact candidate and cannot be inferred from this gate.
+The same gate verifies both AWG machine owners and schemas, the exact official
+`amneziawg-go/v3 v3.1.20260814` module sum and MIT notice, both release build
+tags, typed endpoint tests and the fail-closed legacy-converter tests. Passing
+these checks proves source and build-command consistency only. AWG2 remains
+`prototype_disabled_by_default` and AWG 3.1 remains
+`lab_disabled_by_default`; exact AAR/DLL and owned-server interop,
+physical-device behavior, battery/thermal measurements and mobile/RU-origin
+results require retained evidence for the exact candidate and cannot be
+inferred from this gate.
 
 Core CI runs the complete root-module test graph, focused `go vet`, race and
 pinned `govulncheck v1.7.0` reachable-code scans for supported runtime packages

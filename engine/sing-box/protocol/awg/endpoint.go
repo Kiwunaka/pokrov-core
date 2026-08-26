@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"net"
 	"net/netip"
-	"time"
 
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/adapter/endpoint"
@@ -160,6 +159,34 @@ func genIpcConfig(opts option.AwgEndpointOptions) (string, error) {
 	if opts.I5 != "" {
 		s += "\ni5=" + opts.I5
 	}
+	if opts.HeaderProtectionKey != "" {
+		headerProtectionKeyBytes, err := base64.StdEncoding.DecodeString(opts.HeaderProtectionKey)
+		if err != nil {
+			return "", err
+		}
+		s += "\nheader_protection_key=" + hex.EncodeToString(headerProtectionKeyBytes)
+	}
+	if opts.ContentPaddingAddition != "" {
+		s += "\ncontent_padding_addition=" + opts.ContentPaddingAddition
+	}
+	if opts.RekeyAfterTime != "" {
+		s += "\nrekey_after_time=" + opts.RekeyAfterTime
+	}
+	if opts.RekeyTimeout != "" {
+		s += "\nrekey_timeout=" + opts.RekeyTimeout
+	}
+	if opts.RejectAfterTime != "" {
+		s += "\nreject_after_time=" + opts.RejectAfterTime
+	}
+	if opts.KeepaliveTimeout != "" {
+		s += "\nkeepalive_timeout=" + opts.KeepaliveTimeout
+	}
+	if opts.MaxHandshakeAttempts != "" {
+		s += "\nmax_handshake_attempts=" + opts.MaxHandshakeAttempts
+	}
+	if opts.RandomTrailers {
+		s += "\nrandom_trailers=true"
+	}
 
 	for _, peer := range opts.Peers {
 		publicKeyBytes, err := base64.StdEncoding.DecodeString(peer.PublicKey)
@@ -177,7 +204,9 @@ func genIpcConfig(opts option.AwgEndpointOptions) (string, error) {
 		if peer.Address != "" && peer.Port != 0 {
 			s += "\nendpoint=" + peer.Address + ":" + format.ToString(peer.Port)
 		}
-		if peer.PersistentKeepaliveInterval != 0 {
+		if peer.PersistentKeepaliveIntervalRange != "" {
+			s += "\npersistent_keepalive_interval=" + peer.PersistentKeepaliveIntervalRange
+		} else if peer.PersistentKeepaliveInterval != 0 {
 			s += "\npersistent_keepalive_interval=" + format.ToString(peer.PersistentKeepaliveInterval)
 		}
 		for _, allowedIp := range peer.AllowedIPs {
@@ -232,31 +261,18 @@ func (w *Endpoint) NewConnectionEx(ctx context.Context, conn net.Conn, source M.
 }
 
 func (o *Endpoint) Start(stage adapter.StartStage) error {
-	if stage != adapter.StartStateStart {
-		// return o.endpoint.Start(false)
-	}
-	if stage == adapter.StartStatePostStart {
-		go o.readyChecker()
+	switch stage {
+	case adapter.StartStateStart:
+		if err := o.Device.Start(stage); err != nil {
+			return err
+		}
+		o.started = true
+	case adapter.StartStatePostStart:
+		monitoring.Get(o.ctx).TestNow(o.Tag())
 	}
 	return nil
 }
 
-func (w *Endpoint) readyChecker() {
-	defer func() {
-		w.started = true
-		monitoring.Get(w.ctx).TestNow(w.Tag())
-	}()
-	for i := 0; i < 10; i++ {
-		if w.IsReady() {
-			return
-		}
-		select {
-		case <-w.ctx.Done():
-			return
-		case <-time.After(time.Second):
-		}
-	}
-}
 func (w *Endpoint) IsReady() bool {
 	return w.started
 }

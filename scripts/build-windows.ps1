@@ -11,6 +11,7 @@ $release = Get-Content -Raw -LiteralPath (Join-Path $root "config\release.json")
 $abiContract = Get-Content -Raw -LiteralPath (Join-Path $root "config\abi-contract.json") | ConvertFrom-Json
 & (Join-Path $PSScriptRoot "verify-abi-contract.ps1")
 & (Join-Path $PSScriptRoot "verify-awg2-contract.ps1")
+& (Join-Path $PSScriptRoot "verify-awg31-contract.ps1")
 if (-not $OutputDirectory) {
   $OutputDirectory = Join-Path $root "dist\windows"
 }
@@ -31,9 +32,9 @@ if (-not $compilerCommand) {
 }
 $toolchainDirectory = Split-Path -Parent $compilerCommand.Source
 $objdumpNames = if ($IsWindows) {
-  @("x86_64-w64-mingw32-objdump.exe", "objdump.exe")
+  @("x86_64-w64-mingw32-objdump.exe", "objdump.exe", "llvm-objdump.exe")
 } else {
-  @("x86_64-w64-mingw32-objdump", "objdump")
+  @("x86_64-w64-mingw32-objdump", "objdump", "llvm-objdump")
 }
 $objdumpPath = $objdumpNames |
   ForEach-Object { Join-Path $toolchainDirectory $_ } |
@@ -105,7 +106,15 @@ $exportMatches = [regex]::Matches(
   $exportText,
   '(?m)^\s*\[\s*[0-9]+\](?:\s+\+base\[\s*[0-9]+\]\s+[0-9A-Fa-f]+)?\s+([A-Za-z_][A-Za-z0-9_]*)\s*$'
 )
-$actualExports = @($exportMatches | ForEach-Object { $_.Groups[1].Value })
+$llvmExportMatches = [regex]::Matches(
+  $exportText,
+  '(?m)^\s*[0-9]+\s+0x[0-9A-Fa-f]+\s+([A-Za-z_][A-Za-z0-9_]*)\s*$'
+)
+$actualExports = @(
+  @($exportMatches) + @($llvmExportMatches) |
+    ForEach-Object { $_.Groups[1].Value } |
+    Sort-Object -Unique
+)
 foreach ($symbol in @($abiContract.desktop_abi.exports)) {
   if ($actualExports -notcontains [string]$symbol) {
     throw "Windows runtime is missing required export '$symbol'."

@@ -42,7 +42,7 @@ require (
 	github.com/alexbrainman/sspi v0.0.0-20231016080023-1a75b4708caa // indirect
 	github.com/ameshkov/dnscrypt/v2 v2.4.0 // indirect
 	github.com/ameshkov/dnsstamps v1.0.3 // indirect
-	github.com/amnezia-vpn/amneziawg-go v0.2.16 // indirect
+	github.com/amnezia-vpn/amneziawg-go/v3 v3.1.20260814 // indirect
 	github.com/anthropics/anthropic-sdk-go v1.19.0 // indirect
 	github.com/anytls/sing-anytls v0.0.11 // indirect
 	github.com/armon/go-proxyproto v0.0.0-20180202201750-5b7edb60ff5f // indirect

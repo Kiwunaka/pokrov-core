@@ -9,9 +9,14 @@
 - Raised the pinned Go/dependency floor after reachable-vulnerability review.
 - Added the pinned `pokrov.awg2.endpoint.v1` capability contract, schema,
   synthetic fixture, dependency/license gate and focused typed-endpoint tests.
+- Added a separate disabled `pokrov.awg31.endpoint.v1` lab contract backed by
+  official `amneziawg-go/v3 v3.1.20260814`, including header protection,
+  content padding, bounded timing ranges, random trailers and bounded I1-I5
+  signature packets without custom POKROV cryptography.
 - Made the AWG endpoint fail closed before device creation and fixed bind
   context plus partial-start cleanup while keeping the host as the sole TUN
-  owner.
+  owner. Endpoint readiness now follows successful native Device startup, and
+  contract-owned junk/padding maxima are enforced before `IpcSet`.
 - Disabled raw AWG legacy conversion so AWG material cannot silently become
   vanilla WireGuard.
 - Kept AWG2 non-advertised and disabled by default pending exact Android,

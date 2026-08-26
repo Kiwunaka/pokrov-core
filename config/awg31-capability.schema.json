@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://pokrov.space/contracts/core/awg2-capability.schema.json",
-  "title": "POKROV Core AWG2 capability contract",
+  "$id": "https://pokrov.space/contracts/core/awg31-capability.schema.json",
+  "title": "POKROV Core AWG 3.1 lab capability contract",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -13,6 +13,7 @@
     "engine",
     "dependency",
     "supported_platforms",
+    "compatibility",
     "typed_endpoint",
     "fixture_policy",
     "telemetry",
@@ -21,8 +22,8 @@
   "properties": {
     "$schema": { "type": "string" },
     "schema_version": { "const": 1 },
-    "contract_id": { "const": "pokrov.awg2.endpoint.v1" },
-    "status": { "const": "prototype_disabled_by_default" },
+    "contract_id": { "const": "pokrov.awg31.endpoint.v1" },
+    "status": { "const": "lab_disabled_by_default" },
     "public_runtime_advertised": { "const": false },
     "owner": {
       "type": "object",
@@ -47,11 +48,13 @@
     "dependency": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["module", "version", "module_sum", "license", "notice"],
+      "required": ["module", "version", "source_tag", "source_commit", "module_sum", "license", "notice"],
       "properties": {
         "module": { "const": "github.com/amnezia-vpn/amneziawg-go/v3" },
-        "version": { "type": "string", "pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+$" },
-        "module_sum": { "type": "string", "pattern": "^h1:[A-Za-z0-9+/]{43}=$" },
+        "version": { "const": "v3.1.20260814" },
+        "source_tag": { "const": "v3.1.20260814" },
+        "source_commit": { "const": "1b86b2ae0e493e7ea93f8c1a0f0cb6735b1551f1" },
+        "module_sum": { "const": "h1:l2AhBD+sFycU8Im81n/bZORMxW7fWtlZJEuJ4Hh0+z0=" },
         "license": { "const": "MIT" },
         "notice": { "type": "string", "minLength": 1 }
       }
@@ -61,11 +64,22 @@
       "prefixItems": [{ "const": "android" }, { "const": "windows" }],
       "items": false
     },
+    "compatibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["awg2_contract_id", "wire_compatible_with_awg2", "separate_managed_profile_required"],
+      "properties": {
+        "awg2_contract_id": { "const": "pokrov.awg2.endpoint.v1" },
+        "wire_compatible_with_awg2": { "const": false },
+        "separate_managed_profile_required": { "const": true }
+      }
+    },
     "typed_endpoint": {
       "type": "object",
       "additionalProperties": false,
       "required": [
         "type",
+        "explicit_contract_id_required",
         "use_integrated_tun",
         "peer_count",
         "key_encoding",
@@ -76,26 +90,21 @@
         "maximum_junk_packet_count",
         "maximum_junk_packet_size",
         "maximum_padding_size",
-        "required_awg2_fields",
-        "optional_awg2_fields",
-        "unsupported_fields",
-        "maximum_persistent_keepalive_seconds"
+        "minimum_header_protection_padding",
+        "maximum_instruction_packet_bytes",
+        "maximum_content_padding_addition",
+        "maximum_persistent_keepalive_seconds",
+        "required_awg31_fields",
+        "optional_awg31_fields"
       ],
       "properties": {
         "type": { "const": "awg" },
+        "explicit_contract_id_required": { "const": true },
         "use_integrated_tun": { "const": false },
         "peer_count": { "const": 1 },
         "key_encoding": { "const": "base64" },
         "key_bytes": { "const": 32 },
-        "address_prefix_count": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["minimum", "maximum"],
-          "properties": {
-            "minimum": { "const": 1 },
-            "maximum": { "const": 2 }
-          }
-        },
+        "address_prefix_count": { "type": "object" },
         "peer_address_kind": { "const": "ip_literal" },
         "allowed_mtu": {
           "type": "array",
@@ -103,12 +112,14 @@
           "items": false
         },
         "maximum_junk_packet_count": { "const": 128 },
-        "maximum_junk_packet_size": { "const": 65535 },
+        "maximum_junk_packet_size": { "const": 1279 },
         "maximum_padding_size": { "const": 65535 },
-        "required_awg2_fields": { "type": "array", "minItems": 7, "uniqueItems": true, "items": { "type": "string" } },
-        "optional_awg2_fields": { "type": "array", "minItems": 4, "uniqueItems": true, "items": { "type": "string" } },
-        "unsupported_fields": { "type": "array", "minItems": 14, "uniqueItems": true, "items": { "type": "string" } },
-        "maximum_persistent_keepalive_seconds": { "const": 600 }
+        "minimum_header_protection_padding": { "const": 12 },
+        "maximum_instruction_packet_bytes": { "const": 512 },
+        "maximum_content_padding_addition": { "const": 512 },
+        "maximum_persistent_keepalive_seconds": { "const": 600 },
+        "required_awg31_fields": { "type": "array", "minItems": 13, "uniqueItems": true, "items": { "type": "string" } },
+        "optional_awg31_fields": { "type": "array", "minItems": 13, "uniqueItems": true, "items": { "type": "string" } }
       }
     },
     "fixture_policy": { "type": "object" },
