@@ -47,6 +47,10 @@ type DefaultDialer struct {
 }
 
 func NewDefault(ctx context.Context, options option.DialerOptions) (*DefaultDialer, error) {
+	return newDefault(ctx, options, false)
+}
+
+func newDefault(ctx context.Context, options option.DialerOptions, protectPlatformSocket bool) (*DefaultDialer, error) {
 	networkManager := service.FromContext[adapter.NetworkManager](ctx)
 	platformInterface := service.FromContext[adapter.PlatformInterface](ctx)
 
@@ -87,6 +91,7 @@ func NewDefault(ctx context.Context, options option.DialerOptions) (*DefaultDial
 		}
 	}
 
+	platformProtectApplied := false
 	if networkManager != nil {
 		defaultOptions := networkManager.DefaultOptions()
 		if defaultOptions.BindInterface != "" {
@@ -114,11 +119,17 @@ func NewDefault(ctx context.Context, options option.DialerOptions) (*DefaultDial
 				bindFunc := networkManager.ProtectFunc()
 				dialer.Control = control.Append(dialer.Control, bindFunc)
 				listener.Control = control.Append(listener.Control, bindFunc)
+				platformProtectApplied = true
 			} else {
 				bindFunc := networkManager.AutoDetectInterfaceFunc()
 				dialer.Control = control.Append(dialer.Control, bindFunc)
 				listener.Control = control.Append(listener.Control, bindFunc)
 			}
+		}
+		if protectPlatformSocket && !platformProtectApplied {
+			protectFunc := networkManager.ProtectFunc()
+			dialer.Control = control.Append(dialer.Control, protectFunc)
+			listener.Control = control.Append(listener.Control, protectFunc)
 		}
 		if options.RoutingMark == 0 && defaultOptions.RoutingMark != 0 {
 			dialer.Control = control.Append(dialer.Control, setMarkWrapper(networkManager, defaultOptions.RoutingMark, true))

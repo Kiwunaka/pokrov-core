@@ -26,7 +26,9 @@ service remains the single system TUN and route owner. The endpoint validator
 runs before device creation and rejects unsupported MTU, keys, peers,
 header/junk fields, instruction chains, timing/padding bounds and integrated
 TUN ownership. AWG2 rejects every AWG 3.1-only field instead of silently
-upgrading a profile.
+upgrading a profile. On Android, the AWG endpoint requests platform protection
+only for its outer socket, so `VpnService.protect(fd)` can bypass recapture
+without enabling global interface auto-detection for ordinary transports.
 
 `ray2sing` is not an AWG authority. Raw `awg://` and WireGuard-style
 `[Interface]` AWG inputs fail closed instead of being rewritten as ordinary

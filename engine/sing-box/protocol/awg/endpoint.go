@@ -54,10 +54,11 @@ func NewEndpoint(ctx context.Context, router adapter.Router, logger log.ContextL
 
 	options.UDPFragmentDefault = true
 	dial, err := dialer.NewWithOptions(dialer.Options{
-		Context:        ctx,
-		Options:        options.DialerOptions,
-		RemoteIsDomain: false,
-		DirectOutbound: true,
+		Context:               ctx,
+		Options:               options.DialerOptions,
+		RemoteIsDomain:        false,
+		DirectOutbound:        true,
+		ProtectPlatformSocket: true,
 	})
 	if err != nil {
 		return nil, err
