@@ -116,7 +116,7 @@ func (e *operationalEventEmitter) emit(name string, stage string, phase string, 
 		Generation:    e.generation,
 		Sequence:      e.sequence,
 		Name:          name,
-		Subsystem:     "core",
+		Subsystem:     operationalEventSubsystem(name),
 		Stage:         stage,
 		Severity:      severity,
 		Outcome:       outcome,
@@ -154,6 +154,13 @@ func (e *operationalEventEmitter) deliver() {
 			handler.WriteOperationalEvent(event)
 		}()
 	}
+}
+
+func operationalEventSubsystem(name string) string {
+	if name == "core.egress.probe" {
+		return "egress"
+	}
+	return "core"
 }
 
 func validOperationalEvent(name string, stage string, phase string, outcome string, errorCode string) bool {
