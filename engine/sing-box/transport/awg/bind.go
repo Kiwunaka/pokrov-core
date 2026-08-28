@@ -53,6 +53,14 @@ func (b *bind_adapter) receive(c net.PacketConn) conn.ReceiveFunc {
 	}
 }
 
+func packetConnPort(c net.PacketConn) (uint16, error) {
+	localAddress := M.SocksaddrFromNet(c.LocalAddr()).Unwrap()
+	if localAddress.Port == 0 {
+		return 0, E.New("packet connection did not expose an allocated port")
+	}
+	return localAddress.Port, nil
+}
+
 func (b *bind_adapter) Open(port uint16) (fns []conn.ReceiveFunc, actualPort uint16, err error) {
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
@@ -66,21 +74,42 @@ func (b *bind_adapter) Open(port uint16) (fns []conn.ReceiveFunc, actualPort uin
 		return nil, 0, E.Cause(err, "create ipv4 connection")
 	}
 	if conn4 != nil {
+		actualPort, err = packetConnPort(conn4)
+		if err != nil {
+			return nil, 0, errors.Join(E.Cause(err, "read ipv4 connection port"), conn4.Close())
+		}
 		fns = append(fns, b.receive(conn4))
 	}
 
-	conn6, err := b.connect(netip.IPv6Unspecified(), port)
+	ipv6Port := port
+	if conn4 != nil {
+		ipv6Port = actualPort
+	}
+	conn6, err := b.connect(netip.IPv6Unspecified(), ipv6Port)
 	if err != nil && !errors.Is(err, syscall.EAFNOSUPPORT) {
-		return nil, 0, E.Cause(err, "create ipv6 connection")
+		var closeErr error
+		if conn4 != nil {
+			closeErr = conn4.Close()
+		}
+		return nil, 0, errors.Join(E.Cause(err, "create ipv6 connection"), closeErr)
 	}
 	if conn6 != nil {
+		if conn4 == nil {
+			actualPort, err = packetConnPort(conn6)
+			if err != nil {
+				return nil, 0, errors.Join(E.Cause(err, "read ipv6 connection port"), conn6.Close())
+			}
+		}
 		fns = append(fns, b.receive(conn6))
+	}
+	if len(fns) == 0 {
+		return nil, 0, syscall.EAFNOSUPPORT
 	}
 
 	b.conn4 = conn4
 	b.conn6 = conn6
 
-	return fns, port, nil
+	return fns, actualPort, nil
 }
 
 func (b *bind_adapter) Close() error {
