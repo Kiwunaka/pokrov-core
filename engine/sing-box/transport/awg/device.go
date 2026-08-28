@@ -2,10 +2,8 @@ package awg
 
 import (
 	"context"
-	"fmt"
 	"net"
 	"net/netip"
-	"strings"
 
 	"github.com/amnezia-vpn/amneziawg-go/v3/conn"
 	"github.com/amnezia-vpn/amneziawg-go/v3/device"
@@ -52,19 +50,10 @@ func NewDevice(ctx context.Context, logger logger.ContextLogger, dial network.Di
 		}
 	}
 
-	awgLogger := &device.Logger{
-		Verbosef: func(format string, args ...interface{}) {
-			logger.Debug(fmt.Sprintf(strings.ToLower(format), args...))
-		},
-		Errorf: func(format string, args ...interface{}) {
-			logger.Error(fmt.Sprintf(strings.ToLower(format), args...))
-		},
-	}
-
 	return &Device{
 		tun:       tun,
 		bind:      newBind(ctx, dial),
-		logger:    awgLogger,
+		logger:    newSafeDeviceLogger(logger),
 		ipcConfig: ipcConfig,
 	}, nil
 }

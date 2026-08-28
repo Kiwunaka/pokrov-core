@@ -33,6 +33,13 @@ TUN ownership. AWG2 rejects every AWG 3.1-only field instead of silently
 upgrading a profile. On Android, the AWG endpoint requests platform protection
 only for its outer socket, so `VpnService.protect(fd)` can bypass recapture
 without enabling global interface auto-detection for ordinary transports.
+The embedded AWG device logger never formats upstream arguments because they
+can contain endpoint or peer material. It emits only fixed
+`awg_safe_diag` classifier codes for bounded handshake send/accept/reject,
+retry and transport-error categories, with at most four occurrences per code
+and device lifetime. Unclassified verbose lines are dropped and unknown errors
+collapse to `upstream_error`; these diagnostics locate an interoperability
+failure without becoming traffic or identity evidence.
 
 `ray2sing` is not an AWG authority. Raw `awg://` and WireGuard-style
 `[Interface]` AWG inputs fail closed instead of being rewritten as ordinary
