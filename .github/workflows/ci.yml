@@ -8,6 +8,9 @@ on:
 permissions:
   contents: read
 
+env:
+  POKROV_SOURCE_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -15,7 +18,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ env.POKROV_SOURCE_COMMIT }}
           fetch-depth: 0
+      - name: Verify exact Core source authority
+        shell: pwsh
+        run: |
+          $actual = (& git rev-parse HEAD).Trim()
+          if ($actual -cne $env:POKROV_SOURCE_COMMIT) {
+            throw "Expected Core source $env:POKROV_SOURCE_COMMIT, got $actual."
+          }
       - uses: actions/setup-go@v5
         with:
           go-version: 1.25.13
@@ -84,6 +95,7 @@ jobs:
       - name: Checkout Core candidate
         uses: actions/checkout@v4
         with:
+          ref: ${{ env.POKROV_SOURCE_COMMIT }}
           path: POKROV-core
           fetch-depth: 0
 
@@ -96,6 +108,15 @@ jobs:
           lfs: true
           ssh-key: ${{ secrets.POKROV_RELEASE_CLIENT_DEPLOY_KEY }}
           persist-credentials: false
+
+      - name: Verify exact Core source authority
+        shell: pwsh
+        working-directory: POKROV-core
+        run: |
+          $actual = (& git rev-parse HEAD).Trim()
+          if ($actual -cne $env:POKROV_SOURCE_COMMIT) {
+            throw "Expected Core source $env:POKROV_SOURCE_COMMIT, got $actual."
+          }
 
       - name: Checkout platform promotion line
         uses: actions/checkout@v4
@@ -153,7 +174,16 @@ jobs:
       - name: Checkout Core source
         uses: actions/checkout@v4
         with:
+          ref: ${{ env.POKROV_SOURCE_COMMIT }}
           fetch-depth: 0
+
+      - name: Verify exact Core source authority
+        shell: pwsh
+        run: |
+          $actual = (& git rev-parse HEAD).Trim()
+          if ($actual -cne $env:POKROV_SOURCE_COMMIT) {
+            throw "Expected Core source $env:POKROV_SOURCE_COMMIT, got $actual."
+          }
 
       - name: Setup Python for deterministic XCFramework metadata
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
@@ -223,8 +253,18 @@ jobs:
       - name: Checkout Core source
         uses: actions/checkout@v4
         with:
+          ref: ${{ env.POKROV_SOURCE_COMMIT }}
           path: POKROV-core
           fetch-depth: 0
+
+      - name: Verify exact Core source authority
+        shell: pwsh
+        working-directory: POKROV-core
+        run: |
+          $actual = (& git rev-parse HEAD).Trim()
+          if ($actual -cne $env:POKROV_SOURCE_COMMIT) {
+            throw "Expected Core source $env:POKROV_SOURCE_COMMIT, got $actual."
+          }
 
       - name: Checkout active client for pinned Cronet and 100-cycle backtest
         uses: actions/checkout@v4
@@ -314,7 +354,16 @@ jobs:
       - name: Checkout Core source
         uses: actions/checkout@v4
         with:
+          ref: ${{ env.POKROV_SOURCE_COMMIT }}
           fetch-depth: 0
+
+      - name: Verify exact Core source authority
+        shell: pwsh
+        run: |
+          $actual = (& git rev-parse HEAD).Trim()
+          if ($actual -cne $env:POKROV_SOURCE_COMMIT) {
+            throw "Expected Core source $env:POKROV_SOURCE_COMMIT, got $actual."
+          }
 
       - name: Setup Go
         uses: actions/setup-go@v5

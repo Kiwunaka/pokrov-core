@@ -13,6 +13,8 @@
   official `amneziawg-go/v3 v3.1.20260814`, including header protection,
   content padding, bounded timing ranges, random trailers and bounded I1-I5
   signature packets without custom POKROV cryptography.
+- Added a separate disabled `pokrov.hy2.outbound.v1` managed Hysteria2 lab
+  contract and blocked raw Hysteria2 URI conversion.
 - Made the AWG endpoint fail closed before device creation and fixed bind
   context plus partial-start cleanup while keeping the host as the sole TUN
   owner. Endpoint readiness now follows successful native Device startup, and

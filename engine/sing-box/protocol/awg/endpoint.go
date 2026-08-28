@@ -16,9 +16,11 @@ import (
 	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing-box/transport/awg"
 	"github.com/sagernet/sing/common/bufio"
+	E "github.com/sagernet/sing/common/exceptions"
 	"github.com/sagernet/sing/common/format"
 	M "github.com/sagernet/sing/common/metadata"
 	N "github.com/sagernet/sing/common/network"
+	"github.com/sagernet/sing/service"
 
 	"go4.org/netipx"
 )
@@ -52,10 +54,11 @@ func NewEndpoint(ctx context.Context, router adapter.Router, logger log.ContextL
 
 	options.UDPFragmentDefault = true
 	dial, err := dialer.NewWithOptions(dialer.Options{
-		Context:        ctx,
-		Options:        options.DialerOptions,
-		RemoteIsDomain: false,
-		DirectOutbound: true,
+		Context:               ctx,
+		Options:               options.DialerOptions,
+		RemoteIsDomain:        false,
+		DirectOutbound:        true,
+		ProtectPlatformSocket: true,
 	})
 	if err != nil {
 		return nil, err
@@ -93,12 +96,13 @@ func NewEndpoint(ctx context.Context, router adapter.Router, logger log.ContextL
 	}
 
 	return &Endpoint{
-		Device:  dev,
-		Adapter: endpoint.NewAdapterWithDialerOptions("awg", tag, []string{N.NetworkTCP, N.NetworkUDP}, options.DialerOptions),
-		address: options.Address,
-		router:  router,
-		logger:  logger,
-		ctx:     ctx,
+		Device:    dev,
+		Adapter:   endpoint.NewAdapterWithDialerOptions("awg", tag, []string{N.NetworkTCP, N.NetworkUDP}, options.DialerOptions),
+		address:   options.Address,
+		router:    router,
+		logger:    logger,
+		dnsRouter: service.FromContext[adapter.DNSRouter](ctx),
+		ctx:       ctx,
 	}, nil
 }
 
@@ -258,6 +262,43 @@ func (w *Endpoint) NewConnectionEx(ctx context.Context, conn net.Conn, source M.
 	w.logger.InfoContext(ctx, "inbound connection from ", source)
 	w.logger.InfoContext(ctx, "inbound connection to ", metadata.Destination)
 	w.router.RouteConnectionEx(ctx, conn, metadata, onClose)
+}
+
+func (w *Endpoint) DialContext(ctx context.Context, network string, destination M.Socksaddr) (net.Conn, error) {
+	switch network {
+	case N.NetworkTCP:
+		w.logger.InfoContext(ctx, "outbound connection to ", destination)
+	case N.NetworkUDP:
+		w.logger.InfoContext(ctx, "outbound packet connection to ", destination)
+	}
+	if destination.IsFqdn() {
+		destinationAddresses, err := w.dnsRouter.Lookup(ctx, destination.Fqdn, adapter.DNSQueryOptions{})
+		if err != nil {
+			return nil, err
+		}
+		return N.DialSerial(ctx, w.Device, network, destination, destinationAddresses)
+	} else if !destination.Addr.IsValid() {
+		return nil, E.New("invalid destination: ", destination)
+	}
+	return w.Device.DialContext(ctx, network, destination)
+}
+
+func (w *Endpoint) ListenPacket(ctx context.Context, destination M.Socksaddr) (net.PacketConn, error) {
+	w.logger.InfoContext(ctx, "outbound packet connection to ", destination)
+	if destination.IsFqdn() {
+		destinationAddresses, err := w.dnsRouter.Lookup(ctx, destination.Fqdn, adapter.DNSQueryOptions{})
+		if err != nil {
+			return nil, err
+		}
+		packetConn, _, err := N.ListenSerial(ctx, w.Device, destination, destinationAddresses)
+		if err != nil {
+			return nil, err
+		}
+		return packetConn, nil
+	} else if !destination.Addr.IsValid() {
+		return nil, E.New("invalid destination: ", destination)
+	}
+	return w.Device.ListenPacket(ctx, destination)
 }
 
 func (o *Endpoint) Start(stage adapter.StartStage) error {

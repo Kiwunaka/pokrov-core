@@ -11,6 +11,7 @@ $root = Split-Path -Parent $PSScriptRoot
 $release = Get-Content -Raw -LiteralPath (Join-Path $root "config\release.json") | ConvertFrom-Json
 & (Join-Path $PSScriptRoot "verify-awg2-contract.ps1")
 & (Join-Path $PSScriptRoot "verify-awg31-contract.ps1")
+& (Join-Path $PSScriptRoot "verify-hy2-contract.ps1")
 if (-not $OutputDirectory) {
   $OutputDirectory = Join-Path $root "dist\android"
 }

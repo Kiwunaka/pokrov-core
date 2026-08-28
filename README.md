@@ -85,8 +85,9 @@ license/notice review before release approval.
 - `v2/` — POKROV configuration, lifecycle, resolver, WARP, and service code.
 - `engine/sing-box/` — embedded transport engine.
 - `ray2sing/` — profile-to-sing-box conversion.
-- `config/awg2-capability.json` and `config/awg31-capability.json` — pinned AWG
-  lab schemas, official dependency, build-tag and evidence ceilings.
+- `config/awg2-capability.json`, `config/awg31-capability.json`, and
+  `config/hy2-capability.json` — pinned AWG/Hysteria2 lab schemas, official
+  dependencies, build tags and evidence ceilings.
 - `third_party/warp-plus/` — pinned WARP helper.
 - `scripts/` — deterministic builds and focused checks.
 - `docs/` — architecture and release policy.

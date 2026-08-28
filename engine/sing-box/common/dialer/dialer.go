@@ -17,14 +17,15 @@ import (
 )
 
 type Options struct {
-	Context          context.Context
-	Options          option.DialerOptions
-	RemoteIsDomain   bool
-	DirectResolver   bool
-	ResolverOnDetour bool
-	NewDialer        bool
-	LegacyDNSDialer  bool
-	DirectOutbound   bool
+	Context               context.Context
+	Options               option.DialerOptions
+	RemoteIsDomain        bool
+	DirectResolver        bool
+	ResolverOnDetour      bool
+	NewDialer             bool
+	LegacyDNSDialer       bool
+	DirectOutbound        bool
+	ProtectPlatformSocket bool
 }
 
 // TODO: merge with NewWithOptions
@@ -49,7 +50,7 @@ func NewWithOptions(options Options) (N.Dialer, error) {
 		}
 		dialer = NewDetour(outboundManager, dialOptions.Detour, options.LegacyDNSDialer)
 	} else {
-		dialer, err = NewDefault(options.Context, dialOptions)
+		dialer, err = newDefault(options.Context, dialOptions, options.ProtectPlatformSocket)
 		if err != nil {
 			return nil, err
 		}

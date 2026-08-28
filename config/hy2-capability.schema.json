@@ -1,0 +1,124 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pokrov.space/contracts/core/hy2-capability.schema.json",
+  "title": "POKROV Core Hysteria2 managed lab capability",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "contract_id",
+    "status",
+    "public_runtime_advertised",
+    "owner",
+    "engine",
+    "dependency",
+    "supported_platforms",
+    "typed_outbound",
+    "fixture_policy",
+    "telemetry",
+    "evidence_ceiling"
+  ],
+  "properties": {
+    "$schema": { "type": "string" },
+    "schema_version": { "const": 1 },
+    "contract_id": { "const": "pokrov.hy2.outbound.v1" },
+    "status": { "const": "lab_disabled_by_default" },
+    "public_runtime_advertised": { "const": false },
+    "owner": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "component", "single_tun_owner"],
+      "properties": {
+        "repository": { "const": "Kiwunaka/POKROV-core" },
+        "component": { "const": "v2 managed runtime" },
+        "single_tun_owner": { "const": "host_application" }
+      }
+    },
+    "engine": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "implementation", "build_tag", "android_release_build", "windows_release_build"],
+      "properties": {
+        "type": { "const": "hysteria2" },
+        "implementation": { "const": "embedded sing-box" },
+        "build_tag": { "const": "with_quic" },
+        "android_release_build": { "const": true },
+        "windows_release_build": { "const": true }
+      }
+    },
+    "dependency": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["module", "version", "license", "notice"],
+      "properties": {
+        "module": { "const": "github.com/sagernet/sing-box" },
+        "version": { "const": "v1.13.0" },
+        "license": { "const": "GPL-3.0-or-later" },
+        "notice": { "const": "engine/sing-box/LICENSE" }
+      }
+    },
+    "supported_platforms": {
+      "type": "array",
+      "prefixItems": [{ "const": "android" }, { "const": "windows" }],
+      "items": false
+    },
+    "typed_outbound": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "managed_profile_required",
+        "raw_uri_conversion_allowed",
+        "single_server_port_required",
+        "port_hopping_allowed",
+        "tls_required",
+        "tls_insecure_allowed",
+        "tls_server_name_required",
+        "allowed_obfs_types",
+        "minimum_password_bytes",
+        "maximum_password_bytes",
+        "minimum_bandwidth_mbps",
+        "maximum_bandwidth_mbps"
+      ],
+      "properties": {
+        "type": { "const": "hysteria2" },
+        "managed_profile_required": { "const": true },
+        "raw_uri_conversion_allowed": { "const": false },
+        "single_server_port_required": { "const": true },
+        "port_hopping_allowed": { "const": false },
+        "tls_required": { "const": true },
+        "tls_insecure_allowed": { "const": false },
+        "tls_server_name_required": { "const": true },
+        "allowed_obfs_types": {
+          "type": "array",
+          "prefixItems": [{ "const": "none" }, { "const": "salamander" }],
+          "items": false
+        },
+        "minimum_password_bytes": { "const": 16 },
+        "maximum_password_bytes": { "const": 128 },
+        "minimum_bandwidth_mbps": { "const": 1 },
+        "maximum_bandwidth_mbps": { "const": 1000 }
+      }
+    },
+    "fixture_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["synthetic_only", "documentation_dns_suffix", "real_credentials_endpoints_or_provider_payloads"],
+      "properties": {
+        "synthetic_only": { "const": true },
+        "documentation_dns_suffix": { "const": ".invalid" },
+        "real_credentials_endpoints_or_provider_payloads": { "const": false }
+      }
+    },
+    "telemetry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["allowed_dimensions", "forbidden_dimensions"],
+      "properties": {
+        "allowed_dimensions": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string" } },
+        "forbidden_dimensions": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string" } }
+      }
+    },
+    "evidence_ceiling": { "const": "source_and_local_fixture_only_until_owned_server_exact_artifact_and_device_matrix" }
+  }
+}

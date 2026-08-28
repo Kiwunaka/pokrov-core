@@ -13,7 +13,11 @@ The application supplies a materialized sing-box JSON profile for normal operati
 The AWG2 and AWG 3.1 experiments remain inside the same embedded sing-box
 graph. Their machine owners are `config/awg2-capability.json` and
 `config/awg31-capability.json`, with distinct `pokrov.awg2.endpoint.v1` and
-`pokrov.awg31.endpoint.v1` contract IDs. The engine uses the official pinned
+`pokrov.awg31.endpoint.v1` contract IDs. The separate default-off Hysteria2
+lab is pinned by `config/hy2-capability.json` as
+`pokrov.hy2.outbound.v1`; raw `hysteria2://` and `hy2://` conversion remains
+disabled so only a provenance-bound managed profile can reach the embedded
+official sing-box outbound. The engine uses the official pinned
 `amneziawg-go/v3` module for both modes; POKROV adds only typed configuration,
 validation and host integration, not custom cryptography. AWG 3.1 requires an
 explicit contract ID and remains wire-incompatible with AWG2.
@@ -26,7 +30,9 @@ service remains the single system TUN and route owner. The endpoint validator
 runs before device creation and rejects unsupported MTU, keys, peers,
 header/junk fields, instruction chains, timing/padding bounds and integrated
 TUN ownership. AWG2 rejects every AWG 3.1-only field instead of silently
-upgrading a profile.
+upgrading a profile. On Android, the AWG endpoint requests platform protection
+only for its outer socket, so `VpnService.protect(fd)` can bypass recapture
+without enabling global interface auto-detection for ordinary transports.
 
 `ray2sing` is not an AWG authority. Raw `awg://` and WireGuard-style
 `[Interface]` AWG inputs fail closed instead of being rewritten as ordinary

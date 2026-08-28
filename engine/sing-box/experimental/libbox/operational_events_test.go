@@ -51,6 +51,25 @@ func TestOperationalEmitterUsesClosedSafeFields(t *testing.T) {
 	}
 }
 
+func TestOperationalEmitterPreservesCanonicalEgressSubsystem(t *testing.T) {
+	emitter := newOperationalEventEmitter()
+	defer emitter.close()
+	handler := &recordingOperationalHandler{ready: make(chan struct{}, 1)}
+	emitter.setHandler(handler)
+	if err := emitter.configure(operationalTestRunID, operationalTestAttemptID, 1); err != nil {
+		t.Fatal(err)
+	}
+	if !emitter.emit("core.egress.probe", "verify", "egress", "succeeded", "") {
+		t.Fatal("expected egress event to be accepted")
+	}
+	waitForOperationalEvents(t, handler.ready, 1)
+	handler.lock.Lock()
+	defer handler.lock.Unlock()
+	if subsystem := handler.events[0].Subsystem; subsystem != "egress" {
+		t.Fatalf("expected egress subsystem, got %q", subsystem)
+	}
+}
+
 func TestOperationalEmitterRejectsUnknownAndStaleInput(t *testing.T) {
 	emitter := newOperationalEventEmitter()
 	defer emitter.close()
