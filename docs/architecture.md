@@ -39,7 +39,10 @@ can contain endpoint or peer material. It emits only fixed
 retry and transport-error categories, with at most four occurrences per code
 and device lifetime. Unclassified verbose lines are dropped and unknown errors
 collapse to `upstream_error`; these diagnostics locate an interoperability
-failure without becoming traffic or identity evidence.
+failure without becoming traffic or identity evidence. When release debug
+forwarding is disabled, the daemon recognizes only that closed code set and
+occurrence `1..4`, reconstructs the canonical payload and drops every other
+line before the Android callback.
 
 `ray2sing` is not an AWG authority. Raw `awg://` and WireGuard-style
 `[Interface]` AWG inputs fail closed instead of being rewritten as ordinary

@@ -1222,6 +1222,46 @@ func (s *StartedService) WriteMessage(level log.Level, message string) {
 	s.logSubscriber.Emit(item)
 	if s.debug {
 		s.handler.WriteDebugMessage(message)
+		return
+	}
+	if level == log.LevelWarn {
+		if safeDiagnostic, ok := canonicalAWGSafeDiagnostic(message); ok {
+			s.handler.WriteDebugMessage(safeDiagnostic)
+		}
+	}
+}
+
+func canonicalAWGSafeDiagnostic(message string) (string, bool) {
+	const marker = "awg_safe_diag code="
+	markerIndex := strings.LastIndex(message, marker)
+	if markerIndex < 0 {
+		return "", false
+	}
+	payload := message[markerIndex+len(marker):]
+	code, occurrence, found := strings.Cut(payload, " occurrence=")
+	if !found || !validAWGSafeDiagnosticCode(code) ||
+		(occurrence != "1" && occurrence != "2" && occurrence != "3" && occurrence != "4") {
+		return "", false
+	}
+	return marker + code + " occurrence=" + occurrence, true
+}
+
+func validAWGSafeDiagnosticCode(code string) bool {
+	switch code {
+	case "receive_unknown_type",
+		"receive_invalid_mac1",
+		"receive_invalid_response",
+		"receive_decode_response",
+		"receive_handshake_response",
+		"send_handshake_initiation",
+		"handshake_give_up",
+		"handshake_retry",
+		"receive_error",
+		"send_handshake_error",
+		"upstream_error":
+		return true
+	default:
+		return false
 	}
 }
 
