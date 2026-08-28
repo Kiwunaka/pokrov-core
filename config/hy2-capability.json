@@ -1,0 +1,74 @@
+{
+  "$schema": "./hy2-capability.schema.json",
+  "schema_version": 1,
+  "contract_id": "pokrov.hy2.outbound.v1",
+  "status": "lab_disabled_by_default",
+  "public_runtime_advertised": false,
+  "owner": {
+    "repository": "Kiwunaka/POKROV-core",
+    "component": "v2 managed runtime",
+    "single_tun_owner": "host_application"
+  },
+  "engine": {
+    "type": "hysteria2",
+    "implementation": "embedded sing-box",
+    "build_tag": "with_quic",
+    "android_release_build": true,
+    "windows_release_build": true
+  },
+  "dependency": {
+    "module": "github.com/sagernet/sing-box",
+    "version": "v1.13.0",
+    "license": "GPL-3.0-or-later",
+    "notice": "engine/sing-box/LICENSE"
+  },
+  "supported_platforms": [
+    "android",
+    "windows"
+  ],
+  "typed_outbound": {
+    "type": "hysteria2",
+    "managed_profile_required": true,
+    "raw_uri_conversion_allowed": false,
+    "single_server_port_required": true,
+    "port_hopping_allowed": false,
+    "tls_required": true,
+    "tls_insecure_allowed": false,
+    "tls_server_name_required": true,
+    "allowed_obfs_types": [
+      "none",
+      "salamander"
+    ],
+    "minimum_password_bytes": 16,
+    "maximum_password_bytes": 128,
+    "minimum_bandwidth_mbps": 1,
+    "maximum_bandwidth_mbps": 1000
+  },
+  "fixture_policy": {
+    "synthetic_only": true,
+    "documentation_dns_suffix": ".invalid",
+    "real_credentials_endpoints_or_provider_payloads": false
+  },
+  "telemetry": {
+    "allowed_dimensions": [
+      "transport_family",
+      "config_generation",
+      "endpoint_category",
+      "asn_category",
+      "app_version",
+      "core_version",
+      "network_type",
+      "tls_result",
+      "quic_result"
+    ],
+    "forbidden_dimensions": [
+      "password",
+      "obfs_password",
+      "raw_endpoint",
+      "raw_config",
+      "account_identifier",
+      "device_identifier"
+    ]
+  },
+  "evidence_ceiling": "source_and_local_fixture_only_until_owned_server_exact_artifact_and_device_matrix"
+}

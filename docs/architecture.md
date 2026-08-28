@@ -13,7 +13,11 @@ The application supplies a materialized sing-box JSON profile for normal operati
 The AWG2 and AWG 3.1 experiments remain inside the same embedded sing-box
 graph. Their machine owners are `config/awg2-capability.json` and
 `config/awg31-capability.json`, with distinct `pokrov.awg2.endpoint.v1` and
-`pokrov.awg31.endpoint.v1` contract IDs. The engine uses the official pinned
+`pokrov.awg31.endpoint.v1` contract IDs. The separate default-off Hysteria2
+lab is pinned by `config/hy2-capability.json` as
+`pokrov.hy2.outbound.v1`; raw `hysteria2://` and `hy2://` conversion remains
+disabled so only a provenance-bound managed profile can reach the embedded
+official sing-box outbound. The engine uses the official pinned
 `amneziawg-go/v3` module for both modes; POKROV adds only typed configuration,
 validation and host integration, not custom cryptography. AWG 3.1 requires an
 explicit contract ID and remains wire-incompatible with AWG2.

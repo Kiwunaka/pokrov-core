@@ -12,6 +12,7 @@ $abiContract = Get-Content -Raw -LiteralPath (Join-Path $root "config\abi-contra
 & (Join-Path $PSScriptRoot "verify-abi-contract.ps1")
 & (Join-Path $PSScriptRoot "verify-awg2-contract.ps1")
 & (Join-Path $PSScriptRoot "verify-awg31-contract.ps1")
+& (Join-Path $PSScriptRoot "verify-hy2-contract.ps1")
 if (-not $OutputDirectory) {
   $OutputDirectory = Join-Path $root "dist\windows"
 }
