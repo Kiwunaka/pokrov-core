@@ -188,6 +188,16 @@ func (c *ownedLabObservedPacketConnection) WriteTo(
 }
 
 func resolveOwnedProbeIPv4(ctx context.Context) (netip.Addr, error) {
+	if configured := os.Getenv("POKROV_OWNED_AWG_PROBE_IPV4"); configured != "" {
+		address, err := netip.ParseAddr(configured)
+		if err != nil || !address.Is4() {
+			return netip.Addr{}, &net.DNSError{
+				Err:  "configured IPv4 address is invalid",
+				Name: "POKROV_OWNED_AWG_PROBE_IPV4",
+			}
+		}
+		return address, nil
+	}
 	addresses, err := net.DefaultResolver.LookupNetIP(ctx, "ip4", "api.pokrov.space")
 	if err != nil {
 		return netip.Addr{}, err
