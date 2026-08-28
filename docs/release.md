@@ -56,6 +56,12 @@ file trees before writing bounded provenance:
   suppresses random Mach-O UUID/archive timestamps and logs bounded plist/UUID
   diagnostics before the byte comparison.
 
+Every Core checkout in the workflow is pinned to one explicit source authority:
+the pull-request head SHA for PR runs or `github.sha` for pushes. Artifact
+evidence rejects a checkout whose resolved `HEAD` differs from that authority,
+so a temporary GitHub pull-request merge commit cannot be mislabeled as the
+release source commit.
+
 `scripts/new-release-artifact-evidence.ps1` records source, release-contract,
 SBOM and artifact hashes and rejects dirty source or mismatched build trees.
 The jobs upload only SBOM/evidence JSON with `PRE_CANDIDATE_LOCAL` and

@@ -25,12 +25,24 @@ $required = @(
   "POKROV_MINGW_GCC",
   "C:\ProgramData\mingw64",
   "actions/upload-artifact@v4",
+  "POKROV_SOURCE_COMMIT",
+  "ExpectedSourceCommit",
   "RequireCleanSource"
 )
 foreach ($needle in $required) {
   if (-not $workflow.Contains($needle)) {
     throw "Core CI is missing required release contract token: $needle"
   }
+}
+$sourceCheckoutToken = 'ref: ${{ env.POKROV_SOURCE_COMMIT }}'
+$sourceCheckoutCount = ([regex]::Matches($workflow, [regex]::Escape($sourceCheckoutToken))).Count
+if ($sourceCheckoutCount -ne 5) {
+  throw "Every Core checkout must use the exact source authority; expected 5 explicit refs, found $sourceCheckoutCount."
+}
+$expectedCommitBinding = '-ExpectedSourceCommit "$env:POKROV_SOURCE_COMMIT"'
+$expectedCommitBindingCount = ([regex]::Matches($workflow, [regex]::Escape($expectedCommitBinding))).Count
+if ($expectedCommitBindingCount -ne 3) {
+  throw "Every artifact evidence lane must verify the exact source authority; expected 3 bindings, found $expectedCommitBindingCount."
 }
 foreach ($build in @(
   @{ Token = "build-android.ps1"; Count = 2 },
@@ -80,6 +92,29 @@ if (-not $appleDiagnostic.Contains("diff -u") -or -not $appleDiagnostic.Contains
 }
 if (-not (Test-Path -LiteralPath (Join-Path $root "v2\config\parser_fuzz_test.go") -PathType Leaf)) {
   throw "The config/profile parser fuzz target is missing."
+}
+
+$evidenceScript = Join-Path $root "scripts\new-release-artifact-evidence.ps1"
+$fixtureRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("pokrov-core-evidence-contract-" + [guid]::NewGuid().ToString("N"))
+$firstBuild = Join-Path $fixtureRoot "first"
+$secondBuild = Join-Path $fixtureRoot "second"
+$fixtureOutput = Join-Path $fixtureRoot "evidence.json"
+try {
+  New-Item -ItemType Directory -Force -Path $firstBuild,$secondBuild | Out-Null
+  [System.IO.File]::WriteAllText((Join-Path $firstBuild "artifact.bin"), "same", [System.Text.UTF8Encoding]::new($false))
+  [System.IO.File]::WriteAllText((Join-Path $secondBuild "artifact.bin"), "same", [System.Text.UTF8Encoding]::new($false))
+  try {
+    & $evidenceScript -Lane android -FirstBuildRoot $firstBuild -SecondBuildRoot $secondBuild -Output $fixtureOutput -ExpectedSourceCommit ("0" * 40)
+    throw "Artifact evidence accepted a checkout that did not match the expected source commit."
+  } catch {
+    if ($_.Exception.Message -notmatch '^Expected source commit [0-9a-f]{40}, but the checkout is [0-9a-f]{40}\.$') {
+      throw
+    }
+  }
+} finally {
+  if (Test-Path -LiteralPath $fixtureRoot) {
+    Remove-Item -LiteralPath $fixtureRoot -Recurse -Force
+  }
 }
 
 Write-Host "Core release CI contract OK: Linux tests/security, Android/Windows/Apple builds, two-build comparison, SBOM, bounded provenance, app backtest." -ForegroundColor Green

@@ -10,6 +10,7 @@ param(
   [Parameter(Mandatory)]
   [string]$Output,
   [string]$RepositoryRoot,
+  [string]$ExpectedSourceCommit,
   [string[]]$Sbom = @(),
   [switch]$RequireCleanSource
 )
@@ -83,6 +84,15 @@ $git = Get-Command git -ErrorAction Stop
 $sourceCommit = (& $git.Source -C $RepositoryRoot rev-parse HEAD).Trim()
 if ($LASTEXITCODE -ne 0 -or $sourceCommit -notmatch '^[0-9a-f]{40}$') {
   throw "Could not resolve the exact source revision."
+}
+if ($ExpectedSourceCommit) {
+  $ExpectedSourceCommit = $ExpectedSourceCommit.ToLowerInvariant()
+  if ($ExpectedSourceCommit -notmatch '^[0-9a-f]{40}$') {
+    throw "Expected source commit must be a full 40-character Git SHA."
+  }
+  if ($sourceCommit -cne $ExpectedSourceCommit) {
+    throw "Expected source commit $ExpectedSourceCommit, but the checkout is $sourceCommit."
+  }
 }
 $dirty = @(& $git.Source -C $RepositoryRoot status --porcelain=v1 --untracked-files=all)
 if ($LASTEXITCODE -ne 0) {
