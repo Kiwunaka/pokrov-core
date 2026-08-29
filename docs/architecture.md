@@ -32,7 +32,13 @@ header/junk fields, instruction chains, timing/padding bounds and integrated
 TUN ownership. AWG2 rejects every AWG 3.1-only field instead of silently
 upgrading a profile. On Android, the AWG endpoint requests platform protection
 only for its outer socket, so `VpnService.protect(fd)` can bypass recapture
-without enabling global interface auto-detection for ordinary transports.
+without enabling global interface auto-detection for ordinary transports. For
+an inner FQDN, the endpoint also honors the profile's
+`route.default_domain_resolver` and its strategy instead of silently falling
+back to the DNS graph's final transport. This keeps Android endpoint probes and
+ordinary dialers on the same explicit bootstrap-resolution contract without
+changing TLS verification or replacing the authenticated egress hostname with
+a pinned provider address.
 The embedded AWG device logger never formats upstream arguments because they
 can contain endpoint or peer material. It emits only fixed
 `awg_safe_diag` classifier codes for bounded handshake send/accept/reject,

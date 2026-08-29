@@ -32,12 +32,13 @@ func RegisterEndpoint(registry *endpoint.Registry) {
 type Endpoint struct {
 	*awg.Device
 	endpoint.Adapter
-	address   []netip.Prefix
-	router    adapter.Router
-	logger    log.ContextLogger
-	dnsRouter adapter.DNSRouter
-	started   bool
-	ctx       context.Context
+	address         []netip.Prefix
+	router          adapter.Router
+	logger          log.ContextLogger
+	dnsRouter       adapter.DNSRouter
+	dnsQueryOptions adapter.DNSQueryOptions
+	started         bool
+	ctx             context.Context
 }
 
 func NewEndpoint(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, options option.AwgEndpointOptions) (adapter.Endpoint, error) {
@@ -83,6 +84,10 @@ func NewEndpoint(ctx context.Context, router adapter.Router, logger log.ContextL
 	if err != nil {
 		return nil, err
 	}
+	dnsQueryOptions, err := defaultDomainDNSQueryOptions(ctx)
+	if err != nil {
+		return nil, err
+	}
 
 	dev, err := awg.NewDevice(ctx, logger, dial, ipc, awg.DeviceOpts{
 		UseIntegratedTun: options.UseIntegratedTun,
@@ -96,14 +101,37 @@ func NewEndpoint(ctx context.Context, router adapter.Router, logger log.ContextL
 	}
 
 	return &Endpoint{
-		Device:    dev,
-		Adapter:   endpoint.NewAdapterWithDialerOptions("awg", tag, []string{N.NetworkTCP, N.NetworkUDP}, options.DialerOptions),
-		address:   options.Address,
-		router:    router,
-		logger:    logger,
-		dnsRouter: service.FromContext[adapter.DNSRouter](ctx),
-		ctx:       ctx,
+		Device:          dev,
+		Adapter:         endpoint.NewAdapterWithDialerOptions("awg", tag, []string{N.NetworkTCP, N.NetworkUDP}, options.DialerOptions),
+		address:         options.Address,
+		router:          router,
+		logger:          logger,
+		dnsRouter:       service.FromContext[adapter.DNSRouter](ctx),
+		dnsQueryOptions: dnsQueryOptions,
+		ctx:             ctx,
 	}, nil
+}
+
+func defaultDomainDNSQueryOptions(ctx context.Context) (adapter.DNSQueryOptions, error) {
+	networkManager := service.FromContext[adapter.NetworkManager](ctx)
+	if networkManager == nil {
+		return adapter.DNSQueryOptions{}, nil
+	}
+	defaultOptions := networkManager.DefaultOptions()
+	queryOptions := defaultOptions.DomainResolveOptions
+	if defaultOptions.DomainResolver == "" {
+		return queryOptions, nil
+	}
+	transportManager := service.FromContext[adapter.DNSTransportManager](ctx)
+	if transportManager == nil {
+		return adapter.DNSQueryOptions{}, E.New("missing DNS transport manager")
+	}
+	transport, loaded := transportManager.Transport(defaultOptions.DomainResolver)
+	if !loaded {
+		return adapter.DNSQueryOptions{}, E.New("domain resolver not found: ", defaultOptions.DomainResolver)
+	}
+	queryOptions.Transport = transport
+	return queryOptions, nil
 }
 
 func genIpcConfig(opts option.AwgEndpointOptions) (string, error) {
@@ -272,7 +300,7 @@ func (w *Endpoint) DialContext(ctx context.Context, network string, destination 
 		w.logger.InfoContext(ctx, "outbound packet connection to ", destination)
 	}
 	if destination.IsFqdn() {
-		destinationAddresses, err := w.dnsRouter.Lookup(ctx, destination.Fqdn, adapter.DNSQueryOptions{})
+		destinationAddresses, err := w.dnsRouter.Lookup(ctx, destination.Fqdn, w.dnsQueryOptions)
 		if err != nil {
 			return nil, err
 		}
@@ -286,7 +314,7 @@ func (w *Endpoint) DialContext(ctx context.Context, network string, destination 
 func (w *Endpoint) ListenPacket(ctx context.Context, destination M.Socksaddr) (net.PacketConn, error) {
 	w.logger.InfoContext(ctx, "outbound packet connection to ", destination)
 	if destination.IsFqdn() {
-		destinationAddresses, err := w.dnsRouter.Lookup(ctx, destination.Fqdn, adapter.DNSQueryOptions{})
+		destinationAddresses, err := w.dnsRouter.Lookup(ctx, destination.Fqdn, w.dnsQueryOptions)
 		if err != nil {
 			return nil, err
 		}
