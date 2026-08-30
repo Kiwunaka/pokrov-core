@@ -92,6 +92,12 @@ well as stale run, attempt, generation, or sequence values. Arbitrary upstream
 debug lines are not release evidence and must not be promoted into the
 operational event stream.
 
+The legacy logger follows the same boundary: release setup records only whether
+stored settings were available and never formats the settings value or its
+database table. The desktop FFI returns a local caller-owned error string for
+ABI compatibility, but it does not mirror that raw error into the process log;
+the release host maps it to a fixed public failure category.
+
 On Windows, the current source materializes the auto-route TUN inbound with the
 exact interface name `POKROV`. The privileged client service uses that stable
 ownership identifier to snapshot and restore only Core-owned addresses,

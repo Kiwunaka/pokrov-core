@@ -123,14 +123,15 @@ func Setup(params *SetupRequest, platformInterface libbox.PlatformInterface) (er
 	}
 	settings := db.GetTable[hcommon.AppSettings]()
 	val, err := settings.Get("PokrovSettingsJson")
-	Log(LogLevel_DEBUG, LogType_CORE, "PokrovSettingsJson", val, err)
 	if val == nil || err != nil {
+		Log(LogLevel_DEBUG, LogType_CORE, "stored POKROV settings unavailable")
 		// if params.Mode == SetupMode_GRPC_BACKGROUND_INSECURE {
 		_, err := ChangePokrovSettings(&ChangePokrovSettingsRequest{PokrovSettingsJson: ""}, false)
 		if err != nil {
 			Log(LogLevel_ERROR, LogType_CORE, E.Cause(err, "ChangePokrovSettings").Error())
 		}
 	} else {
+		Log(LogLevel_DEBUG, LogType_CORE, "stored POKROV settings loaded")
 		// settings := db.GetTable[hcommon.AppSettings]()
 		_, err := ChangePokrovSettings(&ChangePokrovSettingsRequest{PokrovSettingsJson: val.Value.(string)}, false)
 		if err != nil {
@@ -208,7 +209,6 @@ func StartGrpcServerByMode(listenAddressG string, mode SetupMode) (*grpc.Server,
 		grpcServer[mode] = grpc.NewServer()
 	} else {
 		table := db.GetTable[hcommon.AppSettings]()
-		Log(LogLevel_DEBUG, LogType_CORE, table)
 		grpcServerPrivateKey, err := table.Get("grpc_server_private_key")
 		grpcServerPublicKey, err2 := table.Get("grpc_server_public_key")
 		if err != nil || err2 != nil {

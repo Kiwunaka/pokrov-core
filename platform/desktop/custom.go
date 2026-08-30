@@ -69,7 +69,6 @@ import (
 	hcore "github.com/Kiwunaka/POKROV-core/v2/hcore"
 	"github.com/Kiwunaka/POKROV-core/v2/hutils"
 	"github.com/sagernet/sing-box/experimental/libbox"
-	"github.com/sagernet/sing-box/log"
 )
 
 // func init() {
@@ -120,7 +119,6 @@ func emptyOrErrorC(err error) *C.char {
 	if err == nil {
 		return C.CString("")
 	}
-	log.Error(err.Error())
 	return C.CString(err.Error())
 }
 
