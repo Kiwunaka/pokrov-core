@@ -94,4 +94,22 @@ if (-not [string]::IsNullOrWhiteSpace($PlatformRoot)) {
   }
 }
 
+$legacyLogSources = @{
+  (Join-Path $root "v2\hcore\grpc_server.go") = @(
+    'Log(LogLevel_DEBUG, LogType_CORE, "PokrovSettingsJson", val, err)',
+    'Log(LogLevel_DEBUG, LogType_CORE, table)'
+  )
+  (Join-Path $root "platform\desktop\custom.go") = @(
+    'log.Error(err.Error())'
+  )
+}
+foreach ($entry in $legacyLogSources.GetEnumerator()) {
+  $source = [IO.File]::ReadAllText($entry.Key)
+  foreach ($forbidden in $entry.Value) {
+    if ($source.Contains($forbidden)) {
+      throw "Legacy Core logging must not emit stored settings, database tables, or raw FFI errors."
+    }
+  }
+}
+
 Write-Host "POKROV Core observability contracts OK: schema=1 contracts=2" -ForegroundColor Green
