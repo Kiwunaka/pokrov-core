@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/sagernet/sing-box/adapter"
+	"github.com/sagernet/sing-box/common/urltest"
 	"github.com/sagernet/sing-box/log"
 )
 
@@ -40,6 +41,9 @@ func TestURLTestErrorCategory(t *testing.T) {
 		{name: "http", err: errors.New("returned status 403"), expected: "http_rejected"},
 		{name: "timeout", err: errors.New("read: i/o timeout"), expected: "io_timeout"},
 		{name: "other", err: errors.New("broken transport"), expected: "transport_failure"},
+		{name: "observed TLS timeout", err: &urltest.ProbeError{Stage: urltest.ProbeStageTLS, Err: context.DeadlineExceeded}, expected: "tls_timeout"},
+		{name: "observed response timeout", err: &urltest.ProbeError{Stage: urltest.ProbeStageResponse, Err: context.DeadlineExceeded}, expected: "response_timeout"},
+		{name: "wrapped certificate", err: &urltest.ProbeError{Stage: urltest.ProbeStageTLS, Err: errors.New("x509: synthetic certificate failure")}, expected: "tls_certificate"},
 	}
 
 	for _, test := range tests {
@@ -48,6 +52,15 @@ func TestURLTestErrorCategory(t *testing.T) {
 				t.Fatalf("unexpected category: got %q, want %q", actual, test.expected)
 			}
 		})
+	}
+}
+
+func TestProbeEventUsesOnlyTypedCauseEvidence(t *testing.T) {
+	if observedProbeErrorCode(&urltest.ProbeError{Stage: urltest.ProbeStageTLS, Err: context.DeadlineExceeded}) != "TRANSPORT-006" {
+		t.Fatal("observed TLS timeout was not retained in the probe event")
+	}
+	if observedProbeErrorCode(errors.New("lookup dns.example.test: synthetic failure")) != "EGRESS-001" {
+		t.Fatal("legacy diagnostic text was promoted to a causal event")
 	}
 }
 

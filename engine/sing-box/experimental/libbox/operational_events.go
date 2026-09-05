@@ -9,6 +9,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/sagernet/sing-box/common/urltest"
 )
 
 const (
@@ -181,12 +183,24 @@ func validOperationalEvent(name string, stage string, phase string, outcome stri
 		errorCode == "CORE-006" || errorCode == "CORE-008" ||
 		errorCode == "EGRESS-001" || errorCode == "TRANSPORT-001" ||
 		errorCode == "TRANSPORT-002" || errorCode == "TRANSPORT-003" ||
-		errorCode == "TRANSPORT-004"
+		errorCode == "TRANSPORT-004" || errorCode == "TRANSPORT-005" ||
+		errorCode == "TRANSPORT-006" || errorCode == "TRANSPORT-007" ||
+		errorCode == "DNS-002"
 }
 
 func classifyOperationalStartError(err error) string {
 	if err == nil {
 		return ""
+	}
+	switch urltest.ObservedFailure(err) {
+	case "dns_lookup":
+		return "DNS-002"
+	case "udp_timeout":
+		return "TRANSPORT-005"
+	case "tls_timeout":
+		return "TRANSPORT-006"
+	case "response_timeout":
+		return "TRANSPORT-007"
 	}
 	if errors.Is(err, context.DeadlineExceeded) {
 		return "TRANSPORT-001"
@@ -197,6 +211,10 @@ func classifyOperationalStartError(err error) string {
 	}
 	if errors.Is(err, syscall.ECONNREFUSED) {
 		return "TRANSPORT-002"
+	}
+	var probeError *urltest.ProbeError
+	if errors.As(err, &probeError) {
+		err = probeError.Err
 	}
 	message := strings.ToLower(err.Error())
 	for _, marker := range []string{

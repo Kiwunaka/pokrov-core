@@ -654,7 +654,7 @@ func (s *StartedService) URLTest(ctx context.Context, request *URLTestRequest) (
 						log.LevelError,
 						"selected outbound URL test failed category="+category,
 					)
-					s.writeOperationalEvent("failed", "EGRESS-001")
+					s.writeOperationalEvent("failed", observedProbeErrorCode(err))
 				}
 				historyStorage.DeleteURLTestHistory(outboundTag)
 			} else {
@@ -713,7 +713,7 @@ func (s *StartedService) testSelectedEndpoint(boxService *Instance, endpoint ada
 	ready, failureCategory := waitForSelectedEndpoint(initializationContext, endpoint)
 	if !ready {
 		cancelInitialization()
-		s.writeSelectedEndpointProbeFailure(failureCategory)
+		s.writeSelectedEndpointProbeFailure(failureCategory, nil)
 		return false
 	}
 	cancelInitialization()
@@ -739,7 +739,7 @@ func (s *StartedService) testSelectedEndpoint(boxService *Instance, endpoint ada
 		result.err = context.Cause(probeContext)
 	}
 	if result.err != nil {
-		s.writeSelectedEndpointProbeFailure(urlTestErrorCategory(result.err))
+		s.writeSelectedEndpointProbeFailure(urlTestErrorCategory(result.err), result.err)
 		return false
 	}
 	s.WriteMessage(log.LevelInfo, "selected endpoint URL test succeeded")
@@ -774,12 +774,27 @@ func waitForSelectedEndpoint(ctx context.Context, endpoint adapter.Endpoint) (bo
 	}
 }
 
-func (s *StartedService) writeSelectedEndpointProbeFailure(category string) {
+func (s *StartedService) writeSelectedEndpointProbeFailure(category string, err error) {
 	s.WriteMessage(
 		log.LevelError,
 		"selected endpoint URL test failed category="+category,
 	)
-	s.writeOperationalEvent("failed", "EGRESS-001")
+	s.writeOperationalEvent("failed", observedProbeErrorCode(err))
+}
+
+func observedProbeErrorCode(err error) string {
+	switch urltest.ObservedFailure(err) {
+	case "dns_lookup":
+		return "DNS-002"
+	case "udp_timeout":
+		return "TRANSPORT-005"
+	case "tls_timeout":
+		return "TRANSPORT-006"
+	case "response_timeout":
+		return "TRANSPORT-007"
+	default:
+		return "EGRESS-001"
+	}
 }
 
 func (s *StartedService) writeOperationalEvent(outcome string, errorCode string) {
@@ -804,11 +819,18 @@ func urlTestErrorCategory(err error) string {
 	if err == nil {
 		return "none"
 	}
+	if observed := urltest.ObservedFailure(err); observed != "" {
+		return observed
+	}
 	if errors.Is(err, context.DeadlineExceeded) {
 		return "deadline_exceeded"
 	}
 	if errors.Is(err, context.Canceled) {
 		return "context_canceled"
+	}
+	var probeError *urltest.ProbeError
+	if errors.As(err, &probeError) {
+		err = probeError.Err
 	}
 	message := strings.ToLower(err.Error())
 	for _, category := range []struct {

@@ -10,6 +10,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/sagernet/sing-box/common/urltest"
 )
 
 const (
@@ -113,7 +115,10 @@ func TestOperationalClassifierKeepsTransportClassesDistinct(t *testing.T) {
 		code string
 	}{
 		{name: "deadline", err: context.DeadlineExceeded, code: "TRANSPORT-001"},
-		{name: "typed timeout", err: &net.DNSError{Err: "temporary transport stall", IsTimeout: true}, code: "TRANSPORT-001"},
+		{name: "typed DNS timeout", err: &net.DNSError{Err: "temporary transport stall", IsTimeout: true}, code: "DNS-002"},
+		{name: "typed UDP timeout", err: &net.OpError{Net: "udp", Err: context.DeadlineExceeded}, code: "TRANSPORT-005"},
+		{name: "observed TLS timeout", err: &urltest.ProbeError{Stage: urltest.ProbeStageTLS, Err: context.DeadlineExceeded}, code: "TRANSPORT-006"},
+		{name: "observed response timeout", err: &urltest.ProbeError{Stage: urltest.ProbeStageResponse, Err: context.DeadlineExceeded}, code: "TRANSPORT-007"},
 		{name: "refused", err: fmt.Errorf("dial failed: %w", syscall.ECONNREFUSED), code: "TRANSPORT-002"},
 		{name: "authentication", err: errors.New("proxy authentication failed"), code: "TRANSPORT-003"},
 		{name: "protocol", err: errors.New("TLS protocol version mismatch"), code: "TRANSPORT-004"},

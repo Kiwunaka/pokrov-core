@@ -6,6 +6,15 @@ POKROV Core is one client runtime with three layers:
 2. `v2/` owns setup, configuration, lifecycle, WARP, DNS, and safe shutdown behavior.
 3. `engine/sing-box/` owns transports, routing, TLS, TUN, and protocol implementations.
 
+URL probes retain a typed connect/TLS/response stage. Cancellation after dial
+returns an error, and the optional second request retains the original context.
+The safe error wrapper exposes no target or raw cause through its message while
+preserving `errors.Is`/`errors.As`. Typed DNS errors take precedence over generic
+timeouts; typed UDP timeouts and observed TLS/response timeouts map to separate
+canonical operational codes. An unqualified deadline cannot establish UDP
+blocking, DPI, MTU or other filtering causes. Android and desktop event consumers
+must accept the matching additive error-code contract before new artifacts ship.
+
 `ray2sing/` converts supported access links into sing-box options. `third_party/warp-plus/` supplies the pinned WARP registration and helper behavior.
 
 The application supplies a materialized sing-box JSON profile for normal operation. Legacy builder APIs remain internal and are not the public POKROV app contract.

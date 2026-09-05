@@ -3,11 +3,14 @@ package urltest
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
+	"net/http/httptrace"
 	"net/url"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/sagernet/sing-box/adapter"
@@ -19,6 +22,68 @@ import (
 )
 
 var _ adapter.URLTestHistoryStorage = (*HistoryStorage)(nil)
+
+type ProbeStage uint32
+
+const (
+	ProbeStageConnect ProbeStage = iota
+	ProbeStageTLS
+	ProbeStageResponse
+)
+
+// ProbeError retains the observed stage without exposing the target or the
+// underlying transport message through Error(). errors.Is/As still work.
+type ProbeError struct {
+	Stage ProbeStage
+	Err   error
+}
+
+func (e *ProbeError) Error() string {
+	switch e.Stage {
+	case ProbeStageConnect:
+		return "URL probe connection failed"
+	case ProbeStageTLS:
+		return "URL probe TLS negotiation failed"
+	case ProbeStageResponse:
+		return "URL probe response failed"
+	default:
+		return "URL probe failed"
+	}
+}
+
+func (e *ProbeError) Unwrap() error { return e.Err }
+
+// ObservedFailure returns only facts carried by typed errors and probe stages.
+// An unqualified timeout contains no evidence of transport or filtering cause.
+func ObservedFailure(err error) string {
+	if err == nil || errors.Is(err, context.Canceled) {
+		return ""
+	}
+	var dnsError *net.DNSError
+	if errors.As(err, &dnsError) {
+		return "dns_lookup"
+	}
+	var networkError net.Error
+	if !errors.Is(err, context.DeadlineExceeded) &&
+		!(errors.As(err, &networkError) && networkError.Timeout()) {
+		return ""
+	}
+	var operationError *net.OpError
+	if errors.As(err, &operationError) &&
+		(operationError.Net == "udp" || operationError.Net == "udp4" || operationError.Net == "udp6") {
+		return "udp_timeout"
+	}
+	var probeError *ProbeError
+	if errors.As(err, &probeError) {
+		switch probeError.Stage {
+		case ProbeStageTLS:
+			return "tls_timeout"
+		case ProbeStageResponse:
+			return "response_timeout"
+		}
+	}
+	return ""
+}
 
 type HistoryStorage struct {
 	access       sync.RWMutex
@@ -120,6 +185,13 @@ func URLTest(ctx context.Context, link string, detour N.Dialer) (t uint16, err e
 	}
 
 	start := time.Now()
+	var stage atomic.Uint32
+	stage.Store(uint32(ProbeStageConnect))
+	defer func() {
+		if err != nil {
+			err = &ProbeError{Stage: ProbeStage(stage.Load()), Err: err}
+		}
+	}()
 	instance, err := detour.DialContext(ctx, "tcp", M.ParseSocksaddrHostPortStr(hostname, port))
 	if err != nil {
 		return
@@ -134,9 +206,20 @@ func URLTest(ctx context.Context, link string, detour N.Dialer) (t uint16, err e
 	}
 	select {
 	case <-ctx.Done():
+		err = context.Cause(ctx)
 		return
 	default:
 	}
+	stage.Store(uint32(ProbeStageResponse))
+	trace := &httptrace.ClientTrace{
+		TLSHandshakeStart: func() { stage.Store(uint32(ProbeStageTLS)) },
+		TLSHandshakeDone: func(_ tls.ConnectionState, handshakeErr error) {
+			if handshakeErr == nil {
+				stage.Store(uint32(ProbeStageResponse))
+			}
+		},
+	}
+	req = req.WithContext(httptrace.WithClientTrace(ctx, trace))
 	client := http.Client{
 		Transport: &http.Transport{
 			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
@@ -155,10 +238,11 @@ func URLTest(ctx context.Context, link string, detour N.Dialer) (t uint16, err e
 	defer client.CloseIdleConnections()
 	select {
 	case <-ctx.Done():
+		err = context.Cause(ctx)
 		return
 	default:
 	}
-	resp, err := client.Do(req.WithContext(ctx))
+	resp, err := client.Do(req)
 	if err != nil {
 		return
 	}
@@ -169,6 +253,7 @@ func URLTest(ctx context.Context, link string, detour N.Dialer) (t uint16, err e
 	if IsUnifiedDelayFromContext(ctx) {
 		select {
 		case <-ctx.Done():
+			err = context.Cause(ctx)
 			return
 		default:
 		}
