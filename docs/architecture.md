@@ -15,6 +15,12 @@ gomobile method. Its bounded result belongs to the captured runtime instance and
 endpoint of that call; a terminal diagnostic event cannot complete another probe.
 The host retains its generation/session fence before applying the result. Older
 AARs without this method provide no endpoint verification through this path.
+Selector and URL-test groups use `CommandServer.ProbeSelectedOutbound`. Core
+captures their selected proxy leaf, runs a bounded per-call URL test, and rejects
+the result if the selected leaf or runtime instance changed. Direct, block, DNS,
+unsupported groups and cyclic selection cannot supply protected egress proof.
+The shared URL-test cache remains diagnostic data and is not a response channel
+for this verifier. Timeout and late results cannot settle a different call.
 The shared event ABI and desktop ABI are unchanged. Source-level checks do not
 prove that a retained AAR contains the method; replacement artifact binding and
 device evidence remain required before promoting this behavior.

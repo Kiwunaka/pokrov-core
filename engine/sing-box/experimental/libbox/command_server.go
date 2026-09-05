@@ -214,6 +214,12 @@ func (s *CommandServer) ProbeEndpoint(tag string) (bool, error) {
 	return s.StartedService.ProbeEndpointResult(tag)
 }
 
+// ProbeSelectedOutbound binds group egress proof to this invocation and the
+// selected leaf, instead of an unrelated update to the shared URL-test cache.
+func (s *CommandServer) ProbeSelectedOutbound(tag string) (bool, error) {
+	return s.StartedService.ProbeSelectedOutboundResult(tag)
+}
+
 func (s *CommandServer) SetOperationalEventContext(runID string, attemptID string, generation int64) error {
 	return s.operationalEvents.configure(runID, attemptID, generation)
 }
