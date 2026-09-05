@@ -5,8 +5,25 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/log"
 )
+
+type unreadyProbeEndpoint struct{ adapter.Endpoint }
+
+func (unreadyProbeEndpoint) IsReady() bool { return false }
+
+func TestEndpointCallCannotSucceedWithoutItsRuntime(t *testing.T) {
+	s := NewStartedService(ServiceOptions{Context: context.Background(), LogMaxLines: 4})
+	if healthy, err := s.ProbeEndpointResult("synthetic-target"); healthy || err == nil {
+		t.Fatal("stopped runtime supplied endpoint proof")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if s.testSelectedEndpoint(&Instance{ctx: ctx}, unreadyProbeEndpoint{}) {
+		t.Fatal("cancelled captured runtime supplied endpoint proof")
+	}
+}
 
 func TestURLTestErrorCategory(t *testing.T) {
 	tests := []struct {

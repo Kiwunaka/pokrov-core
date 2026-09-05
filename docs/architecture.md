@@ -10,6 +10,15 @@ POKROV Core is one client runtime with three layers:
 
 The application supplies a materialized sing-box JSON profile for normal operation. Legacy builder APIs remain internal and are not the public POKROV app contract.
 
+Android endpoint verification uses the additive `CommandServer.ProbeEndpoint`
+gomobile method. Its bounded result belongs to the captured runtime instance and
+endpoint of that call; a terminal diagnostic event cannot complete another probe.
+The host retains its generation/session fence before applying the result. Older
+AARs without this method provide no endpoint verification through this path.
+The shared event ABI and desktop ABI are unchanged. Source-level checks do not
+prove that a retained AAR contains the method; replacement artifact binding and
+device evidence remain required before promoting this behavior.
+
 The AWG2 and AWG 3.1 experiments remain inside the same embedded sing-box
 graph. Their machine owners are `config/awg2-capability.json` and
 `config/awg31-capability.json`, with distinct `pokrov.awg2.endpoint.v1` and

@@ -207,6 +207,13 @@ func (s *CommandServer) SetOperationalEventHandler(handler OperationalEventHandl
 	s.operationalEvents.setHandler(handler)
 }
 
+// ProbeEndpoint returns only the bounded URL test for this exact endpoint call.
+// Unlike URLTest's asynchronous diagnostic events, its result cannot complete
+// a different host probe. The caller must retain its runtime generation fence.
+func (s *CommandServer) ProbeEndpoint(tag string) (bool, error) {
+	return s.StartedService.ProbeEndpointResult(tag)
+}
+
 func (s *CommandServer) SetOperationalEventContext(runID string, attemptID string, generation int64) error {
 	return s.operationalEvents.configure(runID, attemptID, generation)
 }

@@ -684,7 +684,28 @@ func (s *StartedService) URLTest(ctx context.Context, request *URLTestRequest) (
 	return &emptypb.Empty{}, nil
 }
 
-func (s *StartedService) testSelectedEndpoint(boxService *Instance, endpoint adapter.Endpoint) {
+// ProbeEndpointResult binds the result to this invocation's captured instance
+// and endpoint. Diagnostic events are not the response channel for this call.
+func (s *StartedService) ProbeEndpointResult(tag string) (bool, error) {
+	s.serviceAccess.RLock()
+	if s.serviceStatus.Status != ServiceStatus_STARTED || s.instance == nil {
+		s.serviceAccess.RUnlock()
+		return false, E.New("endpoint probe unavailable")
+	}
+	boxService := s.instance
+	outbound, found := boxService.instance.Outbound().Outbound(tag)
+	s.serviceAccess.RUnlock()
+	if !found {
+		return false, E.New("endpoint probe target unavailable")
+	}
+	endpoint, ok := outbound.(adapter.Endpoint)
+	if !ok {
+		return false, E.New("endpoint probe target unsupported")
+	}
+	return s.testSelectedEndpoint(boxService, endpoint), nil
+}
+
+func (s *StartedService) testSelectedEndpoint(boxService *Instance, endpoint adapter.Endpoint) bool {
 	initializationContext, cancelInitialization := context.WithTimeout(
 		boxService.ctx,
 		selectedEndpointInitializationTimeout,
@@ -693,7 +714,7 @@ func (s *StartedService) testSelectedEndpoint(boxService *Instance, endpoint ada
 	if !ready {
 		cancelInitialization()
 		s.writeSelectedEndpointProbeFailure(failureCategory)
-		return
+		return false
 	}
 	cancelInitialization()
 
@@ -714,12 +735,16 @@ func (s *StartedService) testSelectedEndpoint(boxService *Instance, endpoint ada
 	case <-probeContext.Done():
 		result.err = context.Cause(probeContext)
 	}
+	if result.err == nil && probeContext.Err() != nil {
+		result.err = context.Cause(probeContext)
+	}
 	if result.err != nil {
 		s.writeSelectedEndpointProbeFailure(urlTestErrorCategory(result.err))
-		return
+		return false
 	}
 	s.WriteMessage(log.LevelInfo, "selected endpoint URL test succeeded")
 	s.writeOperationalEvent("succeeded", "")
+	return true
 }
 
 func waitForSelectedEndpoint(ctx context.Context, endpoint adapter.Endpoint) (bool, string) {
