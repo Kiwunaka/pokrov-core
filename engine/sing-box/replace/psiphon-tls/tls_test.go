@@ -1941,32 +1941,32 @@ func TestHandshakeKyber(t *testing.T) {
 				t.Fatal(err)
 			}
 			if test.expectKyber {
-				if ss.testingOnlyCurveID != x25519Kyber768Draft00 {
-					t.Errorf("got CurveID %v (server), expected %v", ss.testingOnlyCurveID, x25519Kyber768Draft00)
+				if ss.CurveID != x25519Kyber768Draft00 {
+					t.Errorf("got CurveID %v (server), expected %v", ss.CurveID, x25519Kyber768Draft00)
 				}
-				if cs.testingOnlyCurveID != x25519Kyber768Draft00 {
-					t.Errorf("got CurveID %v (client), expected %v", cs.testingOnlyCurveID, x25519Kyber768Draft00)
+				if cs.CurveID != x25519Kyber768Draft00 {
+					t.Errorf("got CurveID %v (client), expected %v", cs.CurveID, x25519Kyber768Draft00)
 				}
 			} else {
-				if ss.testingOnlyCurveID == x25519Kyber768Draft00 {
-					t.Errorf("got CurveID %v (server), expected not Kyber", ss.testingOnlyCurveID)
+				if ss.CurveID == x25519Kyber768Draft00 {
+					t.Errorf("got CurveID %v (server), expected not Kyber", ss.CurveID)
 				}
-				if cs.testingOnlyCurveID == x25519Kyber768Draft00 {
-					t.Errorf("got CurveID %v (client), expected not Kyber", cs.testingOnlyCurveID)
+				if cs.CurveID == x25519Kyber768Draft00 {
+					t.Errorf("got CurveID %v (client), expected not Kyber", cs.CurveID)
 				}
 			}
 			if test.expectHRR {
-				if !ss.testingOnlyDidHRR {
+				if !ss.HelloRetryRequest {
 					t.Error("server did not use HRR")
 				}
-				if !cs.testingOnlyDidHRR {
+				if !cs.HelloRetryRequest {
 					t.Error("client did not use HRR")
 				}
 			} else {
-				if ss.testingOnlyDidHRR {
+				if ss.HelloRetryRequest {
 					t.Error("server used HRR")
 				}
-				if cs.testingOnlyDidHRR {
+				if cs.HelloRetryRequest {
 					t.Error("client used HRR")
 				}
 			}

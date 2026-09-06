@@ -74,6 +74,10 @@ try {
 
   Push-Location $root
   try {
+    & $goCommand.Source test -count=1 -run '^TestUnsafeConnectionStateHelloRetryRequest$' github.com/Psiphon-Labs/psiphon-tls
+    if ($LASTEXITCODE -ne 0) {
+      throw "Psiphon TLS connection-state conversion tests failed."
+    }
     & $goCommand.Source test -count=1 ./...
     if ($LASTEXITCODE -ne 0) {
       throw "POKROV Core full module tests failed."
