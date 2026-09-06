@@ -1259,6 +1259,7 @@ func (s *StartedService) mustEmbedUnimplementedStartedServiceServer() {
 }
 
 func (s *StartedService) WriteMessage(level log.Level, message string) {
+	message = s.FilterMessage(level, message)
 	item := &log.Entry{Level: level, Message: message}
 	s.logAccess.Lock()
 	s.logLines.PushBack(item)
@@ -1275,6 +1276,44 @@ func (s *StartedService) WriteMessage(level log.Level, message string) {
 		if safeDiagnostic, ok := canonicalAWGSafeDiagnostic(message); ok {
 			s.handler.WriteDebugMessage(safeDiagnostic)
 		}
+	}
+}
+
+// FilterMessage closes every managed native log sink, including debug builds.
+// Request/profile tags and arbitrary upstream errors are never log evidence.
+func (s *StartedService) FilterMessage(level log.Level, message string) string {
+	if level == log.LevelWarn {
+		if diagnostic, ok := canonicalAWGSafeDiagnostic(message); ok {
+			return diagnostic
+		}
+	}
+	if message == "selected endpoint URL test succeeded" {
+		return message
+	}
+	for _, prefix := range []string{
+		"selected endpoint URL test failed category=",
+		"selected outbound URL test failed category=",
+	} {
+		if category, found := strings.CutPrefix(message, prefix); found && validProbeLogCategory(category) {
+			return message
+		}
+	}
+	return "runtime_log_redacted"
+}
+
+func validProbeLogCategory(category string) bool {
+	if category == "endpoint_initialization_timeout" {
+		return true
+	}
+	category = strings.TrimPrefix(category, "endpoint_initialization_")
+	switch category {
+	case "dns_lookup", "tls_certificate", "reality_handshake", "authentication_rejected",
+		"http_rejected", "connection_refused", "connection_reset", "network_unreachable",
+		"io_timeout", "udp_timeout", "tls_timeout", "response_timeout", "deadline_exceeded",
+		"context_canceled", "transport_failure":
+		return true
+	default:
+		return false
 	}
 }
 

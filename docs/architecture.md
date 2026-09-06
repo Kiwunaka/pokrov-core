@@ -116,6 +116,15 @@ well as stale run, attempt, generation, or sequence values. Arbitrary upstream
 debug lines are not release evidence and must not be promoted into the
 operational event stream.
 
+The managed `StartedService` also filters native logging before every factory
+writer/observable sink and before its own replay buffer and subscribers. The
+same closed policy applies in release and debug mode: bounded AWG diagnostics
+and fixed selected-probe outcomes survive; arbitrary messages become
+`runtime_log_redacted`, and upstream logger tags are omitted. Severity and
+fatal/panic control flow remain unchanged. Other users of the embedded logger
+without this platform filter retain their existing behavior. This source
+boundary does not prove that a retained AAR/DLL contains the change.
+
 The legacy logger follows the same boundary: release setup records only whether
 stored settings were available and never formats the settings value or its
 database table. The desktop FFI returns a local caller-owned error string for

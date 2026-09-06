@@ -1,9 +1,12 @@
 package daemon
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/common/urltest"
@@ -134,6 +137,96 @@ func TestReleaseStartedServiceForwardsOnlyCanonicalAWGSafeDiagnostic(t *testing.
 	if handler.debugMessages[0] != "awg_safe_diag code=receive_invalid_mac1 occurrence=1" {
 		t.Fatalf("unexpected forwarded message: %q", handler.debugMessages[0])
 	}
+}
+
+func TestManagedLoggerDoesNotRetainPlantedMaterialInAnyLogSink(t *testing.T) {
+	for _, debug := range []bool{false, true} {
+		t.Run(map[bool]string{false: "release", true: "debug"}[debug], func(t *testing.T) {
+			handler := &recordingPlatformHandler{}
+			service := NewStartedService(ServiceOptions{
+				Context: context.Background(), Handler: handler, Debug: debug, LogMaxLines: 8,
+			})
+			var output bytes.Buffer
+			factory := log.NewDefaultFactory(context.Background(), log.Formatter{
+				DisableColors: true, DisableTimestamp: true,
+			}, &output, "", service, true)
+			defer factory.Close()
+			factoryEntries, _, err := factory.Subscribe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer factory.UnSubscribe(factoryEntries)
+			serviceEntries, _, err := service.logObserver.Subscribe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer service.logObserver.UnSubscribe(serviceEntries)
+			const planted = "PLANTED-PRIVATE-MATERIAL"
+			logger := factory.NewLogger(planted)
+			messages := []string{
+				"outbound failed: Authorization: Bearer " + planted,
+				planted + " awg_safe_diag code=handshake_retry occurrence=1",
+				"awg_safe_diag code=handshake_retry occurrence=1 token=" + planted,
+				"selected endpoint URL test failed category=tls_certificate",
+				"selected endpoint URL test failed category=tls_certificate token=" + planted,
+			}
+			expected := []string{
+				"runtime_log_redacted",
+				"awg_safe_diag code=handshake_retry occurrence=1",
+				"runtime_log_redacted",
+				"selected endpoint URL test failed category=tls_certificate",
+				"runtime_log_redacted",
+			}
+			for index, message := range messages {
+				logger.Warn(message)
+				select {
+				case entry := <-factoryEntries:
+					if strings.Contains(entry.Message, planted) {
+						t.Fatal("factory subscription retained planted material")
+					}
+				case <-time.After(time.Second):
+					t.Fatal("factory log subscription did not settle")
+				}
+				select {
+				case entry := <-serviceEntries:
+					if strings.Contains(entry.Message, planted) {
+						t.Fatal("native service subscription retained planted material")
+					}
+					if entry.Message != expected[index] {
+						t.Fatal("managed log lost its closed diagnostic category")
+					}
+				case <-time.After(time.Second):
+					t.Fatal("native service log subscription did not settle")
+				}
+			}
+			if strings.Contains(output.String(), planted) || strings.Contains(strings.Join(handler.debugMessages, "\n"), planted) {
+				t.Fatal("writer or host callback retained planted material")
+			}
+			service.WriteMessage(log.LevelError, planted)
+			for entry := service.logLines.Front(); entry != nil; entry = entry.Next() {
+				if strings.Contains(entry.Value.Message, planted) {
+					t.Fatal("native replay buffer retained planted material")
+				}
+			}
+		})
+	}
+}
+
+func TestManagedLoggerKeepsPanicSemanticsWithSafePayload(t *testing.T) {
+	service := NewStartedService(ServiceOptions{
+		Context: context.Background(), Handler: &recordingPlatformHandler{}, LogMaxLines: 1,
+	})
+	var output bytes.Buffer
+	factory := log.NewDefaultFactory(context.Background(), log.Formatter{}, &output, "", service, false)
+	defer factory.Close()
+	defer func() {
+		recovered := recover()
+		message, ok := recovered.(string)
+		if !ok || !strings.Contains(message, "runtime_log_redacted") || strings.Contains(message, "PLANTED-PRIVATE-MATERIAL") {
+			t.Fatal("managed logger did not preserve panic with a safe payload")
+		}
+	}()
+	factory.Logger().Panic("PLANTED-PRIVATE-MATERIAL")
 }
 
 type recordingPlatformHandler struct {
