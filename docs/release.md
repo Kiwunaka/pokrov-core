@@ -30,6 +30,16 @@ physical-device behavior, battery/thermal measurements and mobile/RU-origin
 results require retained evidence for the exact candidate and cannot be
 inferred from this gate.
 
+The operator-only `TestOwnedAWGLabAuthenticatedEgress` exercises client MTU
+1280, 1400 and 1408 sequentially against the supplied owned endpoint. Each
+case validates the pinned contract and completes TLS plus the authenticated
+HTTP egress marker using a request with 4096 bytes of inert header padding.
+It records only MTU, outer packet counts/maxima and elapsed milliseconds. This
+is client-MTU interop evidence, not a change to server MTU, a sustained-throughput
+benchmark, a whole-device routing proof or a preset recommendation. Missing
+endpoint material still skips this operator gate; local unit tests do not
+replace the three live results.
+
 Core CI runs the complete root-module test graph, focused `go vet`, race and
 pinned `govulncheck v1.7.0` reachable-code scans for supported runtime packages
 and the Android event bridge. Pinned Staticcheck `v0.7.0` runs the `SA2*`,

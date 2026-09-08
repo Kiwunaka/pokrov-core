@@ -6,10 +6,12 @@ import (
 	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net"
 	"net/http"
 	"net/netip"
 	"os"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -50,11 +52,26 @@ func TestOwnedAWGLabAuthenticatedEgress(t *testing.T) {
 	if err := validateEndpointOptions(endpointOptions); err != nil {
 		t.Fatal("owned AWG endpoint violates the pinned contract")
 	}
+	for _, mtu := range []uint32{1280, 1400, 1408} {
+		t.Run(fmt.Sprintf("mtu_%d", mtu), func(t *testing.T) {
+			options := endpointOptions
+			options.MTU = mtu
+			testOwnedAWGLabMTUEgress(t, options)
+		})
+	}
+}
+
+func testOwnedAWGLabMTUEgress(t *testing.T, endpointOptions option.AwgEndpointOptions) {
+	t.Helper()
+	if err := validateEndpointOptions(endpointOptions); err != nil {
+		t.Fatal("owned AWG MTU variant violates the pinned contract")
+	}
 	ipc, err := genIpcConfig(endpointOptions)
 	if err != nil {
 		t.Fatal("owned AWG endpoint IPC generation failed")
 	}
 
+	started := time.Now()
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 	defaultDialer, err := dialer.NewDefault(ctx, option.DialerOptions{})
@@ -104,7 +121,8 @@ func TestOwnedAWGLabAuthenticatedEgress(t *testing.T) {
 		t.Fatal("owned AWG TCP egress failed after outer responses were received")
 	}
 	defer connection.Close()
-	_ = connection.SetDeadline(time.Now().Add(30 * time.Second))
+	deadline, _ := ctx.Deadline()
+	_ = connection.SetDeadline(deadline)
 
 	tlsConnection := tls.Client(connection, &tls.Config{
 		MinVersion: tls.VersionTLS12,
@@ -117,6 +135,7 @@ func TestOwnedAWGLabAuthenticatedEgress(t *testing.T) {
 	if _, err := tlsConnection.Write([]byte(
 		"GET /api/public/authenticated-egress-probe HTTP/1.1\r\n" +
 			"Host: api.pokrov.space\r\n" +
+			"X-Pokrov-Lab-Padding: " + strings.Repeat("p", 4096) + "\r\n" +
 			"Connection: close\r\n\r\n",
 	)); err != nil {
 		t.Fatal("owned AWG HTTP request failed")
@@ -133,6 +152,12 @@ func TestOwnedAWGLabAuthenticatedEgress(t *testing.T) {
 		response.Header.Get("X-Pokrov-Egress-Probe") != "pokrov-authenticated-egress-v1" {
 		t.Fatal("owned AWG authenticated egress marker mismatch")
 	}
+	if observedDialer.writeCount.Load() == 0 || observedDialer.readCount.Load() == 0 {
+		t.Fatal("owned AWG bidirectional outer packets were not observed")
+	}
+	t.Logf("POKROV_AWG_MTU_RESULT mtu=%d tx_packets=%d rx_packets=%d tx_max=%d rx_max=%d elapsed_ms=%d",
+		endpointOptions.MTU, observedDialer.writeCount.Load(), observedDialer.readCount.Load(),
+		observedDialer.writeMax.Load(), observedDialer.readMax.Load(), time.Since(started).Milliseconds())
 }
 
 type ownedLabObservedDialer struct {
@@ -140,6 +165,8 @@ type ownedLabObservedDialer struct {
 	writeCount      atomic.Int64
 	writeErrorCount atomic.Int64
 	readCount       atomic.Int64
+	writeMax        atomic.Int64
+	readMax         atomic.Int64
 }
 
 func (d *ownedLabObservedDialer) ListenPacket(
@@ -155,6 +182,8 @@ func (d *ownedLabObservedDialer) ListenPacket(
 		writeCount:      &d.writeCount,
 		writeErrorCount: &d.writeErrorCount,
 		readCount:       &d.readCount,
+		writeMax:        &d.writeMax,
+		readMax:         &d.readMax,
 	}, nil
 }
 
@@ -163,12 +192,15 @@ type ownedLabObservedPacketConnection struct {
 	writeCount      *atomic.Int64
 	writeErrorCount *atomic.Int64
 	readCount       *atomic.Int64
+	writeMax        *atomic.Int64
+	readMax         *atomic.Int64
 }
 
 func (c *ownedLabObservedPacketConnection) ReadFrom(payload []byte) (int, net.Addr, error) {
 	read, source, err := c.PacketConn.ReadFrom(payload)
 	if read > 0 {
 		c.readCount.Add(1)
+		ownedLabRecordMaximum(c.readMax, int64(read))
 	}
 	return read, source, err
 }
@@ -180,11 +212,20 @@ func (c *ownedLabObservedPacketConnection) WriteTo(
 	written, err := c.PacketConn.WriteTo(payload, destination)
 	if written > 0 {
 		c.writeCount.Add(1)
+		ownedLabRecordMaximum(c.writeMax, int64(written))
 	}
 	if err != nil {
 		c.writeErrorCount.Add(1)
 	}
 	return written, err
+}
+
+func ownedLabRecordMaximum(counter *atomic.Int64, value int64) {
+	for previous := counter.Load(); value > previous; previous = counter.Load() {
+		if counter.CompareAndSwap(previous, value) {
+			return
+		}
+	}
 }
 
 func resolveOwnedProbeIPv4(ctx context.Context) (netip.Addr, error) {
