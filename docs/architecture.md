@@ -63,6 +63,20 @@ back to the DNS graph's final transport. This keeps Android endpoint probes and
 ordinary dialers on the same explicit bootstrap-resolution contract without
 changing TLS verification or replacing the authenticated egress hostname with
 a pinned provider address.
+
+Cross-field validation also requires disjoint H1-H4 ranges. S1/S2/S3 plus
+their pinned handshake/cookie sizes, S4 plus MTU and the 32-byte transport
+overhead, and junk packet size must fit 2016 bytes: the smallest message buffer
+of the supported Android/Windows engines (pinned Windows `2048-32`). A smaller
+upstream buffer on another build target further limits that target. Scalar
+schema bounds remain necessary but do not by themselves authorize an oversized
+combination. Content padding is capped to the inner MTU by the pinned engine;
+these memory/wire bounds do not promise a particular network path MTU.
+For AWG3.1, the latest possible send rekey precedes the earliest key rejection;
+the upstream receive-refresh calculation must also remain positive using the
+configured minimum keepalive/retry values. Omitted timing fields use the pinned
+upstream defaults. Rejections occur before device creation with fixed messages.
+
 The embedded AWG device logger never formats upstream arguments because they
 can contain endpoint or peer material. It emits only fixed
 `awg_safe_diag` classifier codes for bounded handshake send/accept/reject,
