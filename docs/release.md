@@ -30,6 +30,16 @@ physical-device behavior, battery/thermal measurements and mobile/RU-origin
 results require retained evidence for the exact candidate and cannot be
 inferred from this gate.
 
+The operator-only `TestOwnedAWGLabAuthenticatedEgress` exercises client MTU
+1280, 1400 and 1408 sequentially against the supplied owned endpoint. Each
+case validates the pinned contract and completes TLS plus the authenticated
+HTTP egress marker using a request with 4096 bytes of inert header padding.
+It records only MTU, outer packet counts/maxima and elapsed milliseconds. This
+is client-MTU interop evidence, not a change to server MTU, a sustained-throughput
+benchmark, a whole-device routing proof or a preset recommendation. Missing
+endpoint material still skips this operator gate; local unit tests do not
+replace the three live results.
+
 Core CI runs the complete root-module test graph, focused `go vet`, race and
 pinned `govulncheck v1.7.0` reachable-code scans for supported runtime packages
 and the Android event bridge. Pinned Staticcheck `v0.7.0` runs the `SA2*`,
@@ -68,15 +78,36 @@ and fails when any contract export is absent. These gates do not claim signing
 or candidate evidence until the exact candidate artifact is actually executed
 and retained.
 
-Post-`1.0.3` working source requires Go `1.25.13` and the remediated dependency
+Post-`1.0.3` working source requires Go `1.26.8` and the remediated dependency
 floor recorded in both Go modules: gRPC `1.82.1`, CIRCL `1.6.3`,
-`golang.org/x/crypto` `0.53.0`, `x/net` `0.56.0`, and `x/text` `0.39.0`.
+`golang.org/x/crypto` `0.56.0`, `x/net` `0.56.0`, and `x/text` `0.39.0`.
 Android source builds also pin NDK `29.0.14206865` in `config/release.json`.
 The build validates that exact `source.properties` revision and selects it
 through `ANDROID_NDK_HOME` before `gomobile` links the pinned Cronet archive.
 The floor was selected from reachable `govulncheck` findings; lowering any of
 these versions requires a new vulnerability review. It changes source/build
 inputs only and does not relabel the retained `1.0.3` artifacts.
+
+The Apple build reads the required Go version from `config/release.json`, as
+the Android and Windows builders do. This keeps its preflight on the same
+toolchain as CI; a preflight pass alone does not prove an Apple artifact build.
+
+The 2026-09-06 C05 review found source call paths from the runtime packages to
+`golang.org/x/crypto/ssh` affected by `GO-2026-6354` and `GO-2026-6355`.
+The fixed `x/crypto 0.56.0` requires Go 1.26; the working toolchain is therefore
+pinned to `go1.26.8`. Windows also pins `tfo-go/v2 2.3.3`: the previous 2.3.1
+failed to link against Go 1.26's `internal/poll` implementation. A separate
+trial build reproduced that failure and then built successfully with 2.3.3.
+The local Psiphon TLS ConnectionState mirror also follows Go 1.26's public
+HelloRetryRequest field position; the structural guard stays enabled and a live
+TLS 1.3 direct/HRR handshake tests both unsafe conversion and exporter closure.
+Both root and embedded engine modules use this dependency floor. This source
+change requires fresh platform artifact hashes, ABI/lifecycle checks and
+consumer binding; earlier D05 binaries and their evidence retain their original
+Go 1.25.13 identity until that work is completed. For the stripped C05 DLL/SO,
+govulncheck extract returns no symbols, so binary findings use module-level
+precision. A bounded source scan without call paths is not a full reachability
+proof for other advisories.
 
 The source contract declares desktop ABI `2` and Core event ABI `1` through
 `config/abi-contract.json` and `config/core-event-abi.json`. A release `1.2.0`

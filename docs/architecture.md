@@ -6,9 +6,33 @@ POKROV Core is one client runtime with three layers:
 2. `v2/` owns setup, configuration, lifecycle, WARP, DNS, and safe shutdown behavior.
 3. `engine/sing-box/` owns transports, routing, TLS, TUN, and protocol implementations.
 
+URL probes retain a typed connect/TLS/response stage. Cancellation after dial
+returns an error, and the optional second request retains the original context.
+The safe error wrapper exposes no target or raw cause through its message while
+preserving `errors.Is`/`errors.As`. Typed DNS errors take precedence over generic
+timeouts; typed UDP timeouts and observed TLS/response timeouts map to separate
+canonical operational codes. An unqualified deadline cannot establish UDP
+blocking, DPI, MTU or other filtering causes. Android and desktop event consumers
+must accept the matching additive error-code contract before new artifacts ship.
+
 `ray2sing/` converts supported access links into sing-box options. `third_party/warp-plus/` supplies the pinned WARP registration and helper behavior.
 
 The application supplies a materialized sing-box JSON profile for normal operation. Legacy builder APIs remain internal and are not the public POKROV app contract.
+
+Android endpoint verification uses the additive `CommandServer.ProbeEndpoint`
+gomobile method. Its bounded result belongs to the captured runtime instance and
+endpoint of that call; a terminal diagnostic event cannot complete another probe.
+The host retains its generation/session fence before applying the result. Older
+AARs without this method provide no endpoint verification through this path.
+Selector and URL-test groups use `CommandServer.ProbeSelectedOutbound`. Core
+captures their selected proxy leaf, runs a bounded per-call URL test, and rejects
+the result if the selected leaf or runtime instance changed. Direct, block, DNS,
+unsupported groups and cyclic selection cannot supply protected egress proof.
+The shared URL-test cache remains diagnostic data and is not a response channel
+for this verifier. Timeout and late results cannot settle a different call.
+The shared event ABI and desktop ABI are unchanged. Source-level checks do not
+prove that a retained AAR contains the method; replacement artifact binding and
+device evidence remain required before promoting this behavior.
 
 The AWG2 and AWG 3.1 experiments remain inside the same embedded sing-box
 graph. Their machine owners are `config/awg2-capability.json` and
@@ -39,6 +63,20 @@ back to the DNS graph's final transport. This keeps Android endpoint probes and
 ordinary dialers on the same explicit bootstrap-resolution contract without
 changing TLS verification or replacing the authenticated egress hostname with
 a pinned provider address.
+
+Cross-field validation also requires disjoint H1-H4 ranges. S1/S2/S3 plus
+their pinned handshake/cookie sizes, S4 plus MTU and the 32-byte transport
+overhead, and junk packet size must fit 2016 bytes: the smallest message buffer
+of the supported Android/Windows engines (pinned Windows `2048-32`). A smaller
+upstream buffer on another build target further limits that target. Scalar
+schema bounds remain necessary but do not by themselves authorize an oversized
+combination. Content padding is capped to the inner MTU by the pinned engine;
+these memory/wire bounds do not promise a particular network path MTU.
+For AWG3.1, the latest possible send rekey precedes the earliest key rejection;
+the upstream receive-refresh calculation must also remain positive using the
+configured minimum keepalive/retry values. Omitted timing fields use the pinned
+upstream defaults. Rejections occur before device creation with fixed messages.
+
 The embedded AWG device logger never formats upstream arguments because they
 can contain endpoint or peer material. It emits only fixed
 `awg_safe_diag` classifier codes for bounded handshake send/accept/reject,
@@ -91,6 +129,15 @@ must reject unknown schema/event versions, names, outcomes and error codes, as
 well as stale run, attempt, generation, or sequence values. Arbitrary upstream
 debug lines are not release evidence and must not be promoted into the
 operational event stream.
+
+The managed `StartedService` also filters native logging before every factory
+writer/observable sink and before its own replay buffer and subscribers. The
+same closed policy applies in release and debug mode: bounded AWG diagnostics
+and fixed selected-probe outcomes survive; arbitrary messages become
+`runtime_log_redacted`, and upstream logger tags are omitted. Severity and
+fatal/panic control flow remain unchanged. Other users of the embedded logger
+without this platform filter retain their existing behavior. This source
+boundary does not prove that a retained AAR/DLL contains the change.
 
 The legacy logger follows the same boundary: release setup records only whether
 stored settings were available and never formats the settings value or its
