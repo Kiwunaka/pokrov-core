@@ -10,6 +10,8 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+
+	"github.com/sagernet/sing-box/common/urltest"
 )
 
 var uuidPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
@@ -177,7 +179,8 @@ func validateEvent(definition Definition, outcome Outcome, errorCode string) (Se
 func isKnownErrorCode(code string) bool {
 	switch code {
 	case "CORE-003", "CORE-005", "CORE-006", "CORE-008", "EGRESS-001",
-		"TRANSPORT-001", "TRANSPORT-002", "TRANSPORT-003", "TRANSPORT-004":
+		"DNS-002", "TRANSPORT-001", "TRANSPORT-002", "TRANSPORT-003", "TRANSPORT-004",
+		"TRANSPORT-005", "TRANSPORT-006", "TRANSPORT-007":
 		return true
 	default:
 		return false
@@ -188,6 +191,16 @@ func ClassifyStartError(err error) string {
 	if err == nil {
 		return ""
 	}
+	switch urltest.ObservedFailure(err) {
+	case "dns_lookup":
+		return "DNS-002"
+	case "udp_timeout":
+		return "TRANSPORT-005"
+	case "tls_timeout":
+		return "TRANSPORT-006"
+	case "response_timeout":
+		return "TRANSPORT-007"
+	}
 	if errors.Is(err, context.DeadlineExceeded) {
 		return "TRANSPORT-001"
 	}
@@ -197,6 +210,10 @@ func ClassifyStartError(err error) string {
 	}
 	if errors.Is(err, syscall.ECONNREFUSED) {
 		return "TRANSPORT-002"
+	}
+	var probeError *urltest.ProbeError
+	if errors.As(err, &probeError) {
+		err = probeError.Err
 	}
 	message := strings.ToLower(err.Error())
 	for _, marker := range []string{

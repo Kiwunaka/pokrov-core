@@ -114,10 +114,17 @@ func (l *observableLogger) Log(ctx context.Context, level Level, args []any) {
 	if level > l.level && l.platformWriter == nil {
 		return
 	}
+	messageText := F.ToString(args...)
+	tag := l.tag
+	filter, filtered := l.platformWriter.(PlatformMessageFilter)
+	if filtered {
+		messageText = filter.FilterMessage(level, messageText)
+		tag = ""
+	}
 	nowTime := time.Now()
 	if level <= l.level {
 		if l.needObservable {
-			message, messageSimple := l.formatter.FormatWithSimple(ctx, level, l.tag, F.ToString(args...), nowTime)
+			message, messageSimple := l.formatter.FormatWithSimple(ctx, level, tag, messageText, nowTime)
 			if level == LevelPanic {
 				panic(message)
 			}
@@ -127,7 +134,7 @@ func (l *observableLogger) Log(ctx context.Context, level Level, args []any) {
 			}
 			l.subscriber.Emit(Entry{level, messageSimple})
 		} else {
-			message := l.formatter.Format(ctx, level, l.tag, F.ToString(args...), nowTime)
+			message := l.formatter.Format(ctx, level, tag, messageText, nowTime)
 			if level == LevelPanic {
 				panic(message)
 			}
@@ -138,7 +145,10 @@ func (l *observableLogger) Log(ctx context.Context, level Level, args []any) {
 		}
 	}
 	if l.platformWriter != nil {
-		l.platformWriter.WriteMessage(level, l.platformFormatter.Format(ctx, level, l.tag, F.ToString(args...), nowTime))
+		if !filtered {
+			messageText = l.platformFormatter.Format(ctx, level, tag, messageText, nowTime)
+		}
+		l.platformWriter.WriteMessage(level, messageText)
 	}
 }
 

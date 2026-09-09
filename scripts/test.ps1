@@ -50,6 +50,9 @@ try {
   $goFiles += @(
     "engine\sing-box\daemon\platform.go",
     "engine\sing-box\daemon\started_service.go",
+    "engine\sing-box\daemon\started_service_test.go",
+    "engine\sing-box\common\urltest\urltest.go",
+    "engine\sing-box\common\urltest\urltest_pokrov_test.go",
     "engine\sing-box\experimental\libbox\command_server.go",
     "engine\sing-box\experimental\libbox\operational_events.go",
     "engine\sing-box\experimental\libbox\operational_events_test.go",
@@ -71,6 +74,10 @@ try {
 
   Push-Location $root
   try {
+    & $goCommand.Source test -count=1 -run '^TestUnsafeConnectionStateHelloRetryRequest$' github.com/Psiphon-Labs/psiphon-tls
+    if ($LASTEXITCODE -ne 0) {
+      throw "Psiphon TLS connection-state conversion tests failed."
+    }
     & $goCommand.Source test -count=1 ./...
     if ($LASTEXITCODE -ne 0) {
       throw "POKROV Core full module tests failed."
@@ -85,7 +92,7 @@ try {
     if ($LASTEXITCODE -ne 0) {
       throw "AWG2 contract tests failed."
     }
-    & $goCommand.Source test -count=1 ./daemon ./experimental/libbox
+    & $goCommand.Source test -count=1 ./common/urltest ./daemon ./experimental/libbox
     if ($LASTEXITCODE -ne 0) {
       throw "Core event bridge tests failed."
     }

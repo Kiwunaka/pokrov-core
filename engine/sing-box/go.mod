@@ -1,6 +1,6 @@
 module github.com/sagernet/sing-box
 
-go 1.25.13
+go 1.26.8
 
 require (
 	github.com/Psiphon-Labs/psiphon-tunnel-core v1.0.11-0.20260126173038-c86a1497a760
@@ -10,7 +10,7 @@ require (
 	github.com/caddyserver/certmagic v0.25.0
 	github.com/coder/websocket v1.8.14
 	github.com/cretz/bine v0.2.0
-	github.com/database64128/tfo-go/v2 v2.3.1
+	github.com/database64128/tfo-go/v2 v2.3.3
 	github.com/enfein/mieru/v3 v3.27.0
 	github.com/go-chi/chi/v5 v5.2.3
 	github.com/go-chi/render v1.0.3
@@ -55,7 +55,7 @@ require (
 	github.com/vishvananda/netns v0.0.5
 	go.uber.org/zap v1.27.1
 	go4.org/netipx v0.0.0-20231129151722-fdeea329fbba
-	golang.org/x/crypto v0.55.0
+	golang.org/x/crypto v0.56.0
 	golang.org/x/exp v0.0.0-20251219203646-944ab1f22d93
 	golang.org/x/mod v0.38.0
 	golang.org/x/net v0.57.0
