@@ -654,7 +654,7 @@ func (s *StartedService) URLTest(ctx context.Context, request *URLTestRequest) (
 						log.LevelError,
 						"selected outbound URL test failed category="+category,
 					)
-					s.writeOperationalEvent("failed", "EGRESS-001")
+					s.writeOperationalEvent("failed", observedProbeErrorCode(err))
 				}
 				historyStorage.DeleteURLTestHistory(outboundTag)
 			} else {
@@ -684,7 +684,28 @@ func (s *StartedService) URLTest(ctx context.Context, request *URLTestRequest) (
 	return &emptypb.Empty{}, nil
 }
 
-func (s *StartedService) testSelectedEndpoint(boxService *Instance, endpoint adapter.Endpoint) {
+// ProbeEndpointResult binds the result to this invocation's captured instance
+// and endpoint. Diagnostic events are not the response channel for this call.
+func (s *StartedService) ProbeEndpointResult(tag string) (bool, error) {
+	s.serviceAccess.RLock()
+	if s.serviceStatus.Status != ServiceStatus_STARTED || s.instance == nil {
+		s.serviceAccess.RUnlock()
+		return false, E.New("endpoint probe unavailable")
+	}
+	boxService := s.instance
+	outbound, found := boxService.instance.Outbound().Outbound(tag)
+	s.serviceAccess.RUnlock()
+	if !found {
+		return false, E.New("endpoint probe target unavailable")
+	}
+	endpoint, ok := outbound.(adapter.Endpoint)
+	if !ok {
+		return false, E.New("endpoint probe target unsupported")
+	}
+	return s.testSelectedEndpoint(boxService, endpoint), nil
+}
+
+func (s *StartedService) testSelectedEndpoint(boxService *Instance, endpoint adapter.Endpoint) bool {
 	initializationContext, cancelInitialization := context.WithTimeout(
 		boxService.ctx,
 		selectedEndpointInitializationTimeout,
@@ -692,8 +713,8 @@ func (s *StartedService) testSelectedEndpoint(boxService *Instance, endpoint ada
 	ready, failureCategory := waitForSelectedEndpoint(initializationContext, endpoint)
 	if !ready {
 		cancelInitialization()
-		s.writeSelectedEndpointProbeFailure(failureCategory)
-		return
+		s.writeSelectedEndpointProbeFailure(failureCategory, nil)
+		return false
 	}
 	cancelInitialization()
 
@@ -714,12 +735,16 @@ func (s *StartedService) testSelectedEndpoint(boxService *Instance, endpoint ada
 	case <-probeContext.Done():
 		result.err = context.Cause(probeContext)
 	}
+	if result.err == nil && probeContext.Err() != nil {
+		result.err = context.Cause(probeContext)
+	}
 	if result.err != nil {
-		s.writeSelectedEndpointProbeFailure(urlTestErrorCategory(result.err))
-		return
+		s.writeSelectedEndpointProbeFailure(urlTestErrorCategory(result.err), result.err)
+		return false
 	}
 	s.WriteMessage(log.LevelInfo, "selected endpoint URL test succeeded")
 	s.writeOperationalEvent("succeeded", "")
+	return true
 }
 
 func waitForSelectedEndpoint(ctx context.Context, endpoint adapter.Endpoint) (bool, string) {
@@ -749,12 +774,27 @@ func waitForSelectedEndpoint(ctx context.Context, endpoint adapter.Endpoint) (bo
 	}
 }
 
-func (s *StartedService) writeSelectedEndpointProbeFailure(category string) {
+func (s *StartedService) writeSelectedEndpointProbeFailure(category string, err error) {
 	s.WriteMessage(
 		log.LevelError,
 		"selected endpoint URL test failed category="+category,
 	)
-	s.writeOperationalEvent("failed", "EGRESS-001")
+	s.writeOperationalEvent("failed", observedProbeErrorCode(err))
+}
+
+func observedProbeErrorCode(err error) string {
+	switch urltest.ObservedFailure(err) {
+	case "dns_lookup":
+		return "DNS-002"
+	case "udp_timeout":
+		return "TRANSPORT-005"
+	case "tls_timeout":
+		return "TRANSPORT-006"
+	case "response_timeout":
+		return "TRANSPORT-007"
+	default:
+		return "EGRESS-001"
+	}
 }
 
 func (s *StartedService) writeOperationalEvent(outcome string, errorCode string) {
@@ -779,11 +819,18 @@ func urlTestErrorCategory(err error) string {
 	if err == nil {
 		return "none"
 	}
+	if observed := urltest.ObservedFailure(err); observed != "" {
+		return observed
+	}
 	if errors.Is(err, context.DeadlineExceeded) {
 		return "deadline_exceeded"
 	}
 	if errors.Is(err, context.Canceled) {
 		return "context_canceled"
+	}
+	var probeError *urltest.ProbeError
+	if errors.As(err, &probeError) {
+		err = probeError.Err
 	}
 	message := strings.ToLower(err.Error())
 	for _, category := range []struct {
@@ -1212,6 +1259,7 @@ func (s *StartedService) mustEmbedUnimplementedStartedServiceServer() {
 }
 
 func (s *StartedService) WriteMessage(level log.Level, message string) {
+	message = s.FilterMessage(level, message)
 	item := &log.Entry{Level: level, Message: message}
 	s.logAccess.Lock()
 	s.logLines.PushBack(item)
@@ -1228,6 +1276,44 @@ func (s *StartedService) WriteMessage(level log.Level, message string) {
 		if safeDiagnostic, ok := canonicalAWGSafeDiagnostic(message); ok {
 			s.handler.WriteDebugMessage(safeDiagnostic)
 		}
+	}
+}
+
+// FilterMessage closes every managed native log sink, including debug builds.
+// Request/profile tags and arbitrary upstream errors are never log evidence.
+func (s *StartedService) FilterMessage(level log.Level, message string) string {
+	if level == log.LevelWarn {
+		if diagnostic, ok := canonicalAWGSafeDiagnostic(message); ok {
+			return diagnostic
+		}
+	}
+	if message == "selected endpoint URL test succeeded" {
+		return message
+	}
+	for _, prefix := range []string{
+		"selected endpoint URL test failed category=",
+		"selected outbound URL test failed category=",
+	} {
+		if category, found := strings.CutPrefix(message, prefix); found && validProbeLogCategory(category) {
+			return message
+		}
+	}
+	return "runtime_log_redacted"
+}
+
+func validProbeLogCategory(category string) bool {
+	if category == "endpoint_initialization_timeout" {
+		return true
+	}
+	category = strings.TrimPrefix(category, "endpoint_initialization_")
+	switch category {
+	case "dns_lookup", "tls_certificate", "reality_handshake", "authentication_rejected",
+		"http_rejected", "connection_refused", "connection_reset", "network_unreachable",
+		"io_timeout", "udp_timeout", "tls_timeout", "response_timeout", "deadline_exceeded",
+		"context_canceled", "transport_failure":
+		return true
+	default:
+		return false
 	}
 }
 

@@ -7,7 +7,9 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
+	awgdevice "github.com/amnezia-vpn/amneziawg-go/v3/device"
 	"github.com/sagernet/sing-box/option"
 )
 
@@ -28,6 +30,9 @@ const (
 	maximumAWG2JunkSize    = 65535
 	maximumAWG31JunkSize   = 1279
 	maximumPaddingSize     = 65535
+	// The pinned Windows engine uses 2048-32 byte message buffers. Managed
+	// Android/Windows profiles must fit both consumers, even on Linux tests.
+	maximumManagedWirePacketSize = 2016
 )
 
 func validateEndpointOptions(options option.AwgEndpointOptions) error {
@@ -71,10 +76,21 @@ func validateEndpointOptions(options option.AwgEndpointOptions) error {
 		options.S4 < 0 || options.S4 > maximumPaddingSize {
 		return fmt.Errorf("%s: padding values are outside the supported range", selectedContractID)
 	}
+	if err := validatePacketBudget(options, selectedContractID); err != nil {
+		return err
+	}
+	var headerRanges [4][2]uint64
 	for index, header := range []string{options.H1, options.H2, options.H3, options.H4} {
-		if err := validateHeaderRange(header); err != nil {
+		low, high, err := uintRangeBounds(header)
+		if err != nil {
 			return fmt.Errorf("%s: invalid h%d range", selectedContractID, index+1)
 		}
+		for _, previous := range headerRanges[:index] {
+			if low <= previous[1] && high >= previous[0] {
+				return fmt.Errorf("%s: header ranges must not overlap", selectedContractID)
+			}
+		}
+		headerRanges[index] = [2]uint64{low, high}
 	}
 	if len(options.Peers) != 1 {
 		return fmt.Errorf("%s: exactly one peer is required", selectedContractID)
@@ -109,6 +125,24 @@ func validateEndpointOptions(options option.AwgEndpointOptions) error {
 		return validateAWG2Subset(options)
 	}
 	return validateAWG31Subset(options)
+}
+
+func validatePacketBudget(options option.AwgEndpointOptions, selectedContractID string) error {
+	budget := min(maximumManagedWirePacketSize, awgdevice.MaxMessageSize)
+	for index, packet := range [][2]int{
+		{options.S1, awgdevice.MessageInitiationSize},
+		{options.S2, awgdevice.MessageResponseSize},
+		{options.S3, awgdevice.MessageCookieReplySize},
+		{options.S4, int(options.MTU) + awgdevice.MessageTransportSize},
+	} {
+		if packet[0]+packet[1] > budget {
+			return fmt.Errorf("%s: s%d and packet content exceed the managed wire budget", selectedContractID, index+1)
+		}
+	}
+	if options.Jmax > budget {
+		return fmt.Errorf("%s: junk packet exceeds the managed wire budget", selectedContractID)
+	}
+	return nil
 }
 
 func validateAWG2Subset(options option.AwgEndpointOptions) error {
@@ -159,6 +193,9 @@ func validateAWG31Subset(options option.AwgEndpointOptions) error {
 			return fmt.Errorf("%s: invalid %s range", awg31ContractID, field.name)
 		}
 	}
+	if err := validateTimingRelations(options); err != nil {
+		return err
+	}
 	peer := options.Peers[0]
 	if peer.PersistentKeepaliveInterval != 0 && peer.PersistentKeepaliveIntervalRange != "" {
 		return fmt.Errorf("%s: persistent keepalive scalar and range are mutually exclusive", awg31ContractID)
@@ -167,6 +204,30 @@ func validateAWG31Subset(options option.AwgEndpointOptions) error {
 		if err := validateUintRange(peer.PersistentKeepaliveIntervalRange, 1, 600); err != nil {
 			return fmt.Errorf("%s: invalid persistent keepalive range", awg31ContractID)
 		}
+	}
+	return nil
+}
+
+func validateTimingRelations(options option.AwgEndpointOptions) error {
+	// Scalar/range syntax is already validated. Empty values use the same
+	// defaults as the pinned upstream timer implementation.
+	bounds := func(value string, fallback time.Duration) (uint64, uint64) {
+		if value == "" {
+			seconds := uint64(fallback / time.Second)
+			return seconds, seconds
+		}
+		low, high, _ := uintRangeBounds(value)
+		return low, high
+	}
+	_, rekeyHigh := bounds(options.RekeyAfterTime, awgdevice.RekeyAfterTime)
+	rejectLow, _ := bounds(options.RejectAfterTime, awgdevice.RejectAfterTime)
+	if rekeyHigh >= rejectLow {
+		return fmt.Errorf("%s: rekey time must precede key rejection for every range value", awg31ContractID)
+	}
+	keepaliveLow, _ := bounds(options.KeepaliveTimeout, awgdevice.KeepaliveTimeout)
+	retryLow, _ := bounds(options.RekeyTimeout, awgdevice.RekeyTimeout)
+	if keepaliveLow+retryLow >= rejectLow {
+		return fmt.Errorf("%s: receive rekey interval must remain positive", awg31ContractID)
 	}
 	return nil
 }
@@ -227,46 +288,35 @@ func validateInstructionChain(value string) error {
 	return nil
 }
 
-func validateUintRange(value string, minimum uint64, maximum uint64) error {
+func uintRangeBounds(value string) (uint64, uint64, error) {
 	parts := strings.Split(value, "-")
 	if len(parts) < 1 || len(parts) > 2 || parts[0] == "" {
-		return fmt.Errorf("invalid range")
+		return 0, 0, fmt.Errorf("invalid range")
 	}
 	start, err := strconv.ParseUint(parts[0], 10, 32)
 	if err != nil {
-		return fmt.Errorf("invalid range")
+		return 0, 0, fmt.Errorf("invalid range")
 	}
 	end := start
 	if len(parts) == 2 {
 		end, err = strconv.ParseUint(parts[1], 10, 32)
 		if err != nil {
-			return fmt.Errorf("invalid range")
-		}
-	}
-	if start < minimum || end < start || end > maximum {
-		return fmt.Errorf("range outside supported bounds")
-	}
-	return nil
-}
-
-func validateHeaderRange(value string) error {
-	parts := strings.Split(value, "-")
-	if len(parts) < 1 || len(parts) > 2 || parts[0] == "" {
-		return fmt.Errorf("invalid header range")
-	}
-	start, err := strconv.ParseUint(parts[0], 10, 32)
-	if err != nil {
-		return fmt.Errorf("invalid header range")
-	}
-	end := start
-	if len(parts) == 2 {
-		end, err = strconv.ParseUint(parts[1], 10, 32)
-		if err != nil {
-			return fmt.Errorf("invalid header range")
+			return 0, 0, fmt.Errorf("invalid range")
 		}
 	}
 	if end < start {
-		return fmt.Errorf("invalid header range")
+		return 0, 0, fmt.Errorf("invalid range")
+	}
+	return start, end, nil
+}
+
+func validateUintRange(value string, minimum uint64, maximum uint64) error {
+	start, end, err := uintRangeBounds(value)
+	if err != nil {
+		return err
+	}
+	if start < minimum || end > maximum {
+		return fmt.Errorf("range outside supported bounds")
 	}
 	return nil
 }

@@ -313,11 +313,12 @@ type ConnectionState struct {
 	// client side.
 	ECHAccepted bool
 
+	// HelloRetryRequest indicates whether a HelloRetryRequest was sent or received.
+	// Its position mirrors crypto/tls.ConnectionState in the pinned Go 1.26 toolchain.
+	HelloRetryRequest bool
+
 	// ekm is a closure exposed via ExportKeyingMaterial.
 	ekm func(label string, context []byte, length int) ([]byte, error)
-
-	// testingOnlyDidHRR is true if a HelloRetryRequest was sent/received.
-	testingOnlyDidHRR bool
 
 	// testingOnlyPeerSignatureAlgorithm is the signature algorithm used by the
 	// peer to sign the handshake. It is not set for resumed connections.

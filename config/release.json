@@ -3,7 +3,7 @@
   "version": "1.1.0",
   "state": "PRE_CANDIDATE_LOCAL",
   "candidate_created": false,
-  "go_toolchain": "go1.25.13",
+  "go_toolchain": "go1.26.8",
   "desktop_abi": 2,
   "abi_contract": "config/abi-contract.json",
   "core_event_abi_contract": "config/core-event-abi.json",

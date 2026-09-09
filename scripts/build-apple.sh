@@ -4,9 +4,10 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VERSION="$(tr -d '\r\n' < "$ROOT/VERSION")"
 OUTPUT_DIRECTORY="${1:-$ROOT/dist/apple}"
+GO_TOOLCHAIN="$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["go_toolchain"])' "$ROOT/config/release.json")"
 
-if [[ "$(go env GOVERSION)" != "go1.25.13" ]]; then
-  echo "Go 1.25.13 is required." >&2
+if [[ "$(go env GOVERSION)" != "$GO_TOOLCHAIN" ]]; then
+  echo "$GO_TOOLCHAIN is required." >&2
   exit 1
 fi
 

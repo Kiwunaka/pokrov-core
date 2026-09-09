@@ -99,6 +99,8 @@ github.com/database64128/netx-go v0.1.1 h1:dT5LG7Gs7zFZBthFBbzWE6K8wAHjSNAaK7wCY
 github.com/database64128/netx-go v0.1.1/go.mod h1:LNlYVipaYkQArRFDNNJ02VkNV+My9A5XR/IGS7sIBQc=
 github.com/database64128/tfo-go/v2 v2.3.1 h1:EGE+ELd5/AQ0X6YBlQ9RgKs8+kciNhgN3d8lRvfEJQw=
 github.com/database64128/tfo-go/v2 v2.3.1/go.mod h1:k9wcpg/8i5zenspBkc9jUEYehpZZccBnCElzOJB++bU=
+github.com/database64128/tfo-go/v2 v2.3.3 h1:M0X1SgOirhSvMKI8VQfgUtNVM53L6Rzg9Z+DN6fLA50=
+github.com/database64128/tfo-go/v2 v2.3.3/go.mod h1:floVt2REc8xeOxFIyttPCvnd6XPIyHPTQ4fDA3EXdUs=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc h1:U9qPSI2PIWSS1VwoXQT9A3Wy9MM3WgvqSxFWenqJduM=
@@ -652,6 +654,8 @@ golang.org/x/crypto v0.12.0/go.mod h1:NF0Gs7EO5K4qLn+Ylc+fih8BSTeIjAP05siRnAh98y
 golang.org/x/crypto v0.18.0/go.mod h1:R0j02AL6hcrfOiy9T4ZYp/rcWeMxM3L6QYxlOuEG1mg=
 golang.org/x/crypto v0.55.0 h1:+KWHjbgOaAQ66dh/YlkZKHlz9ZUlq61AFirAR9ntP8M=
 golang.org/x/crypto v0.55.0/go.mod h1:uq0V9dE/fzQuJtbnL+2EhWOE63vo164FY8xqEnV9xis=
+golang.org/x/crypto v0.56.0 h1:GUh5Ii4J5jtcseSMiRqr1jXCNHoxjeV9Fmekc2oLy6Y=
+golang.org/x/crypto v0.56.0/go.mod h1:OMW5y6CY9l38uPLmxU6l6pwcXp1obtLo3e6gT7gQR2I=
 golang.org/x/exp v0.0.0-20190121172915-509febef88a4/go.mod h1:CJ0aWSM057203Lf6IL+f9T1iT9GByDxfZKAQTCR3kQA=
 golang.org/x/exp v0.0.0-20251219203646-944ab1f22d93 h1:fQsdNF2N+/YewlRZiricy4P1iimyPKZ/xwniHj8Q2a0=
 golang.org/x/exp v0.0.0-20251219203646-944ab1f22d93/go.mod h1:EPRbTFwzwjXj9NpYyyrvenVh9Y+GFeEvMNh7Xuz7xgU=

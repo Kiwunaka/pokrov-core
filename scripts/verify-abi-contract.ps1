@@ -174,7 +174,11 @@ Assert-SameSet -Label "Core event ABI error codes" -Actual @($eventContract.erro
   "TRANSPORT-001",
   "TRANSPORT-002",
   "TRANSPORT-003",
-  "TRANSPORT-004"
+  "TRANSPORT-004",
+  "TRANSPORT-005",
+  "TRANSPORT-006",
+  "TRANSPORT-007",
+  "DNS-002"
 )
 if (@($eventContract.events).Count -ne 4 -or
     (@($eventContract.events.name) -join ',') -ne
