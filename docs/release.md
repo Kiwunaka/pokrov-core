@@ -88,6 +88,10 @@ The floor was selected from reachable `govulncheck` findings; lowering any of
 these versions requires a new vulnerability review. It changes source/build
 inputs only and does not relabel the retained `1.0.3` artifacts.
 
+The Apple build reads the required Go version from `config/release.json`, as
+the Android and Windows builders do. This keeps its preflight on the same
+toolchain as CI; a preflight pass alone does not prove an Apple artifact build.
+
 The 2026-09-06 C05 review found source call paths from the runtime packages to
 `golang.org/x/crypto/ssh` affected by `GO-2026-6354` and `GO-2026-6355`.
 The fixed `x/crypto 0.56.0` requires Go 1.26; the working toolchain is therefore
