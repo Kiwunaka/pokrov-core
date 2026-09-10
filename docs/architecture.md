@@ -15,6 +15,12 @@ canonical operational codes. An unqualified deadline cannot establish UDP
 blocking, DPI, MTU or other filtering causes. Android and desktop event consumers
 must accept the matching additive error-code contract before new artifacts ship.
 
+Lifecycle failures from start/restart/stop also expose only a classified catalog
+code through the platform error, legacy status observer and stderr log. Their
+internal typed cause remains available through `errors.Is`/`errors.As`; the
+structured event keeps the same code instead of reclassifying the safe message.
+Raw parser/configuration errors are not diagnostic text.
+
 `ray2sing/` converts supported access links into sing-box options. `third_party/warp-plus/` supplies the pinned WARP registration and helper behavior.
 
 The application supplies a materialized sing-box JSON profile for normal operation. Legacy builder APIs remain internal and are not the public POKROV app contract.
