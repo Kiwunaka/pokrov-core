@@ -73,7 +73,7 @@ func RunInstance(ctx context.Context, pokrovSettings *config.PokrovOptions, sing
 // dialer, err := s.libbox.GetInstance().Router().Dialer(context.Background())
 
 func (s *PokrovInstance) Close() error {
-	return s.StartedService.CloseService()
+	return s.StartedService.Close()
 }
 
 func (s *PokrovInstance) GetContent(url string) (string, error) {

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -11,7 +12,33 @@ import (
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/common/urltest"
 	"github.com/sagernet/sing-box/log"
+	"github.com/sagernet/sing-box/option"
 )
+
+func TestStartedServiceCloseEndsObserversAndRejectsReuse(t *testing.T) {
+	s := NewStartedService(ServiceOptions{Context: context.Background(), LogMaxLines: 4})
+	_, statusDone, _ := s.serviceStatusObserver.Subscribe()
+	_, logDone, _ := s.logObserver.Subscribe()
+	_, urlDone, _ := s.urlTestObserver.Subscribe()
+	_, clashDone, _ := s.clashModeObserver.Subscribe()
+	_, connectionDone, _ := s.connectionEventObserver.Subscribe()
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	for _, done := range []<-chan struct{}{statusDone, logDone, urlDone, clashDone, connectionDone} {
+		select {
+		case <-done:
+		case <-time.After(time.Second):
+			t.Fatal("terminal close left an observer subscription alive")
+		}
+	}
+	if err := s.Close(); err != nil {
+		t.Fatalf("repeated terminal close failed: %v", err)
+	}
+	if err := s.StartOrReloadServiceOptions(option.Options{}); !errors.Is(err, os.ErrClosed) {
+		t.Fatalf("closed service accepted reuse: %v", err)
+	}
+}
 
 type unreadyProbeEndpoint struct{ adapter.Endpoint }
 

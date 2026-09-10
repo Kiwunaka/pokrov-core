@@ -162,6 +162,7 @@ func (s *CommandServer) Close() {
 		s.grpcServer.Stop()
 	}
 	common.Close(s.listener)
+	_ = s.StartedService.Close()
 	s.operationalEvents.close()
 }
 

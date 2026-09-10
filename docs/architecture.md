@@ -163,4 +163,20 @@ artifacts also predate the structured event surfaces; clients may recognize
 that exact legacy identity for compatibility, but release `1.2.0` requires
 replacement artifacts with the structured event capability.
 
+`StartedService.CloseService` stops the current engine instance while keeping
+the command server's observers available for another start or reload.
+`StartedService.Close` is terminal: it closes the instance, five background
+observers and URL-test history, and rejects reuse. Desktop stop, discarded
+independent/tunnel instances, failed service construction and command-server
+shutdown use this terminal operation. Monitoring shutdown cancels its context
+before stopping the ticker; ticker ownership is synchronized with activity
+notifications so a stopped monitor cannot restart its scheduler.
+
+The tagged lifecycle regression exercises loopback sessions through repeated
+start/restart/stop, requires old sessions to close, and measures retained Go
+goroutines and Linux descriptors or Windows handles. It fixes the test's Go
+scheduler at two processors to exclude process-wide thread-pool growth from
+the service ownership assertion. Exact artifact measurements and device VPN
+checks remain separate from this source-level test.
+
 Server inbounds, panel state, provisioning, and traffic accounting remain outside POKROV Core.
