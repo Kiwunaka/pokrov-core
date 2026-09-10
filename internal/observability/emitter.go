@@ -191,6 +191,9 @@ func ClassifyStartError(err error) string {
 	if err == nil {
 		return ""
 	}
+	if code := err.Error(); isKnownErrorCode(code) {
+		return code
+	}
 	switch urltest.ObservedFailure(err) {
 	case "dns_lookup":
 		return "DNS-002"
