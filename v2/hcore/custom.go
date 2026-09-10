@@ -27,7 +27,7 @@ func StopAndAlert(msgType MessageType, message string) {
 	SetCoreStatus(CoreStates_STOPPED, msgType, message)
 
 	if ss := static.StartedService; ss != nil {
-		ss.CloseService()
+		ss.Close()
 		static.StartedService = nil
 	}
 }

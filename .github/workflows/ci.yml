@@ -45,6 +45,9 @@ jobs:
       - name: Race-test supported runtime packages
         run: go test -race ./internal/observability ./v2/config ./v2/hcore ./v2/hutils ./ray2sing/ray2sing
 
+      - name: Check release lifecycle resource ownership
+        run: go test -race -count=1 -tags with_clash_api -run '^TestStartStopReleasesServiceObservers$' -v ./v2/hcore
+
       - name: Install govulncheck
         run: go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
 

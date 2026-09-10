@@ -46,6 +46,7 @@ type StartedService struct {
 	// groupID          int
 	// systemProxyEnabled      bool
 	serviceAccess           sync.RWMutex
+	closed                  bool
 	serviceStatus           *ServiceStatus
 	serviceStatusSubscriber *observable.Subscriber[*ServiceStatus]
 	serviceStatusObserver   *observable.Observer[*ServiceStatus]
@@ -178,6 +179,10 @@ func (s *StartedService) StartOrReloadServiceOptions(profileOptions option.Optio
 }
 func (s *StartedService) startOrReloadServiceImp(profileOptions *option.Options, profileContent string, options *OverrideOptions) error {
 	s.serviceAccess.Lock()
+	if s.closed {
+		s.serviceAccess.Unlock()
+		return os.ErrClosed
+	}
 	switch s.serviceStatus.Status {
 	case ServiceStatus_IDLE, ServiceStatus_STARTED, ServiceStatus_STARTING:
 	default:
@@ -190,6 +195,10 @@ func (s *StartedService) startOrReloadServiceImp(profileOptions *option.Options,
 		s.serviceAccess.Unlock()
 		_ = oldInstance.Close()
 		s.serviceAccess.Lock()
+		if s.closed {
+			s.serviceAccess.Unlock()
+			return os.ErrClosed
+		}
 	}
 	s.updateStatus(ServiceStatus_STARTING)
 	s.resetLogs()
@@ -216,6 +225,10 @@ func (s *StartedService) startOrReloadServiceImp(profileOptions *option.Options,
 	s.serviceAccess.Unlock()
 	err = instance.Start()
 	s.serviceAccess.Lock()
+	if s.closed {
+		s.serviceAccess.Unlock()
+		return os.ErrClosed
+	}
 	if s.serviceStatus.Status != ServiceStatus_STARTING {
 		s.serviceAccess.Unlock()
 		return nil
@@ -251,6 +264,32 @@ func (s *StartedService) CloseService() error {
 	s.serviceAccess.Unlock()
 	runtime.GC()
 	return nil
+}
+
+// Close releases the service owner, including its background observers.
+// CloseService remains the restartable operation used by a live command server.
+func (s *StartedService) Close() error {
+	s.serviceAccess.Lock()
+	defer s.serviceAccess.Unlock()
+	if s.closed {
+		return nil
+	}
+	s.closed = true
+	var err error
+	if s.instance != nil {
+		err = s.instance.Close()
+	}
+	s.instance = nil
+	s.startedAt = time.Time{}
+	s.updateStatus(ServiceStatus_IDLE)
+	return errors.Join(err, common.Close(
+		s.serviceStatusObserver,
+		s.logObserver,
+		s.urlTestObserver,
+		s.clashModeObserver,
+		s.connectionEventObserver,
+		s.urlTestHistoryStorage,
+	))
 }
 
 func (s *StartedService) SetError(err error) {

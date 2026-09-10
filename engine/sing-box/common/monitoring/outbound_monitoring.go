@@ -316,7 +316,9 @@ func (m *OutboundMonitoring) Start(stage adapter.StartStage) error {
 			go m.groupNotifierLoop(m.groups[groupTag])
 		}
 
+		m.access.Lock()
 		m.started = true
+		m.access.Unlock()
 		m.Touch()
 	}
 
@@ -331,9 +333,11 @@ func (m *OutboundMonitoring) startTimerWorkers() {
 
 	m.pauseCallback = pause.RegisterTicker(m.pause, m.mainTicker, m.mainInterval, nil)
 	m.schedulerWG.Add(1)
-	go m.scheduleLoop()
+	go m.scheduleLoop(m.mainTicker)
 }
 func (m *OutboundMonitoring) stopTimerWorkers() {
+	m.access.Lock()
+	defer m.access.Unlock()
 	if !m.workersRunning.CompareAndSwap(true, false) {
 		return
 	}
@@ -443,6 +447,7 @@ func (m *OutboundMonitoring) UnsubscribeGroup(groupTag string, observer <-chan G
 
 func (m *OutboundMonitoring) Close() error {
 	m.closerOnce.Do(func() {
+		m.cancel()
 		m.stopTimerWorkers()
 
 		// close(m.priorityQueue)
@@ -452,7 +457,6 @@ func (m *OutboundMonitoring) Close() error {
 				g.observer.Close()
 			}
 		}
-		m.cancel()
 		m.workerWG.Wait()
 		m.schedulerWG.Wait()
 
@@ -460,10 +464,9 @@ func (m *OutboundMonitoring) Close() error {
 	return nil
 }
 
-func (m *OutboundMonitoring) scheduleLoop() {
+func (m *OutboundMonitoring) scheduleLoop(ticker *time.Ticker) {
 	m.logger.Info("outbound monitoring schedule loop started")
 	m.startCycleOnce()
-	ticker := m.mainTicker
 	for {
 		select {
 		case <-m.ctx.Done():
@@ -838,11 +841,11 @@ func (m *OutboundMonitoring) makeGroup(tag string) *groupState {
 }
 
 func (m *OutboundMonitoring) Touch() {
-	if !m.started {
-		return
-	}
 	m.access.Lock()
 	defer m.access.Unlock()
+	if !m.started || m.ctx.Err() != nil {
+		return
+	}
 	if m.mainTicker != nil {
 		m.lastActive.Store(time.Now())
 		return
