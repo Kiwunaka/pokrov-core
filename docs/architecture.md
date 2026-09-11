@@ -6,6 +6,12 @@ POKROV Core is one client runtime with three layers:
 2. `v2/` owns setup, configuration, lifecycle, WARP, DNS, and safe shutdown behavior.
 3. `engine/sing-box/` owns transports, routing, TLS, TUN, and protocol implementations.
 
+The pinned `replace/sing-tun` module closes the Windows adapter immediately if
+session creation fails. Its finalizer passes the actual adapter handle to
+`WintunCloseAdapter`. The [patch record](../engine/sing-box/replace/sing-tun/POKROV-PATCHES.md)
+identifies the upstream base and Windows callback tests; those tests do not
+load a driver or alter networking.
+
 URL probes retain a typed connect/TLS/response stage. Cancellation after dial
 returns an error, and the optional second request retains the original context.
 The safe error wrapper exposes no target or raw cause through its message while

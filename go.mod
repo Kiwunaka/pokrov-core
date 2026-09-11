@@ -270,3 +270,5 @@ replace github.com/sagernet/tailscale => ./engine/sing-box/replace/tailscale
 replace github.com/Psiphon-Labs/quic-go => ./engine/sing-box/replace/psiphon-quic-go
 
 replace github.com/Psiphon-Labs/psiphon-tls => ./engine/sing-box/replace/psiphon-tls
+
+replace github.com/sagernet/sing-tun => ./engine/sing-box/replace/sing-tun
