@@ -11,6 +11,14 @@ notices are retained. Only two upstream source files change:
 - `tun_windows.go`: close the newly created adapter immediately when
   `StartSession` fails, matching the existing configuration-failure cleanup.
 
+The four supplied `internal/wintun/*/wintun.dll` files remain byte-identical
+to the official Wintun 0.14.1 archive (SHA-256
+`07c256185d6ee3652e09fa55c0b673e2624b565e02c4b9091c79ca7d2f24ef51`).
+These prebuilt files have separate [binary terms](LICENSE-WINTUN-BINARIES.txt),
+retained verbatim from `wintun/LICENSE.txt` in that archive. The Core and module
+source licenses do not replace those terms. This record establishes provenance,
+not a complete license-compatibility assessment.
+
 The three `pokrov_*` fixture files require `pokrov_wintun_test` and Windows.
 They replace Wintun calls with synthetic callbacks, never load the DLL or
 change networking, and prove the original failures and corrected ownership.
