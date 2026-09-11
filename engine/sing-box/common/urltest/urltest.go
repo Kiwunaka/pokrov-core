@@ -98,7 +98,9 @@ func NewHistoryStorage() *HistoryStorage {
 }
 
 func (s *HistoryStorage) SetHook(hook *observable.Subscriber[struct{}]) {
+	s.access.Lock()
 	s.updateHook = hook
+	s.access.Unlock()
 }
 
 func (s *HistoryStorage) LoadURLTestHistory(tag string) *adapter.URLTestHistory {
@@ -150,7 +152,9 @@ func (s *HistoryStorage) AddOnlyIpToHistory(tag string, history *adapter.URLTest
 }
 
 func (s *HistoryStorage) notifyUpdated() {
+	s.access.RLock()
 	updateHook := s.updateHook
+	s.access.RUnlock()
 	if updateHook != nil {
 		updateHook.Emit(struct{}{})
 	}

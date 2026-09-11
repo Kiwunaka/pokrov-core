@@ -26,6 +26,10 @@ The server remains a separate Xray-based system. This repository builds client o
 | iOS/macOS | `PokrovCore.xcframework` | source-build CI; hosted result and device proof required |
 | Linux | none | not shipped in POKROV 1.2.0 |
 
+The [private Linux daemon adapter](platform/linux/README.md) now provides the
+conditional beta's internal Core lifecycle. Its isolated-VM evidence does not
+change the public release targets above.
+
 ## Requirements
 
 - Go `1.25.13`

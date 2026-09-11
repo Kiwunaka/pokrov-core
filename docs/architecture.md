@@ -171,6 +171,9 @@ independent/tunnel instances, failed service construction and command-server
 shutdown use this terminal operation. Monitoring shutdown cancels its context
 before stopping the ticker; ticker ownership is synchronized with activity
 notifications so a stopped monitor cannot restart its scheduler.
+URL-test history uses its existing mutex when installing, reading and clearing
+the update hook, so a probe finishing during shutdown cannot race with hook
+detachment. Notification happens after releasing the history lock.
 
 The tagged lifecycle regression exercises loopback sessions through repeated
 start/restart/stop, requires old sessions to close, and measures retained Go
