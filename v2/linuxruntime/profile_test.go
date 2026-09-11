@@ -21,7 +21,7 @@ func TestPrepareOwnsNetworkingAndKeepsDNS(t *testing.T) {
 		t.Fatal(err)
 	}
 	tun := result["inbounds"].([]any)[0].(map[string]any)
-	if tun["interface_name"] != plan.TunnelInterface || tun["auto_redirect"] != false || tun["strict_route"] != true || tun["iproute2_table_index"] != float64(20555) {
+	if tun["interface_name"] != plan.TunnelInterface || tun["auto_redirect"] != false || tun["auto_route"] != false || tun["strict_route"] != true {
 		t.Fatal("profile controls TUN ownership")
 	}
 	if !strings.Contains(string(data), `"type":"https"`) || result["log"].(map[string]any)["disabled"] != true {

@@ -13,6 +13,8 @@ import (
 	"github.com/Kiwunaka/POKROV-core/v2/linuxruntime"
 	"github.com/sagernet/netlink"
 	"github.com/sagernet/sing-box/experimental/libbox"
+	"github.com/sagernet/sing-box/protocol/tun"
+	"golang.org/x/sys/unix"
 )
 
 var errLinuxDaemon = errors.New("linux core runtime failed")
@@ -35,24 +37,24 @@ func ServeLinuxDaemon(ctx context.Context, profile []byte, root string, commands
 	if err != nil {
 		return errLinuxDaemon
 	}
-	// sing-tun removes rules in [priority, priority+10] during cleanup.
-	// Refuse any existing owner in that range or the fixed route table.
-	routes, err := netlink.RouteListFiltered(netlink.FAMILY_ALL,
-		&netlink.Route{Table: linuxruntime.RouteTable}, netlink.RT_FILTER_TABLE)
-	if err != nil || len(routes) != 0 {
-		return errLinuxDaemon
-	}
-	rules, err := netlink.RuleList(netlink.FAMILY_ALL)
-	if err != nil {
-		return errLinuxDaemon
-	}
-	for _, rule := range rules {
-		if rule.Table == linuxruntime.RouteTable ||
-			(rule.Priority >= linuxruntime.RulePriority && rule.Priority <= linuxruntime.RulePriority+10) {
-			return errLinuxDaemon
+	base, cancelBase := context.WithCancel(tun.WithExternalConfiguration(libbox.BaseContext(nil), func() error {
+		link, err := netlink.LinkByName(plan.TunnelInterface)
+		if err != nil {
+			return err
 		}
-	}
-	base, cancelBase := context.WithCancel(libbox.BaseContext(nil))
+		for _, dns := range plan.DNSServers {
+			prefix := "172.19.0.1/28"
+			if dns == "fdfe:dcba:9876::2" {
+				prefix = "fdfe:dcba:9876::1/126"
+			}
+			address, _ := netlink.ParseAddr(prefix)
+			address.Flags = unix.IFA_F_NOPREFIXROUTE | unix.IFA_F_NODAD
+			if err := netlink.AddrAdd(link, address); err != nil {
+				return err
+			}
+		}
+		return nil
+	}))
 	defer cancelBase()
 	stopCancellation := context.AfterFunc(ctx, cancelBase)
 	defer stopCancellation()

@@ -14,8 +14,6 @@ const (
 	MaximumConfigBytes        = 512 * 1024
 	TunnelInterface           = "pokrov0"
 	RoutingMark        uint32 = 0x504b
-	RouteTable                = 20555
-	RulePriority              = 20555
 )
 
 var ErrProfile = errors.New("linux profile rejected")
@@ -127,12 +125,11 @@ func Prepare(input []byte) ([]byte, Plan, error) {
 		return nil, Plan{}, ErrProfile
 	}
 	tunnel["interface_name"] = TunnelInterface
-	tunnel["auto_route"] = true
+	// linuxd journals and owns policy routes; Core owns only the TUN device.
+	tunnel["auto_route"] = false
 	tunnel["strict_route"] = true
 	tunnel["auto_redirect"] = false // linuxd exclusively owns nftables.
 	tunnel["stack"] = "system"
-	tunnel["iproute2_table_index"] = RouteTable
-	tunnel["iproute2_rule_index"] = RulePriority
 	route, ok := root["route"].(map[string]any)
 	if !ok || !onlyKeys(route, "rules", "rule_set", "final", "find_process", "auto_detect_interface", "default_domain_resolver") {
 		return nil, Plan{}, ErrProfile
