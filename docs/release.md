@@ -40,6 +40,19 @@ benchmark, a whole-device routing proof or a preset recommendation. Missing
 endpoint material still skips this operator gate; local unit tests do not
 replace the three live results.
 
+On Linux, the operator-only `TestOwnedAWGPresetBenchmark` compares the AWG3.1
+control Jc 6 with client Jc 1 and 12 at MTU 1280. The supplied owned fixture
+serves 5 MiB of synthetic data paced at 2 Mibit/s, then echoes 100 bounded UDP
+datagrams. The test records process CPU during the stream, TCP/verified-egress
+readiness, UDP loss/duplicates, server TCP retransmissions and outer UDP payload
+counts/bytes. TCP readiness includes AWG startup; it is not an isolated
+cryptographic-handshake measurement. The byte counts exclude outer IP/UDP
+headers, and the paced stream is not maximum throughput. Battery is explicitly
+unmeasured. This fixture gate skips without operator-supplied material; it does
+not run on ordinary connects or change the managed preset. Compare repeated
+results within each origin and retain fixture cleanup evidence before making a
+preset decision.
+
 Core CI runs the complete root-module test graph, focused `go vet`, race and
 pinned `govulncheck v1.7.0` reachable-code scans for supported runtime packages
 and the Android event bridge. Pinned Staticcheck `v0.7.0` runs the `SA2*`,
