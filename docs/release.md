@@ -53,6 +53,21 @@ not run on ordinary connects or change the managed preset. Compare repeated
 results within each origin and retain fixture cleanup evidence before making a
 preset decision.
 
+Both module graphs pin Psiphon uTLS to
+`v1.1.1-0.20260729134728-7a1fc711853d`, the upstream
+[`release-branch.go1.26` commit](https://github.com/Psiphon-Labs/utls/commit/7a1fc711853d6dd31c10eca10bbd53bf3b082aac).
+That exact module contains its own
+[BSD license](https://github.com/Psiphon-Labs/utls/blob/7a1fc711853d6dd31c10eca10bbd53bf3b082aac/LICENSE).
+This replaces the older fork revision that lacked a root license; it does not
+apply the new branch's license retroactively to retained old artifacts.
+The Psiphon adapter compiles without API changes, and the upstream certificate,
+TLS profile compatibility, fragmentation-without-SNI and obfuscated-session-ticket
+tests pass against local Linux fixtures. The upstream test package imports a
+Unix-only IPC dependency and does not compile on Windows, although the product
+adapter does. Full Core validation and newly bound product binaries/notices are
+still required before release; older binaries continue to retain their original
+dependency and licensing evidence.
+
 Core CI runs the complete root-module test graph, focused `go vet`, race and
 pinned `govulncheck v1.7.0` reachable-code scans for supported runtime packages
 and the Android event bridge. Pinned Staticcheck `v0.7.0` runs the `SA2*`,

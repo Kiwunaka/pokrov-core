@@ -32,6 +32,8 @@ github.com/Psiphon-Labs/psiphon-tunnel-core v1.0.11-0.20260126173038-c86a1497a76
 github.com/Psiphon-Labs/psiphon-tunnel-core v1.0.11-0.20260126173038-c86a1497a760/go.mod h1:FcBjozoGjC2I7ZID0lXFlVQcy/jx6irCzlPxapGebEY=
 github.com/Psiphon-Labs/utls v0.0.0-20260129182755-24497d415a8d h1:PlKwrArEuQOVqEmThSs9KsXMiBduP8MSu9rlWmQ4jgE=
 github.com/Psiphon-Labs/utls v0.0.0-20260129182755-24497d415a8d/go.mod h1:1vv0gVAzq9e2XYkW8HAKrmtuuZrBdDixQFx5H22KAjI=
+github.com/Psiphon-Labs/utls v1.1.1-0.20260729134728-7a1fc711853d h1:htAwZYlfEn3FJXqmY2iTh/53RRfcbkBahdAjDr25UnA=
+github.com/Psiphon-Labs/utls v1.1.1-0.20260729134728-7a1fc711853d/go.mod h1:zoUi6jXnfX7ICJb9Epr8XPmhp28AnGhGz2J+bxyg7Cs=
 github.com/ajg/form v1.5.1 h1:t9c7v8JUKu/XxOGBU0yjNpaMloxGEJhUkqFRq0ibGeU=
 github.com/ajg/form v1.5.1/go.mod h1:uL1WgH+h2mgNtvBq0339dVnzXdBETtL2LeUXaIv25UY=
 github.com/akutz/memconn v0.1.0 h1:NawI0TORU4hcOMsMr11g7vwlCdkYeLKXBcxWu2W/P8A=
