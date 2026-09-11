@@ -167,6 +167,8 @@ type ownedLabObservedDialer struct {
 	readCount       atomic.Int64
 	writeMax        atomic.Int64
 	readMax         atomic.Int64
+	writeBytes      atomic.Int64
+	readBytes       atomic.Int64
 }
 
 func (d *ownedLabObservedDialer) ListenPacket(
@@ -184,6 +186,8 @@ func (d *ownedLabObservedDialer) ListenPacket(
 		readCount:       &d.readCount,
 		writeMax:        &d.writeMax,
 		readMax:         &d.readMax,
+		writeBytes:      &d.writeBytes,
+		readBytes:       &d.readBytes,
 	}, nil
 }
 
@@ -194,12 +198,15 @@ type ownedLabObservedPacketConnection struct {
 	readCount       *atomic.Int64
 	writeMax        *atomic.Int64
 	readMax         *atomic.Int64
+	writeBytes      *atomic.Int64
+	readBytes       *atomic.Int64
 }
 
 func (c *ownedLabObservedPacketConnection) ReadFrom(payload []byte) (int, net.Addr, error) {
 	read, source, err := c.PacketConn.ReadFrom(payload)
 	if read > 0 {
 		c.readCount.Add(1)
+		c.readBytes.Add(int64(read))
 		ownedLabRecordMaximum(c.readMax, int64(read))
 	}
 	return read, source, err
@@ -212,6 +219,7 @@ func (c *ownedLabObservedPacketConnection) WriteTo(
 	written, err := c.PacketConn.WriteTo(payload, destination)
 	if written > 0 {
 		c.writeCount.Add(1)
+		c.writeBytes.Add(int64(written))
 		ownedLabRecordMaximum(c.writeMax, int64(written))
 	}
 	if err != nil {

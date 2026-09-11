@@ -59,6 +59,15 @@ type Inbound struct {
 	routeExcludeAddressSet      []*netipx.IPSet
 }
 
+type externalConfigurationKey struct{}
+
+// WithExternalConfiguration configures the Linux link before its system stack
+// binds listeners, leaving all policy routes to the privileged daemon.
+// It is deliberately unavailable through profile JSON options.
+func WithExternalConfiguration(ctx context.Context, configure func() error) context.Context {
+	return context.WithValue(ctx, externalConfigurationKey{}, configure)
+}
+
 func NewInbound(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, options option.TunInboundOptions) (adapter.Inbound, error) {
 	address := options.Address
 	var deprecatedAddressUsed bool
@@ -200,35 +209,36 @@ func NewInbound(ctx context.Context, router adapter.Router, logger log.ContextLo
 		logger:         logger,
 		inboundOptions: options.InboundOptions,
 		tunOptions: tun.Options{
-			Name:                     options.InterfaceName,
-			MTU:                      tunMTU,
-			GSO:                      enableGSO,
-			Inet4Address:             inet4Address,
-			Inet6Address:             inet6Address,
-			AutoRoute:                options.AutoRoute,
-			IPRoute2TableIndex:       tableIndex,
-			IPRoute2RuleIndex:        ruleIndex,
-			AutoRedirectInputMark:    inputMark,
-			AutoRedirectOutputMark:   outputMark,
-			AutoRedirectResetMark:    resetMark,
-			AutoRedirectNFQueue:      nfQueue,
-			ExcludeMPTCP:             options.ExcludeMPTCP,
-			Inet4LoopbackAddress:     common.Filter(options.LoopbackAddress, netip.Addr.Is4),
-			Inet6LoopbackAddress:     common.Filter(options.LoopbackAddress, netip.Addr.Is6),
-			StrictRoute:              options.StrictRoute,
-			IncludeInterface:         options.IncludeInterface,
-			ExcludeInterface:         options.ExcludeInterface,
-			Inet4RouteAddress:        inet4RouteAddress,
-			Inet6RouteAddress:        inet6RouteAddress,
-			Inet4RouteExcludeAddress: inet4RouteExcludeAddress,
-			Inet6RouteExcludeAddress: inet6RouteExcludeAddress,
-			IncludeUID:               includeUID,
-			ExcludeUID:               excludeUID,
-			IncludeAndroidUser:       options.IncludeAndroidUser,
-			IncludePackage:           options.IncludePackage,
-			ExcludePackage:           options.ExcludePackage,
-			InterfaceMonitor:         networkManager.InterfaceMonitor(),
-			EXP_MultiPendingPackets:  multiPendingPackets,
+			EXP_ExternalConfiguration: C.IsLinux && ctx.Value(externalConfigurationKey{}) != nil,
+			Name:                      options.InterfaceName,
+			MTU:                       tunMTU,
+			GSO:                       enableGSO,
+			Inet4Address:              inet4Address,
+			Inet6Address:              inet6Address,
+			AutoRoute:                 options.AutoRoute,
+			IPRoute2TableIndex:        tableIndex,
+			IPRoute2RuleIndex:         ruleIndex,
+			AutoRedirectInputMark:     inputMark,
+			AutoRedirectOutputMark:    outputMark,
+			AutoRedirectResetMark:     resetMark,
+			AutoRedirectNFQueue:       nfQueue,
+			ExcludeMPTCP:              options.ExcludeMPTCP,
+			Inet4LoopbackAddress:      common.Filter(options.LoopbackAddress, netip.Addr.Is4),
+			Inet6LoopbackAddress:      common.Filter(options.LoopbackAddress, netip.Addr.Is6),
+			StrictRoute:               options.StrictRoute,
+			IncludeInterface:          options.IncludeInterface,
+			ExcludeInterface:          options.ExcludeInterface,
+			Inet4RouteAddress:         inet4RouteAddress,
+			Inet6RouteAddress:         inet6RouteAddress,
+			Inet4RouteExcludeAddress:  inet4RouteExcludeAddress,
+			Inet6RouteExcludeAddress:  inet6RouteExcludeAddress,
+			IncludeUID:                includeUID,
+			ExcludeUID:                excludeUID,
+			IncludeAndroidUser:        options.IncludeAndroidUser,
+			IncludePackage:            options.IncludePackage,
+			ExcludePackage:            options.ExcludePackage,
+			InterfaceMonitor:          networkManager.InterfaceMonitor(),
+			EXP_MultiPendingPackets:   multiPendingPackets,
 		},
 		udpTimeout:        udpTimeout,
 		stack:             options.Stack,
@@ -397,6 +407,11 @@ func (t *Inbound) Start(stage adapter.StartStage) error {
 		}
 		t.logger.Trace("creating stack")
 		t.tunIf = tunInterface
+		if tunOptions.EXP_ExternalConfiguration {
+			if err := t.ctx.Value(externalConfigurationKey{}).(func() error)(); err != nil {
+				return E.Cause(err, "configure externally owned TUN addresses")
+			}
+		}
 		var (
 			forwarderBindInterface bool
 			includeAllNetworks     bool
