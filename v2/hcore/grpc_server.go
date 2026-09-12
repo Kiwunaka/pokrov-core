@@ -67,13 +67,11 @@ func Setup(params *SetupRequest, platformInterface libbox.PlatformInterface) (er
 	static.BaseContext = libbox.BaseContext(platformInterface)
 	static.debug = params.Debug
 	static.globalPlatformInterface = platformInterface
-	tcpConn := true // runtime.GOOS == "windows" // TODO add TVOS
 	libbox.Setup(
 		&libbox.SetupOptions{
-			BasePath:    params.BasePath,
-			WorkingPath: params.WorkingDir,
-			TempPath:    params.TempDir,
-			// IsTVOS:          !tcpConn,
+			BasePath:        params.BasePath,
+			WorkingPath:     params.WorkingDir,
+			TempPath:        params.TempDir,
 			FixAndroidStack: params.FixAndroidStack,
 			LogMaxLines:     100,
 			Debug:           params.Debug,
@@ -81,7 +79,7 @@ func Setup(params *SetupRequest, platformInterface libbox.PlatformInterface) (er
 
 	hutils.RedirectStderr(fmt.Sprint(params.WorkingDir, "/data/stderr", params.Mode, ".log"))
 
-	Log(LogLevel_DEBUG, LogType_CORE, fmt.Sprintf("libbox.Setup success %s %s %s %v", params.BasePath, params.WorkingDir, params.TempDir, tcpConn))
+	Log(LogLevel_DEBUG, LogType_CORE, "libbox.Setup success")
 
 	sWorkingPath = params.WorkingDir
 	os.Chdir(sWorkingPath)
@@ -110,7 +108,7 @@ func Setup(params *SetupRequest, platformInterface libbox.PlatformInterface) (er
 		return E.Cause(err, "create logger")
 	}
 
-	Log(LogLevel_DEBUG, LogType_CORE, fmt.Sprintf("StartGrpcServerByMode %s %d\n", params.Listen, params.Mode))
+	Log(LogLevel_DEBUG, LogType_CORE, "StartGrpcServerByMode ", params.Mode)
 	switch params.Mode {
 	case SetupMode_OLD:
 		statusPropagationPort = int64(params.FlutterStatusPort)
