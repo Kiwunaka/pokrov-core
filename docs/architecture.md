@@ -153,7 +153,9 @@ boundary does not prove that a retained AAR/DLL contains the change.
 
 The legacy logger follows the same boundary: release setup records only whether
 stored settings were available and never formats the settings value or its
-database table. The desktop FFI returns a local caller-owned error string for
+database table. Setup messages omit caller-provided filesystem paths and the
+listen address from both stderr and the legacy observer, including with debug
+disabled. The desktop FFI returns a local caller-owned error string for
 ABI compatibility, but it does not mirror that raw error into the process log;
 the release host maps it to a fixed public failure category.
 
