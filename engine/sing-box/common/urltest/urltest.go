@@ -168,6 +168,34 @@ func (s *HistoryStorage) Close() error {
 }
 
 func URLTest(ctx context.Context, link string, detour N.Dialer) (t uint16, err error) {
+	// The deadline and the stage observation must share one boundary. A caller
+	// racing this result with ctx.Done() would discard the TLS/response stage.
+	var stage atomic.Uint32
+	type result struct {
+		delay uint16
+		err   error
+	}
+	done := make(chan result, 1)
+	go func() {
+		delay, probeErr := urlTest(ctx, link, detour, &stage)
+		done <- result{delay, probeErr}
+	}()
+	select {
+	case value := <-done:
+		t, err = value.delay, value.err
+	case <-ctx.Done():
+		err = context.Cause(ctx)
+	}
+	if err == nil && ctx.Err() != nil {
+		err = context.Cause(ctx)
+	}
+	if err != nil {
+		err = &ProbeError{Stage: ProbeStage(stage.Load()), Err: err}
+	}
+	return
+}
+
+func urlTest(ctx context.Context, link string, detour N.Dialer, stage *atomic.Uint32) (t uint16, err error) {
 	if detour == nil {
 		err = fmt.Errorf("urltest dialer is nil")
 		return
@@ -189,13 +217,6 @@ func URLTest(ctx context.Context, link string, detour N.Dialer) (t uint16, err e
 	}
 
 	start := time.Now()
-	var stage atomic.Uint32
-	stage.Store(uint32(ProbeStageConnect))
-	defer func() {
-		if err != nil {
-			err = &ProbeError{Stage: ProbeStage(stage.Load()), Err: err}
-		}
-	}()
 	instance, err := detour.DialContext(ctx, "tcp", M.ParseSocksaddrHostPortStr(hostname, port))
 	if err != nil {
 		return

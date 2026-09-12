@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
+	"net"
 	"os"
 	"strings"
 	"testing"
@@ -13,6 +15,7 @@ import (
 	"github.com/sagernet/sing-box/common/urltest"
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
+	M "github.com/sagernet/sing/common/metadata"
 )
 
 func TestStartedServiceCloseEndsObserversAndRejectsReuse(t *testing.T) {
@@ -41,6 +44,34 @@ func TestStartedServiceCloseEndsObserversAndRejectsReuse(t *testing.T) {
 }
 
 type unreadyProbeEndpoint struct{ adapter.Endpoint }
+
+type stalledTLSProbeEndpoint struct {
+	adapter.Endpoint
+	conn net.Conn
+}
+
+func (stalledTLSProbeEndpoint) IsReady() bool { return true }
+
+func (e stalledTLSProbeEndpoint) DialContext(context.Context, string, M.Socksaddr) (net.Conn, error) {
+	return e.conn, nil
+}
+
+func TestSelectedEndpointDeadlineRetainsTLSStage(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	client, server := net.Pipe()
+	defer server.Close()
+	go io.Copy(io.Discard, server) // Receive ClientHello without replying.
+	s := NewStartedService(ServiceOptions{Context: ctx, LogMaxLines: 4})
+	defer s.Close()
+	if s.testSelectedEndpoint(&Instance{ctx: ctx}, stalledTLSProbeEndpoint{conn: client}) {
+		t.Fatal("stalled TLS negotiation supplied egress proof")
+	}
+	entry := s.logLines.Back()
+	if entry == nil || entry.Value.Message != "selected endpoint URL test failed category=tls_timeout" {
+		t.Fatal("endpoint deadline discarded the observed TLS stage")
+	}
+}
 
 func (unreadyProbeEndpoint) IsReady() bool { return false }
 
