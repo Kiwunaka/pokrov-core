@@ -9,3 +9,4 @@
 *.yml text eol=lf
 *.yaml text eol=lf
 *.ps1 text eol=crlf
+engine/sing-box/replace/sing-tun/LICENSE-WINTUN-BINARIES.txt -text whitespace=cr-at-eol
