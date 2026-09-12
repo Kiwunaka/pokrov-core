@@ -82,6 +82,12 @@ try {
     if ($LASTEXITCODE -ne 0) {
       throw "POKROV Core full module tests failed."
     }
+    if ($IsWindows) {
+      & $goCommand.Source test -count=1 -tags pokrov_wintun_test -run '^TestPokrov(FinalizerPassesAdapterHandle|FailedSessionClosesAdapterImmediately)$' github.com/sagernet/sing-tun/internal/wintun github.com/sagernet/sing-tun
+      if ($LASTEXITCODE -ne 0) {
+        throw "Windows adapter ownership tests failed."
+      }
+    }
   } finally {
     Pop-Location
   }
