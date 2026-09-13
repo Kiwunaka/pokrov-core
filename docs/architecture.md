@@ -14,6 +14,9 @@ load a driver or alter networking.
 
 URL probes retain a typed connect/TLS/response stage. Cancellation after dial
 returns an error, and the optional second request retains the original context.
+The URL probe itself owns the bounded wait and samples its observed stage when
+the context expires. Selected-endpoint and background outbound checks consume
+that result directly, so an outer timer cannot erase a TLS or response timeout.
 The safe error wrapper exposes no target or raw cause through its message while
 preserving `errors.Is`/`errors.As`. Typed DNS errors take precedence over generic
 timeouts; typed UDP timeouts and observed TLS/response timeouts map to separate

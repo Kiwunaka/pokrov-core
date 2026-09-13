@@ -670,22 +670,7 @@ func (s *StartedService) URLTest(ctx context.Context, request *URLTestRequest) (
 			outboundTag := outboundToTest.Tag()
 			probeContext, cancelProbe := context.WithTimeout(boxService.ctx, C.TCPTimeout)
 			defer cancelProbe()
-			type probeResult struct {
-				delay uint16
-				err   error
-			}
-			resultChannel := make(chan probeResult, 1)
-			go func() {
-				t, err := urltest.URLTest(probeContext, "", outboundToTest)
-				resultChannel <- probeResult{delay: t, err: err}
-			}()
-			var result probeResult
-			select {
-			case result = <-resultChannel:
-			case <-probeContext.Done():
-				result.err = context.Cause(probeContext)
-			}
-			t, err := result.delay, result.err
+			t, err := urltest.URLTest(probeContext, "", outboundToTest)
 			if err != nil {
 				if outboundTag == selectedTag {
 					category := urlTestErrorCategory(err)
@@ -759,26 +744,9 @@ func (s *StartedService) testSelectedEndpoint(boxService *Instance, endpoint ada
 
 	probeContext, cancelProbe := context.WithTimeout(boxService.ctx, C.TCPTimeout)
 	defer cancelProbe()
-	type probeResult struct {
-		delay uint16
-		err   error
-	}
-	resultChannel := make(chan probeResult, 1)
-	go func() {
-		delay, err := urltest.URLTest(probeContext, "", endpoint)
-		resultChannel <- probeResult{delay: delay, err: err}
-	}()
-	var result probeResult
-	select {
-	case result = <-resultChannel:
-	case <-probeContext.Done():
-		result.err = context.Cause(probeContext)
-	}
-	if result.err == nil && probeContext.Err() != nil {
-		result.err = context.Cause(probeContext)
-	}
-	if result.err != nil {
-		s.writeSelectedEndpointProbeFailure(urlTestErrorCategory(result.err), result.err)
+	_, err := urltest.URLTest(probeContext, "", endpoint)
+	if err != nil {
+		s.writeSelectedEndpointProbeFailure(urlTestErrorCategory(err), err)
 		return false
 	}
 	s.WriteMessage(log.LevelInfo, "selected endpoint URL test succeeded")
