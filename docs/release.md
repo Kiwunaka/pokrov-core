@@ -53,6 +53,17 @@ not run on ordinary connects or change the managed preset. Compare repeated
 results within each origin and retain fixture cleanup evidence before making a
 preset decision.
 
+The same test records the monotonic interval from the safe initiation event
+(before message construction) to the safe authenticated Noise response event.
+This includes network and packet processing and ends before symmetric-session
+derivation; subsequent verified HTTPS proves usable session establishment.
+It is not isolated cryptographic CPU time. Diagnostic occurrence counts are
+capped at four per category. Operator input `handshake_only=true` runs just
+that handshake/TCP/HTTPS measurement without the synthetic stream or UDP echo;
+it requires no private fixture port and supplies no new CPU, loss or battery
+evidence. This instrumentation is test-only and does not change runtime logging
+or ordinary connection behavior.
+
 Both module graphs pin Psiphon uTLS to
 `v1.1.1-0.20260729134728-7a1fc711853d`, the upstream
 [`release-branch.go1.26` commit](https://github.com/Psiphon-Labs/utls/commit/7a1fc711853d6dd31c10eca10bbd53bf3b082aac).

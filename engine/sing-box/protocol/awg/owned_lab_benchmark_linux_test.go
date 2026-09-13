@@ -14,6 +14,7 @@ import (
 	"net/netip"
 	"os"
 	"strconv"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -23,6 +24,7 @@ import (
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
 	awgtransport "github.com/sagernet/sing-box/transport/awg"
+	"github.com/sagernet/sing/common/logger"
 	M "github.com/sagernet/sing/common/metadata"
 	N "github.com/sagernet/sing/common/network"
 )
@@ -41,11 +43,12 @@ func TestOwnedAWGPresetBenchmark(t *testing.T) {
 	}
 	defer clear(raw)
 	var input struct {
-		Endpoint option.AwgEndpointOptions `json:"endpoint"`
-		Preset   string                    `json:"preset"`
-		Port     uint16                    `json:"port"`
+		Endpoint      option.AwgEndpointOptions `json:"endpoint"`
+		Preset        string                    `json:"preset"`
+		Port          uint16                    `json:"port"`
+		HandshakeOnly bool                      `json:"handshake_only"`
 	}
-	if json.Unmarshal(raw, &input) != nil || input.Port < 1024 {
+	if json.Unmarshal(raw, &input) != nil || (!input.HandshakeOnly && input.Port < 1024) {
 		t.Fatal("benchmark input rejected")
 	}
 	jc, ok := map[string]int{"control": 6, "low-junk": 1, "high-junk": 12}[input.Preset]
@@ -70,8 +73,9 @@ func TestOwnedAWGPresetBenchmark(t *testing.T) {
 		t.Fatal("benchmark dialer unavailable")
 	}
 	meter := &ownedLabObservedDialer{Dialer: direct}
+	handshake := &awgBenchmarkHandshakeLogger{ContextLogger: log.NewNOPFactory().Logger()}
 	started := time.Now()
-	device, err := awgtransport.NewDevice(ctx, log.NewNOPFactory().Logger(), meter, ipc,
+	device, err := awgtransport.NewDevice(ctx, handshake, meter, ipc,
 		awgtransport.DeviceOpts{Address: input.Endpoint.Address, AllowedIps: input.Endpoint.Peers[0].AllowedIPs, MTU: input.Endpoint.MTU})
 	if err != nil {
 		t.Fatal("benchmark device preparation failed")
@@ -108,6 +112,20 @@ func TestOwnedAWGPresetBenchmark(t *testing.T) {
 	}
 	egressReady := time.Since(started)
 	startup := awgBenchmarkCounters(meter)
+	handshakeResult := handshake.result(t)
+	if input.HandshakeOnly {
+		result, err := json.Marshal(map[string]any{
+			"preset": input.Preset, "jc": jc, "mtu": input.Endpoint.MTU,
+			"handshake": handshakeResult, "tcp_ready_ms": tcpReady.Milliseconds(),
+			"verified_egress_ms": egressReady.Milliseconds(), "startup_outer": startup,
+			"scope": "handshake and verified HTTPS only; no stream, loss, CPU or battery measurement",
+		})
+		if err != nil {
+			t.Fatal("handshake result encoding failed")
+		}
+		t.Log("POKROV_AWG_PRESET_RESULT " + string(result))
+		return
+	}
 	fixture := M.Socksaddr{Addr: netip.MustParseAddr("10.203.31.1"), Port: input.Port}
 	dataConnection, err := device.DialContext(ctx, N.NetworkTCP, fixture)
 	if err != nil {
@@ -192,6 +210,7 @@ func TestOwnedAWGPresetBenchmark(t *testing.T) {
 	datagrams := <-done
 	result := map[string]any{
 		"preset": input.Preset, "jc": jc, "mtu": input.Endpoint.MTU,
+		"handshake":    handshakeResult,
 		"tcp_ready_ms": tcpReady.Milliseconds(), "verified_egress_ms": egressReady.Milliseconds(),
 		"startup_outer": startup, "data_bytes": count, "data_elapsed_ms": dataElapsed.Milliseconds(),
 		"data_cpu_microseconds": cpu.Microseconds(), "data_average_core_percent": cpu.Seconds() / dataElapsed.Seconds() * 100,
@@ -206,6 +225,52 @@ func TestOwnedAWGPresetBenchmark(t *testing.T) {
 		t.Fatal("benchmark result encoding failed")
 	}
 	t.Log("POKROV_AWG_PRESET_RESULT " + string(encodedResult))
+}
+
+// Observe only the transport's fixed safe diagnostic labels. Upstream peer
+// arguments never reach this logger. Both timestamps use one monotonic clock.
+type awgBenchmarkHandshakeLogger struct {
+	logger.ContextLogger
+	mutex                           sync.Mutex
+	initiation, response            time.Time
+	initiations, responses, retries int
+}
+
+func (l *awgBenchmarkHandshakeLogger) Warn(args ...any) {
+	if len(args) != 4 || args[0] != "awg_safe_diag code=" {
+		return
+	}
+	l.mutex.Lock()
+	defer l.mutex.Unlock()
+	switch args[1] {
+	case "send_handshake_initiation":
+		l.initiations++
+		if l.initiation.IsZero() {
+			l.initiation = time.Now()
+		}
+	case "receive_handshake_response":
+		l.responses++
+		if l.response.IsZero() {
+			l.response = time.Now()
+		}
+	case "handshake_retry":
+		l.retries++
+	}
+}
+
+func (l *awgBenchmarkHandshakeLogger) result(t *testing.T) map[string]any {
+	t.Helper()
+	l.mutex.Lock()
+	defer l.mutex.Unlock()
+	if l.initiation.IsZero() || l.response.IsZero() || !l.response.After(l.initiation) {
+		t.Fatal("ordered safe handshake events unavailable")
+	}
+	return map[string]any{
+		"initiation_to_authenticated_response_us": l.response.Sub(l.initiation).Microseconds(),
+		"observed_initiations":                    l.initiations, "observed_responses": l.responses,
+		"observed_retries": l.retries, "event_count_limit_per_category": 4,
+		"scope": "before initiation construction to authenticated Noise response; includes network and processing; excludes subsequent session derivation",
+	}
 }
 
 func awgBenchmarkCPU(t *testing.T) time.Duration {
