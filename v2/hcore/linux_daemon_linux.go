@@ -28,6 +28,7 @@ type linuxReply struct {
 	Protocol string             `json:"protocol"`
 	Phase    string             `json:"phase"`
 	Plan     *linuxruntime.Plan `json:"plan,omitempty"`
+	Health   *linuxHealth       `json:"health,omitempty"`
 }
 
 // ServeLinuxDaemon uses the same lifecycle as desktop/mobile with no gRPC or
@@ -101,14 +102,24 @@ func ServeLinuxDaemon(ctx context.Context, profile []byte, root string, commands
 	if encoder.Encode(linuxReply{Protocol: linuxruntime.Protocol, Phase: "started"}) != nil {
 		return errLinuxDaemon
 	}
-	select {
-	case <-ctx.Done():
-	case action := <-actions:
-		if action != "stop" {
-			return errLinuxDaemon
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case action := <-actions:
+			switch action {
+			case "stop":
+				return nil
+			case "health":
+				health := probeLinuxHealth(ctx)
+				if encoder.Encode(linuxReply{Protocol: linuxruntime.Protocol, Phase: "health", Health: &health}) != nil {
+					return errLinuxDaemon
+				}
+			default:
+				return errLinuxDaemon
+			}
 		}
 	}
-	return nil
 }
 
 func readLinuxCommands(ctx context.Context, input io.Reader, actions chan<- string) {
@@ -119,7 +130,7 @@ func readLinuxCommands(ctx context.Context, input io.Reader, actions chan<- stri
 		decoder := json.NewDecoder(bytes.NewReader(scanner.Bytes()))
 		decoder.DisallowUnknownFields()
 		var command linuxCommand
-		if decoder.Decode(&command) != nil || command.Protocol != linuxruntime.Protocol || (command.Action != "start" && command.Action != "stop") {
+		if decoder.Decode(&command) != nil || command.Protocol != linuxruntime.Protocol || (command.Action != "start" && command.Action != "stop" && command.Action != "health") {
 			return
 		}
 		var extra any
