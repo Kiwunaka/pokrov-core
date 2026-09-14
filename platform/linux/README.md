@@ -17,7 +17,15 @@ stdout/stderr and configuration never enter that protocol.
    `prepared` with only `tunnel_interface`, `routing_mark` and `dns_servers`.
 2. After the parent installs its traffic filter, accept `start`, invoke the
    existing hcore lifecycle, verify `pokrov0` exists, then reply `started`.
-3. On `stop`, SIGTERM or parent cancellation, invoke hcore.Stop and acknowledge
+3. After the parent finishes the network transaction, accept `health`. Resolve
+   `api.pokrov.space` through the system resolver (five-second bound), then
+   validate HTTPS through the captured default proxy leaf (ten-second bound).
+   Require the owned endpoint's 204 response and
+   `X-Pokrov-Egress-Probe: pokrov-authenticated-egress-v1`, normal certificate
+   verification, no redirects and an unchanged selected leaf. Direct, block and
+   DNS outbounds cannot supply VPN proof. Reply with only `dns_ready` and
+   `core_egress_validated` booleans; do not export destinations or raw errors.
+4. On `stop`, SIGTERM or parent cancellation, invoke hcore.Stop and acknowledge
    `stopped`. A process exit without this acknowledgement is not cleanup proof.
 
 The child exclusively chooses TUN `pokrov0`, mark `0x504b` and the system stack.
