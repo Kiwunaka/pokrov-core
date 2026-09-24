@@ -94,7 +94,9 @@ func StartService(ctx context.Context, in *StartRequest) (coreResponse *CoreInfo
 	})
 	static.lock.Lock()
 	defer static.lock.Unlock()
-	if err := ctx.Err(); err != nil { return nil, err }
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 
 	if static.CoreState != CoreStates_STOPPED {
 		// return errorWrapper(MessageType_ALREADY_STARTED, fmt.Errorf("instance already started"))
@@ -122,7 +124,9 @@ func StartService(ctx context.Context, in *StartRequest) (coreResponse *CoreInfo
 	if err != nil {
 		return errorWrapper(MessageType_ERROR_BUILDING_CONFIG, err)
 	}
-	if err := ctx.Err(); err != nil { return errorWrapper(MessageType_START_SERVICE, err) }
+	if err := ctx.Err(); err != nil {
+		return errorWrapper(MessageType_START_SERVICE, err)
+	}
 	saveLastStartRequest(in)
 
 	Log(LogLevel_DEBUG, LogType_CORE, "Main Service pre start")
@@ -144,7 +148,9 @@ func StartService(ctx context.Context, in *StartRequest) (coreResponse *CoreInfo
 			return errorWrapper(MessageType_START_SERVICE, ctx.Err())
 		}
 	}
-	if err := ctx.Err(); err != nil { return errorWrapper(MessageType_START_SERVICE, err) }
+	if err := ctx.Err(); err != nil {
+		return errorWrapper(MessageType_START_SERVICE, err)
+	}
 	libbox.SetMemoryLimit(C.IsIos || !in.DisableMemoryLimit)
 	instance, err := NewService(ctx, *options)
 	if err != nil {
@@ -153,7 +159,9 @@ func StartService(ctx context.Context, in *StartRequest) (coreResponse *CoreInfo
 	static.StartedService = instance
 	// Retain the instance for the caller's serialized Stop/rollback even if
 	// cancellation won the race with the final native startup stage.
-	if err := ctx.Err(); err != nil { return nil, err }
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if static.debug {
 		dumpGoroutinesToFile(fmt.Sprint(sWorkingPath, "/data/goroutine-start.log"))
 	}

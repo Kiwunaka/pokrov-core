@@ -24,32 +24,32 @@ import (
 var errLinuxDaemon = errors.New("linux core runtime failed")
 
 type linuxCommand struct {
-	Protocol string `json:"protocol"`
-	Action   string `json:"action"`
-	ExpectedCoreModuleSHA256 string `json:"expected_core_module_sha256,omitempty"`
-	ExpectedProfileSHA256 string `json:"expected_profile_sha256,omitempty"`
-	Deadline *linuxConnectDeadline `json:"deadline,omitempty"`
-	LeaseID string `json:"endpoint_lease_ref,omitempty"`
-	IssuedAt string `json:"issued_at,omitempty"`
-	NewFlowsUntil string `json:"new_flows_until,omitempty"`
-	ActiveFlowsUntil string `json:"active_flows_until,omitempty"`
-	TerminateActive *bool `json:"terminate_active,omitempty"`
+	Protocol                 string                `json:"protocol"`
+	Action                   string                `json:"action"`
+	ExpectedCoreModuleSHA256 string                `json:"expected_core_module_sha256,omitempty"`
+	ExpectedProfileSHA256    string                `json:"expected_profile_sha256,omitempty"`
+	Deadline                 *linuxConnectDeadline `json:"deadline,omitempty"`
+	LeaseID                  string                `json:"endpoint_lease_ref,omitempty"`
+	IssuedAt                 string                `json:"issued_at,omitempty"`
+	NewFlowsUntil            string                `json:"new_flows_until,omitempty"`
+	ActiveFlowsUntil         string                `json:"active_flows_until,omitempty"`
+	TerminateActive          *bool                 `json:"terminate_active,omitempty"`
 }
 
 type linuxReply struct {
-	Protocol string             `json:"protocol"`
-	Phase    string             `json:"phase"`
-	Plan     *linuxruntime.Plan `json:"plan,omitempty"`
-	Health   *linuxHealth       `json:"health,omitempty"`
-	TransportCapabilities string `json:"transport_capabilities_json,omitempty"`
-	CoreModuleSHA256 string `json:"core_module_sha256,omitempty"`
-	ProfileSHA256 string `json:"profile_sha256,omitempty"`
-	IdentitySchema int `json:"identity_schema,omitempty"`
-	DeadlineSchema int `json:"deadline_schema,omitempty"`
-	ConnectDeadline *linuxConnectDeadline `json:"connect_deadline,omitempty"`
-	LeaseID string `json:"endpoint_lease_ref,omitempty"`
-	ActiveFlowsUntil string `json:"active_flows_until,omitempty"`
-	LeaseRevoked *bool `json:"lease_revoked,omitempty"`
+	Protocol              string                `json:"protocol"`
+	Phase                 string                `json:"phase"`
+	Plan                  *linuxruntime.Plan    `json:"plan,omitempty"`
+	Health                *linuxHealth          `json:"health,omitempty"`
+	TransportCapabilities string                `json:"transport_capabilities_json,omitempty"`
+	CoreModuleSHA256      string                `json:"core_module_sha256,omitempty"`
+	ProfileSHA256         string                `json:"profile_sha256,omitempty"`
+	IdentitySchema        int                   `json:"identity_schema,omitempty"`
+	DeadlineSchema        int                   `json:"deadline_schema,omitempty"`
+	ConnectDeadline       *linuxConnectDeadline `json:"connect_deadline,omitempty"`
+	LeaseID               string                `json:"endpoint_lease_ref,omitempty"`
+	ActiveFlowsUntil      string                `json:"active_flows_until,omitempty"`
+	LeaseRevoked          *bool                 `json:"lease_revoked,omitempty"`
 }
 
 // ServeLinuxDaemon uses the same lifecycle as desktop/mobile with no gRPC or
@@ -133,11 +133,15 @@ func ServeLinuxDaemon(ctx context.Context, profile []byte, root string, commands
 		}
 		if boundStart {
 			deadline = command.Deadline
-			if !deadline.current() { return errLinuxDaemon }
+			if !deadline.current() {
+				return errLinuxDaemon
+			}
 			go deadline.watch(ctx, cancelRun, &promotedUntil, &promotionMu)
 		}
 	}
-	if ctx.Err() != nil { return errLinuxDaemon }
+	if ctx.Err() != nil {
+		return errLinuxDaemon
+	}
 	started, err := Start(base, request)
 	if err != nil || started.CoreState != CoreStates_STARTED {
 		return errLinuxDaemon
@@ -147,7 +151,9 @@ func ServeLinuxDaemon(ctx context.Context, profile []byte, root string, commands
 	}
 	startedReply := linuxReply{Protocol: linuxruntime.Protocol, Phase: "started"}
 	if boundStart {
-		if !deadline.current() { return errLinuxDaemon }
+		if !deadline.current() {
+			return errLinuxDaemon
+		}
 		startedReply.IdentitySchema = 1
 		startedReply.DeadlineSchema = 1
 		startedReply.ConnectDeadline = deadline
@@ -176,10 +182,14 @@ func ServeLinuxDaemon(ctx context.Context, profile []byte, root string, commands
 					return errLinuxDaemon
 				}
 				leaseDeadline, valid := linuxATSLeaseDeadline(config, command)
-				if !valid || ctx.Err() != nil { return errLinuxDaemon }
+				if !valid || ctx.Err() != nil {
+					return errLinuxDaemon
+				}
 				confirmed, confirmErr := ConfirmATSLease(command.LeaseID, command.IssuedAt,
 					command.NewFlowsUntil, command.ActiveFlowsUntil)
-				if confirmErr != nil || !confirmed || ctx.Err() != nil { return errLinuxDaemon }
+				if confirmErr != nil || !confirmed || ctx.Err() != nil {
+					return errLinuxDaemon
+				}
 				promotionMu.Lock()
 				if !deadline.current() || ctx.Err() != nil {
 					promotionMu.Unlock()
@@ -189,17 +199,23 @@ func ServeLinuxDaemon(ctx context.Context, profile []byte, root string, commands
 				promotionMu.Unlock()
 				if encoder.Encode(linuxReply{Protocol: linuxruntime.Protocol, Phase: "promoted",
 					ProfileSHA256: profileSHA256, LeaseID: command.LeaseID,
-					ActiveFlowsUntil: command.ActiveFlowsUntil}) != nil { return errLinuxDaemon }
+					ActiveFlowsUntil: command.ActiveFlowsUntil}) != nil {
+					return errLinuxDaemon
+				}
 			case "revoke_ats_lease":
 				if !boundStart || promotedUntil.Load() == 0 ||
 					command.ExpectedProfileSHA256 != profileSHA256 || ctx.Err() != nil {
 					return errLinuxDaemon
 				}
 				revoked, revokeErr := RevokeATSLease(command.LeaseID, *command.TerminateActive)
-				if revokeErr != nil || !revoked { return errLinuxDaemon }
+				if revokeErr != nil || !revoked {
+					return errLinuxDaemon
+				}
 				if encoder.Encode(linuxReply{Protocol: linuxruntime.Protocol, Phase: "lease_revoked",
 					ProfileSHA256: profileSHA256, LeaseID: command.LeaseID,
-					LeaseRevoked: &revoked}) != nil { return errLinuxDaemon }
+					LeaseRevoked: &revoked}) != nil {
+					return errLinuxDaemon
+				}
 			default:
 				return errLinuxDaemon
 			}
@@ -222,20 +238,28 @@ func readLinuxCommands(ctx context.Context, input io.Reader, actions chan<- linu
 		case "start_with_identity":
 			if !linuxIdentitySHA256(command.ExpectedCoreModuleSHA256) || !linuxIdentitySHA256(command.ExpectedProfileSHA256) ||
 				!command.Deadline.valid() || command.LeaseID != "" || command.IssuedAt != "" ||
-				command.NewFlowsUntil != "" || command.ActiveFlowsUntil != "" || command.TerminateActive != nil { return }
+				command.NewFlowsUntil != "" || command.ActiveFlowsUntil != "" || command.TerminateActive != nil {
+				return
+			}
 		case "start", "stop", "health":
 			if command.ExpectedCoreModuleSHA256 != "" || command.ExpectedProfileSHA256 != "" || command.Deadline != nil ||
-				command.LeaseID != "" || command.IssuedAt != "" || command.NewFlowsUntil != "" || command.ActiveFlowsUntil != "" || command.TerminateActive != nil { return }
+				command.LeaseID != "" || command.IssuedAt != "" || command.NewFlowsUntil != "" || command.ActiveFlowsUntil != "" || command.TerminateActive != nil {
+				return
+			}
 		case "promote_ats_lease":
 			if command.ExpectedCoreModuleSHA256 != "" || command.Deadline != nil ||
 				!linuxIdentitySHA256(command.ExpectedProfileSHA256) ||
 				!linuxATSLeasePattern.MatchString(command.LeaseID) ||
-				command.IssuedAt == "" || command.NewFlowsUntil == "" || command.ActiveFlowsUntil == "" || command.TerminateActive != nil { return }
+				command.IssuedAt == "" || command.NewFlowsUntil == "" || command.ActiveFlowsUntil == "" || command.TerminateActive != nil {
+				return
+			}
 		case "revoke_ats_lease":
 			if command.ExpectedCoreModuleSHA256 != "" || command.Deadline != nil ||
 				!linuxIdentitySHA256(command.ExpectedProfileSHA256) ||
 				!linuxATSLeasePattern.MatchString(command.LeaseID) || command.TerminateActive == nil ||
-				command.IssuedAt != "" || command.NewFlowsUntil != "" || command.ActiveFlowsUntil != "" { return }
+				command.IssuedAt != "" || command.NewFlowsUntil != "" || command.ActiveFlowsUntil != "" {
+				return
+			}
 		default:
 			return
 		}
@@ -252,9 +276,13 @@ func readLinuxCommands(ctx context.Context, input io.Reader, actions chan<- linu
 }
 
 func linuxIdentitySHA256(value string) bool {
-	if len(value) != 64 { return false }
+	if len(value) != 64 {
+		return false
+	}
 	for _, char := range value {
-		if !(char >= '0' && char <= '9' || char >= 'a' && char <= 'f') { return false }
+		if !(char >= '0' && char <= '9' || char >= 'a' && char <= 'f') {
+			return false
+		}
 	}
 	return true
 }

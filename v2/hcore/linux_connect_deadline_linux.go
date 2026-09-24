@@ -15,9 +15,9 @@ import (
 var linuxBootRefPattern = regexp.MustCompile(`^linux:[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$`)
 
 type linuxConnectDeadline struct {
-	BootRef string `json:"boot_ref"`
-	StartedElapsedMS int64 `json:"started_elapsed_ms"`
-	DeadlineElapsedMS int64 `json:"deadline_elapsed_ms"`
+	BootRef           string `json:"boot_ref"`
+	StartedElapsedMS  int64  `json:"started_elapsed_ms"`
+	DeadlineElapsedMS int64  `json:"deadline_elapsed_ms"`
 }
 
 func (deadline *linuxConnectDeadline) valid() bool {
@@ -29,11 +29,17 @@ func (deadline *linuxConnectDeadline) valid() bool {
 
 func (deadline *linuxConnectDeadline) current() bool {
 	data, err := os.ReadFile("/proc/sys/kernel/random/boot_id")
-	if err != nil || "linux:"+strings.TrimSpace(string(data)) != deadline.BootRef { return false }
+	if err != nil || "linux:"+strings.TrimSpace(string(data)) != deadline.BootRef {
+		return false
+	}
 	var elapsed unix.Timespec
-	if unix.ClockGettime(unix.CLOCK_BOOTTIME, &elapsed) != nil { return false }
+	if unix.ClockGettime(unix.CLOCK_BOOTTIME, &elapsed) != nil {
+		return false
+	}
 	seconds, nanos := int64(elapsed.Sec), int64(elapsed.Nsec)
-	if seconds < 0 || seconds > 9007199254740 || nanos < 0 || nanos >= 1000000000 { return false }
+	if seconds < 0 || seconds > 9007199254740 || nanos < 0 || nanos >= 1000000000 {
+		return false
+	}
 	ms := seconds*1000 + nanos/1000000
 	return ms >= deadline.StartedElapsedMS && ms < deadline.DeadlineElapsedMS
 }
@@ -48,17 +54,24 @@ func (deadline *linuxConnectDeadline) watch(ctx context.Context, cancel context.
 		promotionMu.Lock()
 		limit := promotedUntil.Load()
 		if limit == 0 {
-			if !deadline.current() { cancel(); promotionMu.Unlock(); return }
+			if !deadline.current() {
+				cancel()
+				promotionMu.Unlock()
+				return
+			}
 		} else {
 			var elapsed unix.Timespec
 			if unix.ClockGettime(unix.CLOCK_BOOTTIME, &elapsed) != nil ||
 				int64(elapsed.Sec)*1000+int64(elapsed.Nsec)/1000000 >= limit {
-				cancel(); promotionMu.Unlock(); return
+				cancel()
+				promotionMu.Unlock()
+				return
 			}
 		}
 		promotionMu.Unlock()
 		select {
-		case <-ctx.Done(): return
+		case <-ctx.Done():
+			return
 		case <-ticker.C:
 		}
 	}

@@ -6,8 +6,8 @@ package main
 
 import (
 	"context"
-	"io"
 	"encoding/json"
+	"io"
 	"os"
 	"os/signal"
 	"syscall"
@@ -34,14 +34,18 @@ func run() int {
 	// control pipe. It neither prepares nor starts a tunnel.
 	if len(os.Args) == 2 && os.Args[1] == "--transport-capabilities" {
 		metadata := struct {
-			Schema int `json:"schema"`
+			Schema       int    `json:"schema"`
 			Capabilities string `json:"transport_capabilities_json"`
 			ModuleSHA256 string `json:"core_module_sha256"`
 		}{1, libbox.TransportCapabilities(), hcore.LinuxModuleSHA256(context.Background())}
-		if json.NewEncoder(os.Stdout).Encode(metadata) != nil { return 1 }
+		if json.NewEncoder(os.Stdout).Encode(metadata) != nil {
+			return 1
+		}
 		return 0
 	}
-	if len(os.Args) != 1 { return 1 }
+	if len(os.Args) != 1 {
+		return 1
+	}
 	// The service's private control pipe is separate from all Core logging.
 	replies := os.NewFile(3, "linuxd-core-control")
 	if replies == nil {

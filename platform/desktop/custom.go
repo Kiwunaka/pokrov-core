@@ -147,106 +147,168 @@ func pokrovCoreTransportCapabilities() *C.char {
 
 //export pokrovCoreConfirmATSLease
 func pokrovCoreConfirmATSLease(leaseID, issuedAt, newFlowsUntil, activeFlowsUntil *C.char) C.int {
-	if leaseID == nil || issuedAt == nil || newFlowsUntil == nil || activeFlowsUntil == nil { return -1 }
+	if leaseID == nil || issuedAt == nil || newFlowsUntil == nil || activeFlowsUntil == nil {
+		return -1
+	}
 	confirmed, err := hcore.ConfirmATSLease(C.GoString(leaseID), C.GoString(issuedAt),
 		C.GoString(newFlowsUntil), C.GoString(activeFlowsUntil))
-	if err != nil { return -1 }
-	if confirmed { return 1 }
+	if err != nil {
+		return -1
+	}
+	if confirmed {
+		return 1
+	}
 	return 0
 }
 
 //export pokrovCoreRevokeATSLease
 func pokrovCoreRevokeATSLease(leaseID *C.char, terminateActive C.int) C.int {
-	if leaseID == nil || (terminateActive != 0 && terminateActive != 1) { return -1 }
+	if leaseID == nil || (terminateActive != 0 && terminateActive != 1) {
+		return -1
+	}
 	found, err := hcore.RevokeATSLease(C.GoString(leaseID), terminateActive == 1)
-	if err != nil { return -1 }
-	if found { return 1 }
+	if err != nil {
+		return -1
+	}
+	if found {
+		return 1
+	}
 	return 0
 }
 
 //export pokrovCoreRevokeRoutingCatalog
 func pokrovCoreRevokeRoutingCatalog() C.int {
 	found, err := hcore.RevokeRoutingCatalog()
-	if err != nil { return -1 }
-	if found { return 1 }
+	if err != nil {
+		return -1
+	}
+	if found {
+		return 1
+	}
 	return 0
 }
 
 //export pokrovCoreRevokeSmartAccessPolicy
 func pokrovCoreRevokeSmartAccessPolicy(terminateActive C.int) C.int {
-	if terminateActive != 0 && terminateActive != 1 { return -1 }
+	if terminateActive != 0 && terminateActive != 1 {
+		return -1
+	}
 	found, err := hcore.RevokeSmartAccessPolicy(terminateActive == 1)
-	if err != nil { return -1 }
-	if found { return 1 }
+	if err != nil {
+		return -1
+	}
+	if found {
+		return 1
+	}
 	return 0
 }
 
 //export pokrovCoreRevokeRoutingCatalogService
 func pokrovCoreRevokeRoutingCatalogService(serviceID *C.char) C.int {
-	if serviceID == nil { return -1 }
+	if serviceID == nil {
+		return -1
+	}
 	found, err := hcore.RevokeRoutingCatalogService(C.GoString(serviceID))
-	if err != nil { return -1 }
-	if found { return 1 }
+	if err != nil {
+		return -1
+	}
+	if found {
+		return 1
+	}
 	return 0
 }
 
 //export pokrovCoreRevokeSmartAccessLease
 func pokrovCoreRevokeSmartAccessLease(leaseID *C.char, terminateActive C.int) C.int {
-	if leaseID == nil || (terminateActive != 0 && terminateActive != 1) { return -1 }
+	if leaseID == nil || (terminateActive != 0 && terminateActive != 1) {
+		return -1
+	}
 	found, err := hcore.RevokeSmartAccessLease(C.GoString(leaseID), terminateActive == 1)
-	if err != nil { return -1 }
-	if found { return 1 }
+	if err != nil {
+		return -1
+	}
+	if found {
+		return 1
+	}
 	return 0
 }
 
 //export pokrovCoreRenewSmartAccessLease
 func pokrovCoreRenewSmartAccessLease(expectedID, nextID, issuedAt, newFlowsUntil, activeFlowsUntil *C.char) C.int {
-	if expectedID == nil || nextID == nil || issuedAt == nil || newFlowsUntil == nil || activeFlowsUntil == nil { return -1 }
+	if expectedID == nil || nextID == nil || issuedAt == nil || newFlowsUntil == nil || activeFlowsUntil == nil {
+		return -1
+	}
 	found, err := hcore.RenewSmartAccessLease(C.GoString(expectedID), C.GoString(nextID),
 		C.GoString(issuedAt), C.GoString(newFlowsUntil), C.GoString(activeFlowsUntil))
-	if err != nil { return -1 }
-	if found { return 1 }
+	if err != nil {
+		return -1
+	}
+	if found {
+		return 1
+	}
 	return 0
 }
 
 //export pokrovCoreConfigureSmartAccessRuntimeControl
 func pokrovCoreConfigureSmartAccessRuntimeControl(profileDigest, configJSON *C.char) C.int {
-	if profileDigest == nil || configJSON == nil { return -1 }
+	if profileDigest == nil || configJSON == nil {
+		return -1
+	}
 	configured, err := hcore.ConfigureSmartAccessRuntimeControl(C.GoString(profileDigest), C.GoString(configJSON))
-	if err != nil { return -1 }
-	if configured { return 1 }
+	if err != nil {
+		return -1
+	}
+	if configured {
+		return 1
+	}
 	return 0
 }
 
 //export pokrovCoreConfigureSmartAccessRenewal
 func pokrovCoreConfigureSmartAccessRenewal(profileDigest, configJSON *C.char) C.int {
-	if profileDigest == nil || configJSON == nil { return -1 }
+	if profileDigest == nil || configJSON == nil {
+		return -1
+	}
 	configured, err := hcore.ConfigureSmartAccessRenewal(C.GoString(profileDigest), C.GoString(configJSON))
-	if err != nil { return -1 }
-	if configured { return 1 }
+	if err != nil {
+		return -1
+	}
+	if configured {
+		return 1
+	}
 	return 0
 }
 
 //export pokrovCoreReadSmartAccessLeases
 func pokrovCoreReadSmartAccessLeases() *C.char {
 	value, err := hcore.ReadSmartAccessLeases()
-	if err != nil { return nil }
+	if err != nil {
+		return nil
+	}
 	return C.CString(value)
 }
 
 //export pokrovCoreReadSmartAccessRestrictions
 func pokrovCoreReadSmartAccessRestrictions() *C.char {
 	encoded, err := hcore.ReadSmartAccessRestrictions()
-	if err != nil { return nil }
+	if err != nil {
+		return nil
+	}
 	return C.CString(encoded)
 }
 
 //export pokrovCoreAcknowledgeSmartAccessRestrictions
 func pokrovCoreAcknowledgeSmartAccessRestrictions(snapshotSHA256 *C.char) C.int {
-	if snapshotSHA256 == nil { return -1 }
+	if snapshotSHA256 == nil {
+		return -1
+	}
 	acknowledged, err := hcore.AcknowledgeSmartAccessRestrictions(C.GoString(snapshotSHA256))
-	if err != nil { return -1 }
-	if acknowledged { return 1 }
+	if err != nil {
+		return -1
+	}
+	if acknowledged {
+		return 1
+	}
 	return 0
 }
 
@@ -355,14 +417,18 @@ func start(configPath *C.char, disableMemoryLimit bool) *C.char {
 
 //export pokrovCoreStartInterruptibleV1
 func pokrovCoreStartInterruptibleV1(configPath *C.char, disableMemoryLimit bool, callback C.pokrov_core_interrupted_v1, owner unsafe.Pointer) *C.char {
-	if configPath == nil { return C.CString("core_start_failed") }
+	if configPath == nil {
+		return C.CString("core_start_failed")
+	}
 	_, err := hcore.StartInterruptible(libbox.BaseContext(nil), &hcore.StartRequest{
-		ConfigPath: C.GoString(configPath),
+		ConfigPath:             C.GoString(configPath),
 		EnableOldCommandServer: false,
-		EnableRawConfig: true,
-		DisableMemoryLimit: bool(disableMemoryLimit),
+		EnableRawConfig:        true,
+		DisableMemoryLimit:     bool(disableMemoryLimit),
 	}, func() bool { return C.pokrov_core_is_interrupted_v1(callback, owner) != 0 })
-	if err != nil { return C.CString("core_start_failed") }
+	if err != nil {
+		return C.CString("core_start_failed")
+	}
 	return C.CString("")
 }
 

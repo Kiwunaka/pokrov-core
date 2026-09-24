@@ -12,7 +12,9 @@ func StartInterruptible(base context.Context, request *StartRequest, interrupted
 	ctx, cancel := context.WithCancel(base)
 	finished := make(chan struct{})
 	joined := make(chan struct{})
-	if interrupted() { cancel() }
+	if interrupted() {
+		cancel()
+	}
 	go func() {
 		defer close(joined)
 		ticker := time.NewTicker(25 * time.Millisecond)
@@ -24,17 +26,24 @@ func StartInterruptible(base context.Context, request *StartRequest, interrupted
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				if interrupted() { cancel(); return }
+				if interrupted() {
+					cancel()
+					return
+				}
 			}
 		}
 	}()
 	defer func() {
 		close(finished)
 		<-joined
-		if err == nil { err = ctx.Err() }
+		if err == nil {
+			err = ctx.Err()
+		}
 		// A successful instance owns its context until serialized Stop. Do not
 		// cancel it merely because the synchronous start call finished.
-		if response == nil || err != nil { cancel() }
+		if response == nil || err != nil {
+			cancel()
+		}
 	}()
 	response, err = Start(ctx, request)
 	return response, err
