@@ -1,51 +1,40 @@
 # POKROV Core Repository Contract
 
-This repository owns the POKROV client runtime core. It produces the Android, Windows, and future Apple runtime libraries consumed by `POKROV-app`. Server-side Xray and panel behavior are outside this repository.
+This repository owns the POKROV client runtime core. It produces the Android, Windows and future Apple runtime libraries consumed by `POKROV-app`. Server-side behavior belongs to `C:/Users/kiwun/Documents/ai/POKROV-node`, not here. Current work follows the owner's execution plan `C:/Users/kiwun/Downloads/POKROV_EXECUTION_PLAN_2026-09-24.md`.
 
-## Start Every Task
+## How To Work
 
-1. Inspect `git status --short --branch` and the scoped diff before changing files.
-2. Identify the affected layer: public ABI, platform adapter, core service, embedded engine, build tooling, or documentation.
-3. Preserve unrelated work and existing release evidence.
-4. Run the smallest checks that prove the changed behavior.
-
-## Proportional Engineering
-
-- Apply KISS, YAGNI, and the Pareto principle. Make the smallest maintainable change that satisfies the explicit acceptance criteria and current evidence; prefer existing patterns and code paths.
-- Do not add speculative abstractions, dependencies, compatibility layers, fallbacks, configuration, cleanup, documentation, or future-proofing outside the assigned scope.
-- Keep verification proportional. Add or update only the smallest focused tests needed to prove changed behavior or prevent a concrete observed regression. Do not add redundant unit/integration/E2E coverage, exhaustive edge-case matrices, broad regression suites, or unrelated test refactors unless the task, affected shared contract, or observed failure requires them.
-- Keep security work proportional to the actual trust boundary and concrete threat model. Preserve mandatory safeguards and fix vulnerabilities introduced or exposed by the task, but do not add speculative hardening, new security frameworks, or unrelated defenses without evidence or an explicit requirement.
-- Before expanding scope, identify the concrete acceptance criterion, failure, or risk that requires it. If none exists, omit the extra work. If expansion would materially change the solution, request owner direction first.
-- These rules do not authorize skipping an explicit release gate or a focused regression test for changed runtime behavior.
+- Check `git status` and the scoped diff first. Other agents may work in the same repos; never overwrite, revert or reformat work outside your task.
+- Make the smallest maintainable change; prefer existing patterns. No speculative abstractions, dependencies, compatibility layers or future-proofing.
+- Test only the changed behavior: focused package tests first, `scripts/test.ps1` before a release commit. Repeat a check only after a change or a failure.
+- Build only after code changes, and only the affected platform artifacts. Check the exported ABI when it changes.
+- Do not create evidence folders, ledgers or decision diaries.
 
 ## Architecture Rules
 
 - Keep `platform/mobile` and `platform/desktop` as thin adapters.
 - Put lifecycle and runtime behavior in `v2/`; keep embedded transport changes in `engine/sing-box`.
-- Keep the desktop C ABI small, caller-owned, and backward compatible within a major release.
+- Keep the desktop C ABI small, caller-owned and backward compatible within a major release.
 - Do not add server-side behavior or application UI to this repository.
-- Import reference fixes one at a time with the source issue or commit recorded in the pull request. Do not bulk-merge another codebase.
+- Import reference fixes one at a time with the source issue or commit recorded in the commit message. Do not bulk-merge another codebase.
 
 ## Runtime Security
 
-- Never log raw profiles, full generated configurations, credentials, private keys, tokens, WARP registration data, or provider payloads.
-- Runtime configuration files must remain owner-only where the platform supports it.
-- Treat FFI allocation ownership, shutdown ordering, resolver behavior, and VPN lifecycle as security-sensitive contracts.
-- Do not silently downgrade encrypted DNS or weaken TLS verification.
+- Never log raw profiles, full generated configurations, credentials, private keys, tokens, WARP registration data or provider payloads.
+- Runtime configuration files stay owner-only where the platform supports it.
+- Treat FFI allocation ownership, shutdown ordering, resolver behavior and VPN lifecycle as security-sensitive.
+- Do not silently downgrade encrypted DNS or weaken TLS or REALITY verification.
 
-## Universal Safety
+## Git And GitHub
 
-- Integrity and safety checks are authorized only for local POKROV repositories, POKROV-owned runtime surfaces, and isolated fixtures named by the task. Third-party systems, accounts, credentials, and data are out of scope.
-- Never print, commit, move, copy into artifacts, or expose secrets, tokens, credentials, private keys, raw connection material, customer data, or unredacted provider payloads.
-- Do not perform broad deletion, destructive Git operations, production mutation, deploy, external communication, or release publication unless the task explicitly authorizes it.
-- Preserve audit evidence, rollback material, license notices, and generated provenance.
-- Treat dirty files and other worktrees as concurrent work. Do not overwrite, revert, stage, or reformat changes outside the assigned scope.
-- Keep cleanup targeted, reviewable, and reversible.
+- GitHub is plain storage for code and history. Actions results, PR reviews, commit signatures and LFS are not gates, and nothing paid is used.
+- Work on `main` or a short-lived branch; merge right after local checks and delete the branch. Never force-push `main`.
+- Do not commit build outputs. Release libraries go to GitHub Releases.
+- A release: version in `VERSION` and `config/release.json`, a tag, libraries attached to the GitHub Release.
 
-## Verification And Release
+## Safety
 
-- Format changed Go files with `gofmt`.
-- Run focused package tests first. Run `scripts/test.ps1` before a release commit.
-- Rebuild only affected platform artifacts, then verify exported ABI, package names, architecture coverage, and hashes.
-- Physical-device, signing, notarization, store, and RU-origin checks remain manual until executed.
-- A release requires a clean tree, an exact version in `VERSION` and `config/release.json`, retained artifact hashes, and a matching annotated tag.
+- Never print, commit or expose secrets, keys, tokens or raw connection material. Keep license notices.
+- Work only on POKROV-owned repos, servers and devices. Third-party systems are out of scope.
+- No destructive Git operations, deploys or release publication without explicit owner approval.
+- Never claim a check, build or release that did not happen. State plainly what was not checked.
