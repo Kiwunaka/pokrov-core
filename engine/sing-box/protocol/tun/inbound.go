@@ -331,6 +331,7 @@ func (t *Inbound) Tag() string {
 }
 
 func (t *Inbound) Start(stage adapter.StartStage) error {
+	if err := t.ctx.Err(); err != nil { return err }
 	switch stage {
 	case adapter.StartStateStart:
 		if C.IsAndroid && t.platformInterface == nil {
@@ -391,6 +392,7 @@ func (t *Inbound) Start(stage adapter.StartStage) error {
 				}
 			}
 		}
+		if err := t.ctx.Err(); err != nil { return err }
 		monitor.Start("open interface")
 		if t.platformInterface != nil && t.platformInterface.UsePlatformInterface() {
 			tunInterface, err = t.platformInterface.OpenInterface(&tunOptions, t.platformOptions)
@@ -407,6 +409,7 @@ func (t *Inbound) Start(stage adapter.StartStage) error {
 		}
 		t.logger.Trace("creating stack")
 		t.tunIf = tunInterface
+		if err := t.ctx.Err(); err != nil { return err }
 		if tunOptions.EXP_ExternalConfiguration {
 			if err := t.ctx.Value(externalConfigurationKey{}).(func() error)(); err != nil {
 				return E.Cause(err, "configure externally owned TUN addresses")
@@ -444,6 +447,7 @@ func (t *Inbound) Start(stage adapter.StartStage) error {
 		if err != nil {
 			return E.Cause(err, "starting tun stack")
 		}
+		if err := t.ctx.Err(); err != nil { return err }
 		monitor.Start("starting tun interface")
 		err = t.tunIf.Start()
 		monitor.Finish()
@@ -451,6 +455,7 @@ func (t *Inbound) Start(stage adapter.StartStage) error {
 			return E.Cause(err, "starting TUN interface")
 		}
 		if t.autoRedirect != nil {
+			if err := t.ctx.Err(); err != nil { return err }
 			monitor.Start("initialize auto-redirect")
 			err := t.autoRedirect.Start()
 			monitor.Finish()

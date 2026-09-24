@@ -25,6 +25,18 @@
       "freeString",
       "pokrovCoreAbiVersion",
       "pokrovCoreCapabilities",
+      "pokrovCoreTransportCapabilities",
+      "pokrovCoreStartInterruptibleV1",
+      "pokrovCoreAcknowledgeSmartAccessRestrictions",
+      "pokrovCoreConfigureSmartAccessRuntimeControl",
+      "pokrovCoreConfigureSmartAccessRenewal",
+      "pokrovCoreReadSmartAccessLeases",
+      "pokrovCoreReadSmartAccessRestrictions",
+      "pokrovCoreRenewSmartAccessLease",
+      "pokrovCoreRevokeRoutingCatalog",
+      "pokrovCoreRevokeRoutingCatalogService",
+      "pokrovCoreRevokeSmartAccessLease",
+      "pokrovCoreRevokeSmartAccessPolicy",
       "pokrovCoreSetEventCallback",
       "pokrovCoreSetEventContext",
       "pokrovSecureFile",
@@ -34,10 +46,104 @@
       "stop"
     ]
   },
+  "desktop_interruptible_start": {
+    "symbol": "pokrovCoreStartInterruptibleV1",
+    "arguments": "config path UTF-8, disableMemoryLimit bool, __cdecl int callback(void* owner), opaque caller-owned pointer. Callback returns 0 to continue, nonzero to cancel. Null callback cancels before start. Callback must be thread-safe, nonblocking and must not call Core or throw across the ABI.",
+    "lifetime": "Core checks once before Start and observes the callback on a Go worker every 25 ms while Start is in flight. The worker only cancels the startup context; it never calls Stop. The observer is joined before return, so the callback and owner are not retained. Successful context is not cancelled merely on return. Caller retains the absolute deadline and serial Stop/restoration after response.",
+    "returns": "Caller-owned empty string on success, fixed core_start_failed on failure; release with freeString. Null is failure at the host. Additive optional symbol under desktop ABI 2; bound Windows start requires it before arming recovery and cannot fall back to start. Existing exact capability descriptor is unchanged.",
+    "scope": "Cooperative cancellation of context-aware work and stage/TUN admission checks. Does not interrupt an arbitrary blocked OS/driver call, guarantee hard real-time settlement, promote a lease, or prove restoration. Source NOT_VERIFIED; matching Core/host binaries not built."
+  },
+  "android_module_identity": {
+    "symbol": "mobile.CoreModuleSHA256",
+    "java_symbol": "space.pokrov.core.mobile.Mobile.coreModuleSHA256",
+    "arguments": "none; android+cgo only; no caller path or expected digest",
+    "returns": "Lowercase 64-hex SHA-256 of the loaded Core ELF, or empty when unavailable. Process-lifetime cached observation through dladdr, matching /proc/self/maps device/inode and executable ELF segment offset. Extracted library or exact uncompressed APK entry; never the APK/AAR container digest.",
+    "bounds": "Module at most 1 GiB, backing file at most 2 GiB, 128 KiB streaming hash buffer, maps read at most 16 MiB with 16 KiB line bound. Reject ambiguous ZIP entry, changed stat or changed mapping. No filesystem paths, addresses or errors leave the getter.",
+    "scope": "Owned native observation, not remote attestation, profile admission or protection from a compromised host/Core. Optional additive Android binding; missing older AAR getter leaves ATS identity unavailable. No tunnel, network or entitlement mutation. Source NOT_VERIFIED."
+  },
+  "transport_capabilities": {
+    "symbol": "pokrovCoreTransportCapabilities",
+    "mobile_symbol": "libbox.TransportCapabilities",
+    "apple_linkage": "Pinned gomobile emits c-archive static XCFramework slices. Updated iOS hosts call generated LibboxTransportCapabilities directly; matching headers/archive are required at link time. Runner and PacketTunnelExtension contain different execution images; archive/xcframework or Runner identity cannot substitute for the running extension. No optional dlsym visibility/ownership assumption.",
+    "linux_adapter": "Root-only fixed --transport-capabilities metadata mode: compact object in field order schema=1, transport_capabilities_json (inventory string), core_module_sha256 (self-executable SHA-256 or empty), plus newline; before profile/state/FD3 handling. Normal prepared reply adds transport_capabilities_json and core_module_sha256 from that child. /proc/self/exe hashing uses a bounded stream, never the installation pathname. Matching Core/linuxd pair is required; preflight cannot authorize a later executable without revalidation.",
+    "arguments": "none; pure compiled-feature inventory, no runtime or network setup",
+    "returns": "Caller-owned UTF-8 JSON, at most 4096 bytes, release desktop string with freeString. Closed shape: schema=1, features=sorted unique ASCII feature IDs. Absent symbol/null/invalid or unknown schema means unavailable, never inferred support. This optional additive export does not change desktop ABI 2 or the existing exact capability descriptor.",
+    "features": {
+      "pokrov_ats_lease_v1": "Core outbound wrapper for a single VLESS ATS endpoint. New TCP/UDP flows stop within 10 minutes of issue; admitted flows close within one hour. The host must bind and revoke the exact running profile/lease.",
+      "singbox_tls_v1": "Native TLS client implementation; per-profile validation still required",
+      "singbox_vless_v1": "sing-box VLESS outbound implementation; transport/TLS options require their own features",
+      "singbox_grpc_v1": "sing-box V2Ray gRPC client transport, including the lite implementation without with_grpc",
+      "singbox_xhttp_v1": "sing-box V2Ray XHTTP client transport, not the unsupported xray outbound or xray-json ingestion",
+      "singbox_utls_v1": "uTLS client, only with_utls",
+      "singbox_reality_v1": "Reality client, only with_utls; requires uTLS",
+      "singbox_hysteria2_v1": "Hysteria2 outbound, only with_quic",
+      "pokrov_awg31_endpoint_v1": "Bounded pokrov.awg31.endpoint.v1 subset, only with_awg"
+    },
+    "scope": "No artifact digest, opaque signed capability reference/revision, IP-family reachability, endpoint lease, entitlement, proof or production readiness. Those bindings remain independent requirements. The inventory is intentionally limited to current ATS transport ingredients, not every engine registration."
+  },
+  "linux_expected_identity_start": {
+    "protocol": "pokrov-linux-core-v1",
+    "prepared": "identity_schema=1, deadline_schema=1, core_module_sha256 of this child, profile_sha256 of exact untransformed staged bytes; linuxd must compare the expected pair before arming the network transaction. Missing schema or digest rejects identity-bound admission.",
+    "command": "start_with_identity, expected_core_module_sha256 and expected_profile_sha256 (both 64 lowercase hex), deadline object (boot_ref, started_elapsed_ms, deadline_elapsed_ms); fixed stdin/FD3 control channel, maximum command line 512 bytes. Ordinary start/stop/health cannot carry nonempty expectations or a deadline object.",
+    "start": "Compare digests, reread self-executable SHA and require the original CLOCK_BOOTTIME interval before hcore.Start. Started echoes both schemas=1, the pair and connect_deadline. A 100ms observer cancels the runtime context on expiry/clock loss, also after successful start. linuxd rejects missing/conflicting confirmation and uses existing rollback. No wakeup or hard real-time shutdown claim.",
+    "scope": "Unreleased matching Core/linuxd pair; deadline duration ceiling 24h is a schema bound, not a default or granted lease. No desktop ABI change, new path or privilege. Does not authenticate a remote candidate, promote a healthy flow/lease or prove connectivity. Source NOT_VERIFIED."
+  },
+  "smart_access_runtime_control": {
+    "symbol": "pokrovCoreConfigureSmartAccessRuntimeControl",
+    "arguments": "Two UTF-8 strings: exact running profile digest (64 lowercase hex), JSON at most 16384 bytes with schema pokrov-smart-access-runtime-worker-v1. Core rejects mismatched JSON profile binding. Authenticated host fences runtime and invalidates reusable profile BEFORE dispatch. Contains an opaque restriction-only capability; never log or persist this command.",
+    "returns": {"1": "worker configured or exact live retry acknowledged", "0": "not configured", "-1": "invalid, conflicting or unavailable"}
+  },
+  "smart_access_runtime_renewal_enrollment": {
+    "symbol": "pokrovCoreConfigureSmartAccessRenewal",
+    "arguments": "Two UTF-8 strings: exact running profile digest and JSON at most 16384 bytes with schema pokrov-smart-access-runtime-renewal-worker-v1, profile_digest, capability, issued_at, expires_at, lease (23-field recovery identity). Authenticated host invalidates saved reuse before dispatch. Requires an existing live restriction worker and the exact current admission-capable lease/dates. Credential stays in memory; no HTTP or extension is performed by enrollment.",
+    "returns": {"1": "enrolled or exact live retry acknowledged", "0": "no matching current lease", "-1": "invalid, conflicting, full or unavailable"}
+  },
+  "smart_access_restriction_readback": {
+    "read_symbol": "pokrovCoreReadSmartAccessRestrictions",
+    "read_arguments": "none; initialized Core, including when no profile is running",
+    "read_returns": "caller-owned UTF-8 JSON snapshot at most 1 MiB (schema, snapshot_sha256, entries), release with freeString; null on failure. Each entry has profile_digest, catalog_sha256, generation, pending, policy_action, catalog_withdrawn, expires_at, leases, live. leases contains at most 256 non-secret 23-field recovery identities, never credentials or grants. Snapshot hash includes recursively sorted identity keys and unchanged array order. expires_at bounds original and retained runtime authority in UTC seconds; empty means unknown, never credential expiry.",
+    "ack_symbol": "pokrovCoreAcknowledgeSmartAccessRestrictions",
+    "ack_arguments": "snapshot SHA-256 after the client durably retained every restriction, uncertain recovery marker and lease identity within its original catalog/scope binding",
+    "ack_returns": {"1": "snapshot matched; only non-live entries removed", "0": "snapshot changed; reread required", "-1": "invalid or unavailable; no acknowledgement"}
+  },
+  "smart_access_current_leases": {
+    "symbol": "pokrovCoreReadSmartAccessLeases",
+    "arguments": "none; authenticated native host fences the exact running profile under its existing execution owner",
+    "returns": "caller-owned UTF-8 JSON object up to 65536 bytes: schema=1, lease_ids (at most 256 unique current 32-hex IDs), selections (at most 256 rows: service_id, lease_id, selection_index, state pending/gateway/unavailable, available). Empty arrays for no Smart Access outbounds, null on unavailable/error; release with freeString. Historical IDs, endpoints and grants are excluded. Selection readback never selects another provider and cannot authorize renewal. Unreleased wire shape; requires matching Core/host/client source."
+  },
+  "routing_catalog_revoke": {
+    "symbol": "pokrovCoreRevokeRoutingCatalog",
+    "arguments": "none; authenticated host must fence the exact running profile",
+    "returns": {"1": "catalog windows or leases found and revoked", "0": "no catalog windows or leases; no mutation", "-1": "runtime unavailable"}
+  },
+  "smart_access_revoke": {
+    "symbol": "pokrovCoreRevokeSmartAccessLease",
+    "arguments": "UTF-8 lease ID (32 lowercase hex), terminate_active (0 or 1)",
+    "returns": {"1": "matching lease revoked", "0": "lease absent; no mutation", "-1": "invalid input or runtime unavailable"}
+  },
+  "smart_access_renewal": {
+    "symbol": "pokrovCoreRenewSmartAccessLease",
+    "arguments": "Five UTF-8 strings: expected lease ID, next lease ID (32 lowercase hex each), issued_at, new_flows_until, active_flows_until (exact UTC seconds). Authenticated host verifies unchanged grant scope, persists restriction identities and fences the running profile.",
+    "returns": {"1": "next generation installed or exact retry acknowledged", "0": "expected lease absent; no mutation", "-1": "invalid, expired, revoked, conflicting renewal or runtime unavailable"}
+  },
+  "smart_access_policy_revoke": {
+    "symbol": "pokrovCoreRevokeSmartAccessPolicy",
+    "arguments": "terminate_active (0 or 1); authenticated host must fence the exact running profile",
+    "returns": {"1": "all profile leases restricted", "0": "no leases; no mutation", "-1": "invalid input or runtime unavailable"}
+  },
+  "routing_catalog_service_revoke": {
+    "symbol": "pokrovCoreRevokeRoutingCatalogService",
+    "arguments": "ASCII service ID matching [a-z0-9][a-z0-9._-]{0,63}; authenticated host fences the exact running profile",
+    "returns": {"1": "matching service windows withdrawn and linked leases terminated", "0": "service absent; no mutation", "-1": "invalid input or runtime unavailable"}
+  },
   "descriptor": {
     "schema_version": 1,
     "desktop_abi": 2,
     "event_abi": 1,
+    "routing_catalog_window_version": 1,
+    "smart_access_lease_version": 1,
+    "smart_access_runtime_control_version": 1,
+    "routing_catalog_control_version": 4,
     "capabilities": [
       "bounded_stop_reason",
       "core_start_stop",

@@ -11,6 +11,7 @@ import (
 )
 
 type abstractDefaultRule struct {
+	catalogWindow           *catalogRuleWindow
 	items                   []RuleItem
 	sourceAddressItems      []RuleItem
 	sourcePortItems         []RuleItem
@@ -27,7 +28,26 @@ func (r *abstractDefaultRule) Type() string {
 	return C.RuleTypeDefault
 }
 
+// Withdraw only the compiled catalog admission window. Keep the rule and its
+// following fallback in place; manual/safety rules without a window are intact.
+func (r *abstractDefaultRule) RevokeRoutingCatalog() bool {
+	if r.catalogWindow == nil { return false }
+	r.catalogWindow.expired.Store(true)
+	return true
+}
+
+func (r *abstractDefaultRule) RevokeRoutingCatalogService(serviceID string) bool {
+	window := r.catalogWindow
+	if window == nil || window.serviceID == "" || window.serviceID != serviceID { return false }
+	window.expired.Store(true)
+	if window.lease != nil { window.lease.Revoke(true) }
+	return true
+}
+
 func (r *abstractDefaultRule) Start() error {
+	if r.catalogWindow != nil {
+		if err := r.catalogWindow.start(); err != nil { return err }
+	}
 	for _, item := range r.allItems {
 		if starter, isStarter := item.(interface {
 			Start() error
@@ -52,6 +72,10 @@ func (r *abstractDefaultRule) Close() error {
 }
 
 func (r *abstractDefaultRule) Match(metadata *adapter.InboundContext) bool {
+	// Lifetime is an admission gate, never a condition that invert can reverse.
+	if r.catalogWindow != nil && !r.catalogWindow.active() {
+		return false
+	}
 	if len(r.allItems) == 0 {
 		return true
 	}
@@ -131,6 +155,9 @@ func (r *abstractDefaultRule) Match(metadata *adapter.InboundContext) bool {
 		return r.invert
 	}
 
+	// Service selection changes only after this rule's actual scope matched;
+	// unrelated traffic must not select a gateway or manufacture UI evidence.
+	if r.catalogWindow != nil && !r.catalogWindow.selected() { return false }
 	if !metadata.DidMatch {
 		return true
 	}

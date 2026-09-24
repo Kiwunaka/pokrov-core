@@ -198,6 +198,17 @@ func (r *Router) matchDNS(ctx context.Context, allowFakeIP bool, ruleIndex int, 
 	return r.transport.Default(), nil, -1
 }
 
+func markSmartAccessDNSFailure(rule adapter.DNSRule) bool {
+	marker, ok := rule.(interface { MarkPokrovSmartAccessDNSFailure() bool })
+	return ok && marker.MarkPokrovSmartAccessDNSFailure()
+}
+
+func smartAccessDNSTransportFailed(err error) bool {
+	if err == nil || errors.Is(err, ErrResponseRejected) { return false }
+	var rcode RcodeError
+	return !errors.As(err, &rcode)
+}
+
 func (r *Router) Exchange(ctx context.Context, message *mDNS.Msg, options adapter.DNSQueryOptions) (*mDNS.Msg, error) {
 	if len(message.Question) != 1 {
 		r.logger.WarnContext(ctx, "bad question size: ", len(message.Question))
@@ -287,6 +298,7 @@ func (r *Router) Exchange(ctx context.Context, message *mDNS.Msg, options adapte
 			response, err = r.client.Exchange(dnsCtx, transport, message, dnsOptions, responseCheck)
 			var rejected bool
 			var bypass bool
+			var smartAccessBypass bool
 			if err != nil {
 				if errors.Is(err, ErrResponseRejectedCached) {
 					rejected = true
@@ -299,11 +311,12 @@ func (r *Router) Exchange(ctx context.Context, message *mDNS.Msg, options adapte
 				} else {
 					r.logger.ErrorContext(ctx, E.Cause(err, "exchange ", transport.Tag(), " failed for <empty query>"))
 				}
-				if rule != nil && rule.BypassIfFailed() && ruleIndex != -1 {
+				if rule != nil && ruleIndex != -1 {
 					select {
 					case <-ctx.Done():
 					default:
-						bypass = true
+						if smartAccessDNSTransportFailed(err) { smartAccessBypass = markSmartAccessDNSFailure(rule) }
+						bypass = smartAccessBypass || rule.BypassIfFailed()
 					}
 				}
 			}
@@ -311,6 +324,7 @@ func (r *Router) Exchange(ctx context.Context, message *mDNS.Msg, options adapte
 				continue
 			}
 			if bypass {
+				if smartAccessBypass { ruleIndex = -1 }
 				continue
 			}
 
@@ -419,6 +433,10 @@ func (r *Router) Lookup(ctx context.Context, domain string, options adapter.DNSQ
 				dnsOptions.Strategy = r.defaultDomainStrategy
 			}
 			responseAddrs, err = r.client.Lookup(dnsCtx, transport, domain, dnsOptions, responseCheck)
+			if smartAccessDNSTransportFailed(err) && rule != nil && ruleIndex != -1 && ctx.Err() == nil && markSmartAccessDNSFailure(rule) {
+				ruleIndex = -1
+				continue
+			}
 			if rule != nil && len(responseAddrs) == 0 && rule.BypassIfFailed() && ruleIndex != -1 {
 				continue
 			}

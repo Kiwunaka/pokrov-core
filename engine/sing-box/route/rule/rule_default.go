@@ -54,12 +54,20 @@ type RuleItem interface {
 }
 
 func NewDefaultRule(ctx context.Context, logger log.ContextLogger, options option.DefaultRule) (*DefaultRule, error) {
+	window, err := newCatalogRuleWindow(ctx, options.PokrovCatalogWindow, options.Invert, len(options.Domain)+len(options.DomainSuffix))
+	if err != nil {
+		return nil, err
+	}
+	if window != nil && options.Action != "" && options.Action != C.RuleActionTypeRoute && options.Action != C.RuleActionTypeReject {
+		return nil, E.New("catalog_window_route_action_unsupported")
+	}
 	action, err := NewRuleAction(ctx, logger, options.RuleAction)
 	if err != nil {
 		return nil, E.Cause(err, "action")
 	}
 	rule := &DefaultRule{
 		abstractDefaultRule{
+			catalogWindow: window,
 			invert: options.Invert,
 			action: action,
 		},
@@ -320,6 +328,9 @@ func NewLogicalRule(ctx context.Context, logger log.ContextLogger, options optio
 		return nil, E.New("unknown logical mode: ", options.Mode)
 	}
 	for i, subOptions := range options.Rules {
+		if subOptions.DefaultOptions.PokrovCatalogWindow != nil {
+			return nil, E.New("catalog_window_requires_top_level_rule")
+		}
 		subRule, err := NewRule(ctx, logger, subOptions, false)
 		if err != nil {
 			return nil, E.Cause(err, "sub rule[", i, "]")

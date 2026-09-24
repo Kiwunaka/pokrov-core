@@ -3,6 +3,7 @@ package daemon
 import (
 	"bytes"
 	"context"
+	"time"
 
 	box "github.com/sagernet/sing-box"
 	"github.com/sagernet/sing-box/adapter"
@@ -25,6 +26,9 @@ type Instance struct {
 	cacheFile             adapter.CacheFile
 	pauseManager          pause.Manager
 	urlTestHistoryStorage *urltest.HistoryStorage
+	// Accessed only under StartedService.serviceAccess; worker context is owned by this instance.
+	smartAccessControl    *smartAccessRuntimeControlWorker
+	smartAccessRestrictionExpires time.Time
 }
 
 func (s *StartedService) CheckConfig(configContent string) error {
@@ -110,6 +114,7 @@ func (s *StartedService) newInstanceOptions(options option.Options, overrideOpti
 		ctx = urltest.ContextWithIsUnifiedDelay(ctx)
 	}
 	i.instance = boxInstance
+	i.smartAccessRestrictionExpires = smartAccessProfileRestrictionExpiry(options)
 	i.clashServer = service.FromContext[adapter.ClashServer](ctx)
 	i.pauseManager = service.FromContext[pause.Manager](ctx)
 	i.cacheFile = service.FromContext[adapter.CacheFile](ctx)

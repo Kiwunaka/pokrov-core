@@ -40,6 +40,7 @@ import (
 var _ adapter.SimpleLifecycle = (*Box)(nil)
 
 type Box struct {
+	ctx             context.Context
 	createdAt       time.Time
 	logFactory      log.Factory
 	logger          log.ContextLogger
@@ -411,6 +412,7 @@ func New(options Options) (*Box, error) {
 		internalServices = append(internalServices, adapter.NewLifecycleService(ntpService, "ntp service"))
 	}
 	return &Box{
+		ctx:             ctx,
 		network:         networkManager,
 		endpoint:        endpointManager,
 		inbound:         inboundManager,
@@ -467,6 +469,7 @@ func (s *Box) Start() error {
 }
 
 func (s *Box) preStart() error {
+	if err := s.ctx.Err(); err != nil { return err }
 	monitor := taskmonitor.New(s.logger, C.StartTimeout)
 	monitor.Start("start logger")
 	err := s.logFactory.Start()
@@ -474,14 +477,17 @@ func (s *Box) preStart() error {
 	if err != nil {
 		return E.Cause(err, "start logger")
 	}
+	if err := s.ctx.Err(); err != nil { return err }
 	err = adapter.StartNamed(s.logger, adapter.StartStateInitialize, s.internalService) // cache-file clash-api v2ray-api
 	if err != nil {
 		return err
 	}
+	if err := s.ctx.Err(); err != nil { return err }
 	err = adapter.Start(s.logger, adapter.StartStateInitialize, s.network, s.dnsTransport, s.dnsRouter, s.connection, s.router, s.outbound, s.inbound, s.endpoint, s.service)
 	if err != nil {
 		return err
 	}
+	if err := s.ctx.Err(); err != nil { return err }
 	err = adapter.Start(s.logger, adapter.StartStateStart, s.outbound, s.dnsTransport, s.dnsRouter, s.network, s.connection, s.router)
 	if err != nil {
 		return err
@@ -494,31 +500,37 @@ func (s *Box) start() error {
 	if err != nil {
 		return err
 	}
+	if err := s.ctx.Err(); err != nil { return err }
 	err = adapter.StartNamed(s.logger, adapter.StartStateStart, s.internalService)
 	if err != nil {
 		return err
 	}
+	if err := s.ctx.Err(); err != nil { return err }
 	err = adapter.Start(s.logger, adapter.StartStateStart, s.inbound, s.endpoint, s.service)
 	if err != nil {
 		return err
 	}
+	if err := s.ctx.Err(); err != nil { return err }
 	err = adapter.Start(s.logger, adapter.StartStatePostStart, s.outbound, s.network, s.dnsTransport, s.dnsRouter, s.connection, s.router, s.inbound, s.endpoint, s.service)
 	if err != nil {
 		return err
 	}
+	if err := s.ctx.Err(); err != nil { return err }
 	err = adapter.StartNamed(s.logger, adapter.StartStatePostStart, s.internalService)
 	if err != nil {
 		return err
 	}
+	if err := s.ctx.Err(); err != nil { return err }
 	err = adapter.Start(s.logger, adapter.StartStateStarted, s.network, s.dnsTransport, s.dnsRouter, s.connection, s.router, s.outbound, s.inbound, s.endpoint, s.service)
 	if err != nil {
 		return err
 	}
+	if err := s.ctx.Err(); err != nil { return err }
 	err = adapter.StartNamed(s.logger, adapter.StartStateStarted, s.internalService)
 	if err != nil {
 		return err
 	}
-	return nil
+	return s.ctx.Err()
 }
 
 func (s *Box) Close() error {

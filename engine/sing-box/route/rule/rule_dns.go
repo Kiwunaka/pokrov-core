@@ -49,8 +49,26 @@ type DefaultDNSRule struct {
 }
 
 func NewDefaultDNSRule(ctx context.Context, logger log.ContextLogger, options option.DefaultDNSRule) (*DefaultDNSRule, error) {
+	window, err := newCatalogRuleWindow(ctx, options.PokrovCatalogWindow, options.Invert, len(options.Domain)+len(options.DomainSuffix))
+	if err != nil {
+		return nil, err
+	}
+	if window != nil {
+		switch options.Action {
+		case "", C.RuleActionTypeRoute:
+			// Neither core nor cooperating downstream resolvers should retain an
+			// answer from a catalog-specific DNS choice beyond that rule's window.
+			zeroTTL := uint32(0)
+			options.RouteOptions.DisableCache = true
+			options.RouteOptions.RewriteTTL = &zeroTTL
+		case C.RuleActionTypeReject:
+		default:
+			return nil, E.New("catalog_window_dns_action_unsupported")
+		}
+	}
 	rule := &DefaultDNSRule{
 		abstractDefaultRule: abstractDefaultRule{
+			catalogWindow: window,
 			invert: options.Invert,
 			action: NewDNSRuleAction(logger, options.DNSRuleAction),
 		},
@@ -344,6 +362,9 @@ func NewLogicalDNSRule(ctx context.Context, logger log.ContextLogger, options op
 		return nil, E.New("unknown logical mode: ", options.Mode)
 	}
 	for i, subRule := range options.Rules {
+		if subRule.DefaultOptions.PokrovCatalogWindow != nil {
+			return nil, E.New("catalog_window_requires_top_level_rule")
+		}
 		rule, err := NewDNSRule(ctx, logger, subRule, false)
 		if err != nil {
 			return nil, E.Cause(err, "sub rule[", i, "]")
@@ -413,4 +434,8 @@ func (r *DefaultDNSRule) BypassIfFailed() bool {
 		return act.RuleActionDNSRouteOptions.BypassIfFailed
 	}
 	return false
+}
+
+func (r *DefaultDNSRule) MarkPokrovSmartAccessDNSFailure() bool {
+	return r.catalogWindow.smartAccessDNSFailed()
 }

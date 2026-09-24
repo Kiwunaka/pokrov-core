@@ -67,6 +67,7 @@ func (r Rule) IsValid() bool {
 }
 
 type RawDefaultRule struct {
+	PokrovCatalogWindow      *PokrovCatalogWindow              `json:"pokrov_catalog_window,omitempty"`
 	Inbound                  badoption.Listable[string]        `json:"inbound,omitempty"`
 	IPVersion                int                               `json:"ip_version,omitempty"`
 	Network                  badoption.Listable[string]        `json:"network,omitempty"`

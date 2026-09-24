@@ -201,6 +201,7 @@ func urlTest(ctx context.Context, link string, detour N.Dialer, stage *atomic.Ui
 		return
 	}
 	link = resolveURLTestLink(link)
+	ownedEgressProbe := link == defaultURLTestLink
 	linkURL, err := url.Parse(link)
 	if err != nil {
 		return
@@ -271,7 +272,9 @@ func urlTest(ctx context.Context, link string, detour N.Dialer, stage *atomic.Ui
 	if err != nil {
 		return
 	}
-	resp.Body.Close()
+	if err = acceptURLTestResponse(resp, ownedEgressProbe); err != nil {
+		return
+	}
 
 	t = uint16(time.Since(start) / time.Millisecond)
 
@@ -287,15 +290,28 @@ func urlTest(ctx context.Context, link string, detour N.Dialer, stage *atomic.Ui
 		if err != nil {
 			return
 		}
-		resp.Body.Close()
+		if err = acceptURLTestResponse(resp, ownedEgressProbe); err != nil {
+			return
+		}
 		t = uint16(time.Since(second) / time.Millisecond) //to avid timeout in the second call
 	}
 	return
 }
 
+func acceptURLTestResponse(response *http.Response, ownedEgressProbe bool) error {
+	defer response.Body.Close()
+	if ownedEgressProbe && (response.StatusCode != http.StatusNoContent ||
+		response.Header.Get("X-Pokrov-Egress-Probe") != "pokrov-authenticated-egress-v1") {
+		return errors.New("authenticated egress marker invalid")
+	}
+	return nil
+}
+
+const defaultURLTestLink = "https://api.pokrov.space/api/public/authenticated-egress-probe"
+
 func resolveURLTestLink(link string) string {
 	if link != "" {
 		return link
 	}
-	return "https://api.pokrov.space/api/public/authenticated-egress-probe"
+	return defaultURLTestLink
 }

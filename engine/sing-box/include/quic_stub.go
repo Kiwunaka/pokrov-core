@@ -23,6 +23,8 @@ import (
 	N "github.com/sagernet/sing/common/network"
 )
 
+const pokrovTransportQUIC = false
+
 func init() {
 	v2ray.RegisterQUICConstructor(
 		func(ctx context.Context, logger logger.ContextLogger, options option.V2RayQUICOptions, tlsConfig tls.ServerConfig, handler adapter.V2RayServerTransportHandler) (adapter.V2RayServerTransport, error) {

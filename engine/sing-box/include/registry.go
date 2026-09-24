@@ -25,7 +25,9 @@ import (
 	"github.com/sagernet/sing-box/protocol/group"
 	"github.com/sagernet/sing-box/protocol/group/balancer"
 	"github.com/sagernet/sing-box/protocol/pokrov/dnstt"
+	"github.com/sagernet/sing-box/protocol/pokrov/atslease"
 	"github.com/sagernet/sing-box/protocol/pokrov/hinvalid"
+	"github.com/sagernet/sing-box/protocol/pokrov/smartaccess"
 
 	"github.com/sagernet/sing-box/protocol/pokrov/xray"
 	"github.com/sagernet/sing-box/protocol/http"
@@ -85,6 +87,8 @@ func OutboundRegistry() *outbound.Registry {
 	registry := outbound.NewRegistry()
 
 	direct.RegisterOutbound(registry)
+	atslease.RegisterOutbound(registry)
+	smartaccess.RegisterOutbound(registry)
 
 	block.RegisterOutbound(registry)
 	protocolDNS.RegisterOutbound(registry)

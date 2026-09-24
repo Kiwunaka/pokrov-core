@@ -13,6 +13,8 @@ import (
 	E "github.com/sagernet/sing/common/exceptions"
 )
 
+const pokrovTransportAWG = false
+
 func registerAwgEndpoint(registry *endpoint.Registry) {
 	endpoint.Register(registry, C.TypeAwg, func(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, options option.AwgEndpointOptions) (adapter.Endpoint, error) {
 		return nil, E.New(`Awg is not included in this build, rebuild with -tags with_awg`)

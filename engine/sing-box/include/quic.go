@@ -14,6 +14,8 @@ import (
 	_ "github.com/sagernet/sing-box/transport/v2rayquic"
 )
 
+const pokrovTransportQUIC = true
+
 func registerQUICInbounds(registry *inbound.Registry) {
 	hysteria.RegisterInbound(registry)
 	tuic.RegisterInbound(registry)

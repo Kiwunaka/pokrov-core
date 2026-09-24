@@ -68,6 +68,7 @@ func (r DNSRule) IsValid() bool {
 }
 
 type RawDefaultDNSRule struct {
+	PokrovCatalogWindow      *PokrovCatalogWindow              `json:"pokrov_catalog_window,omitempty"`
 	Inbound                  badoption.Listable[string]        `json:"inbound,omitempty"`
 	IPVersion                int                               `json:"ip_version,omitempty"`
 	QueryType                badoption.Listable[DNSQueryType]  `json:"query_type,omitempty"`

@@ -5,7 +5,7 @@ It is not a public Linux release artifact or a replacement for the desktop ABI.
 The supported development host is Ubuntu 24.04 amd64 with systemd,
 NetworkManager, systemd-resolved and nftables.
 
-The adapter accepts no arguments. It runs as root, reads only the root-owned
+The normal runtime mode accepts no arguments. It runs as root, reads only the root-owned
 mode-0600 `/var/lib/pokrov/profiles/active-profile.json`, and uses
 `/var/lib/pokrov/core` for private runtime state. The parent supplies stdin
 commands and a separate inherited FD 3 pipe for bounded replies; raw Core
@@ -14,7 +14,8 @@ stdout/stderr and configuration never enter that protocol.
 `pokrov-linux-core-v1` has the following lifecycle:
 
 1. Validate and normalize the materialized profile and parse the engine schema. Reply
-   `prepared` with only `tunnel_interface`, `routing_mark` and `dns_servers`.
+   `prepared` with the plan (`tunnel_interface`, `routing_mark`, `dns_servers`)
+   and optional `transport_capabilities_json` from that exact Core process.
 2. After the parent installs its traffic filter, accept `start`, invoke the
    existing hcore lifecycle, verify `pokrov0` exists, then reply `started`.
 3. After the parent finishes the network transaction, accept `health`. Resolve
@@ -48,6 +49,39 @@ inbounds. It rejects paths, namespaces, interface/mark overrides and auxiliary
 services, while retaining supported proxy and DNS transport options. AWG
 endpoint configuration is outside this Linux boundary. The profile compiler
 does not turn the adapter into an arbitrary root command or file API.
+
+Source now also accepts the single fixed `--transport-capabilities` argument.
+This root-only mode emits a compact object with `schema: 1`,
+`transport_capabilities_json` (the libbox inventory string), and
+`core_module_sha256`, in that order and followed by one newline on stdout. It
+exits before profile/state/control-pipe handling. The digest is SHA-256 of the
+kernel's `/proc/self/exe` file, streamed in 128 KiB chunks with a 1 GiB file bound,
+size/mtime consistency and cancellation checks; unavailable identity is empty.
+The actual tunnel child's `prepared` reply also carries its own executable
+digest. Renaming/replacing the installation pathname does not make a running
+child report the replacement's hash. No package/archive hash is substituted.
+It does not prepare/start a tunnel or probe a destination. linuxd invokes it
+only for preflight metadata under a three-second deadline and bounded output;
+the running child supplies its own inventory in the `prepared` reply instead.
+The inventory describes engine ingredients, not this adapter's profile allowlist:
+for example a compiled AWG ingredient does not remove the endpoint prohibition
+above. New Core and linuxd must ship together because retained daemon readers
+reject unknown child reply fields. No artifact/build/runtime evidence is added;
+metadata/child wire and timeout checks remain NOT_VERIFIED.
+
+The private handshake also supports identity-bound start. `prepared` includes
+`identity_schema: 1`, `deadline_schema: 1` and `profile_sha256` over the untransformed bytes read from
+the fixed staged file. linuxd checks the candidate's module/profile pair before
+its network transaction. `start_with_identity` carries both expectations; Core
+compares them and rereads its own module hash before starting. The `started`
+reply confirms the same schema/pair. Missing/mismatched confirmation takes the
+existing daemon rollback path. Ordinary start never absorbs a bound request.
+The command also requires the original boot/start/end deadline. Core validates
+CLOCK_BOOTTIME before/after start, confirms the tuple and keeps a 100 ms clock
+watcher after responding. Expiry/clock loss closes the attempt; startup does not
+promote a lease. No wakeup or hard real-time shutdown is claimed. The command
+line limit is 512 bytes. Policy/lease/proof and selector executor integration
+remain open; this source has no new runtime evidence.
 
 For a development build, use the root module's Go toolchain and existing tags:
 

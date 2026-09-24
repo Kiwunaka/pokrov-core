@@ -11,6 +11,11 @@ package main
 #define POKROV_CALL
 #endif
 
+typedef int (POKROV_CALL *pokrov_core_interrupted_v1)(void* owner);
+static int pokrov_core_is_interrupted_v1(pokrov_core_interrupted_v1 callback, void* owner) {
+  return callback == NULL || callback(owner) != 0;
+}
+
 typedef void (POKROV_CALL *pokrov_core_event_callback_v1)(
     int schema_version,
     int event_abi,
@@ -123,7 +128,7 @@ func emptyOrErrorC(err error) *C.char {
 }
 
 const pokrovDesktopABIVersion = 2
-const pokrovCoreCapabilitiesJSON = `{"schema_version":1,"desktop_abi":2,"event_abi":1,"capabilities":["bounded_stop_reason","core_start_stop","materialized_profile","secure_profile_file","structured_operational_events","typed_lifecycle_events"],"lifecycle_events":["initialization","profile","core_start","tun","routes","dns","egress","recovery","stop"],"operational_events":{"contract":"config/core-event-abi.json","schema_version":1,"event_abi":1,"callback_symbol":"pokrovCoreSetEventCallback","context_symbol":"pokrovCoreSetEventContext","maximum_pending_events":128}}`
+const pokrovCoreCapabilitiesJSON = `{"schema_version":1,"desktop_abi":2,"event_abi":1,"routing_catalog_window_version":1,"smart_access_lease_version":1,"smart_access_runtime_control_version":1,"routing_catalog_control_version":4,"capabilities":["bounded_stop_reason","core_start_stop","materialized_profile","secure_profile_file","structured_operational_events","typed_lifecycle_events"],"lifecycle_events":["initialization","profile","core_start","tun","routes","dns","egress","recovery","stop"],"operational_events":{"contract":"config/core-event-abi.json","schema_version":1,"event_abi":1,"callback_symbol":"pokrovCoreSetEventCallback","context_symbol":"pokrovCoreSetEventContext","maximum_pending_events":128}}`
 
 //export pokrovCoreAbiVersion
 func pokrovCoreAbiVersion() C.int {
@@ -133,6 +138,116 @@ func pokrovCoreAbiVersion() C.int {
 //export pokrovCoreCapabilities
 func pokrovCoreCapabilities() *C.char {
 	return C.CString(pokrovCoreCapabilitiesJSON)
+}
+
+//export pokrovCoreTransportCapabilities
+func pokrovCoreTransportCapabilities() *C.char {
+	return C.CString(libbox.TransportCapabilities())
+}
+
+//export pokrovCoreConfirmATSLease
+func pokrovCoreConfirmATSLease(leaseID, issuedAt, newFlowsUntil, activeFlowsUntil *C.char) C.int {
+	if leaseID == nil || issuedAt == nil || newFlowsUntil == nil || activeFlowsUntil == nil { return -1 }
+	confirmed, err := hcore.ConfirmATSLease(C.GoString(leaseID), C.GoString(issuedAt),
+		C.GoString(newFlowsUntil), C.GoString(activeFlowsUntil))
+	if err != nil { return -1 }
+	if confirmed { return 1 }
+	return 0
+}
+
+//export pokrovCoreRevokeATSLease
+func pokrovCoreRevokeATSLease(leaseID *C.char, terminateActive C.int) C.int {
+	if leaseID == nil || (terminateActive != 0 && terminateActive != 1) { return -1 }
+	found, err := hcore.RevokeATSLease(C.GoString(leaseID), terminateActive == 1)
+	if err != nil { return -1 }
+	if found { return 1 }
+	return 0
+}
+
+//export pokrovCoreRevokeRoutingCatalog
+func pokrovCoreRevokeRoutingCatalog() C.int {
+	found, err := hcore.RevokeRoutingCatalog()
+	if err != nil { return -1 }
+	if found { return 1 }
+	return 0
+}
+
+//export pokrovCoreRevokeSmartAccessPolicy
+func pokrovCoreRevokeSmartAccessPolicy(terminateActive C.int) C.int {
+	if terminateActive != 0 && terminateActive != 1 { return -1 }
+	found, err := hcore.RevokeSmartAccessPolicy(terminateActive == 1)
+	if err != nil { return -1 }
+	if found { return 1 }
+	return 0
+}
+
+//export pokrovCoreRevokeRoutingCatalogService
+func pokrovCoreRevokeRoutingCatalogService(serviceID *C.char) C.int {
+	if serviceID == nil { return -1 }
+	found, err := hcore.RevokeRoutingCatalogService(C.GoString(serviceID))
+	if err != nil { return -1 }
+	if found { return 1 }
+	return 0
+}
+
+//export pokrovCoreRevokeSmartAccessLease
+func pokrovCoreRevokeSmartAccessLease(leaseID *C.char, terminateActive C.int) C.int {
+	if leaseID == nil || (terminateActive != 0 && terminateActive != 1) { return -1 }
+	found, err := hcore.RevokeSmartAccessLease(C.GoString(leaseID), terminateActive == 1)
+	if err != nil { return -1 }
+	if found { return 1 }
+	return 0
+}
+
+//export pokrovCoreRenewSmartAccessLease
+func pokrovCoreRenewSmartAccessLease(expectedID, nextID, issuedAt, newFlowsUntil, activeFlowsUntil *C.char) C.int {
+	if expectedID == nil || nextID == nil || issuedAt == nil || newFlowsUntil == nil || activeFlowsUntil == nil { return -1 }
+	found, err := hcore.RenewSmartAccessLease(C.GoString(expectedID), C.GoString(nextID),
+		C.GoString(issuedAt), C.GoString(newFlowsUntil), C.GoString(activeFlowsUntil))
+	if err != nil { return -1 }
+	if found { return 1 }
+	return 0
+}
+
+//export pokrovCoreConfigureSmartAccessRuntimeControl
+func pokrovCoreConfigureSmartAccessRuntimeControl(profileDigest, configJSON *C.char) C.int {
+	if profileDigest == nil || configJSON == nil { return -1 }
+	configured, err := hcore.ConfigureSmartAccessRuntimeControl(C.GoString(profileDigest), C.GoString(configJSON))
+	if err != nil { return -1 }
+	if configured { return 1 }
+	return 0
+}
+
+//export pokrovCoreConfigureSmartAccessRenewal
+func pokrovCoreConfigureSmartAccessRenewal(profileDigest, configJSON *C.char) C.int {
+	if profileDigest == nil || configJSON == nil { return -1 }
+	configured, err := hcore.ConfigureSmartAccessRenewal(C.GoString(profileDigest), C.GoString(configJSON))
+	if err != nil { return -1 }
+	if configured { return 1 }
+	return 0
+}
+
+//export pokrovCoreReadSmartAccessLeases
+func pokrovCoreReadSmartAccessLeases() *C.char {
+	value, err := hcore.ReadSmartAccessLeases()
+	if err != nil { return nil }
+	return C.CString(value)
+}
+
+//export pokrovCoreReadSmartAccessRestrictions
+func pokrovCoreReadSmartAccessRestrictions() *C.char {
+	encoded, err := hcore.ReadSmartAccessRestrictions()
+	if err != nil { return nil }
+	return C.CString(encoded)
+}
+
+//export pokrovCoreAcknowledgeSmartAccessRestrictions
+func pokrovCoreAcknowledgeSmartAccessRestrictions(snapshotSHA256 *C.char) C.int {
+	if snapshotSHA256 == nil { return -1 }
+	acknowledged, err := hcore.AcknowledgeSmartAccessRestrictions(C.GoString(snapshotSHA256))
+	if err != nil { return -1 }
+	if acknowledged { return 1 }
+	return 0
 }
 
 //export pokrovCoreSetEventCallback
@@ -236,6 +351,19 @@ func start(configPath *C.char, disableMemoryLimit bool) *C.char {
 		DisableMemoryLimit:     bool(disableMemoryLimit),
 	})
 	return emptyOrErrorC(err)
+}
+
+//export pokrovCoreStartInterruptibleV1
+func pokrovCoreStartInterruptibleV1(configPath *C.char, disableMemoryLimit bool, callback C.pokrov_core_interrupted_v1, owner unsafe.Pointer) *C.char {
+	if configPath == nil { return C.CString("core_start_failed") }
+	_, err := hcore.StartInterruptible(libbox.BaseContext(nil), &hcore.StartRequest{
+		ConfigPath: C.GoString(configPath),
+		EnableOldCommandServer: false,
+		EnableRawConfig: true,
+		DisableMemoryLimit: bool(disableMemoryLimit),
+	}, func() bool { return C.pokrov_core_is_interrupted_v1(callback, owner) != 0 })
+	if err != nil { return C.CString("core_start_failed") }
+	return C.CString("")
 }
 
 //export stop
