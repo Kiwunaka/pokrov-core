@@ -26,6 +26,8 @@
       "pokrovCoreAbiVersion",
       "pokrovCoreCapabilities",
       "pokrovCoreTransportCapabilities",
+      "pokrovCoreConfirmATSLease",
+      "pokrovCoreRevokeATSLease",
       "pokrovCoreStartInterruptibleV1",
       "pokrovCoreAcknowledgeSmartAccessRestrictions",
       "pokrovCoreConfigureSmartAccessRuntimeControl",
