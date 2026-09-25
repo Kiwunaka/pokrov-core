@@ -10,5 +10,6 @@
 *.exe
 *.test
 *.out
+__pycache__/
 .idea/
 .vscode/

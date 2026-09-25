@@ -14,6 +14,15 @@ artifact or candidate. `config/release.json` retains the immutable public
 `1.0.3` evidence in a separate `retained_public_release` block until exact
 `1.1.0` artifacts are built twice and accepted by the client manifest.
 
+For the REALITY version gate, build the current `engine/sing-box` CLI with
+`with_utls` and run `scripts/test-reality-xray-matrix.py` with each official
+Xray binary via repeated `--xray` arguments. It creates loopback VLESS/REALITY
+servers with disposable credentials and requires HTTPS 204 through the client.
+`--url` and `--check-pokrov-marker` exercise the owned authenticated-egress
+endpoint. If the local resolver supplies a fake or reserved address, pass the
+verified public destination via `--egress-ip`; this applies only to the local
+fixture. This matrix does not replace production-node or installed-app checks.
+
 `scripts/test.ps1` also checks `config/abi-contract.json` against
 `config/release.json`, every desktop `//export` declaration and the exact
 capability descriptor embedded in the library. Adding, removing or renaming an
