@@ -123,7 +123,8 @@ func (e *RealityClientConfig) ClientHandshake(ctx context.Context, conn net.Conn
 		ctx,
 		conn,
 		e.uClient.fragment,
-		e.uClient.recordFragment,
+		// Hybrid Chrome ClientHello needs record fragmentation on the owned DE path.
+		true,
 		e.uClient.fragmentFallbackDelay,
 	)
 	uConfig := e.uClient.config.Clone()
@@ -132,8 +133,7 @@ func (e *RealityClientConfig) ClientHandshake(ctx context.Context, conn net.Conn
 	uConfig.VerifyPeerCertificate = verifier.VerifyPeerCertificate
 	uConn := utls.UClient(conn, uConfig, e.uClient.id)
 	verifier.UConn = uConn
-	err := uConn.BuildHandshakeState()
-	if err != nil {
+	if err := uConn.BuildHandshakeState(); err != nil {
 		return nil, err
 	}
 	if len(uConfig.NextProtos) > 0 {

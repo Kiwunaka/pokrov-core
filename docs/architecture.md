@@ -595,10 +595,12 @@ Hysteria2 requires `with_quic`, and the `pokrov.awg31.endpoint.v1` subset requir
 are not capabilities. In particular native V2Ray XHTTP is independent of the
 unimplemented `xray` outbound and does not advertise xray-json ingestion.
 
-With `with_utls`, the REALITY client advertises version 26.3.27, retains the
-`X25519MLKEM768` key share, and derives its authorization key from the X25519
-share or the hybrid share's X25519 component. Server verification remains
-mandatory. Profiles need a uTLS fingerprint that supplies the hybrid share.
+With `with_utls`, the REALITY client advertises version 26.3.27 and retains
+both the `X25519MLKEM768` and X25519 key shares supplied by the fingerprint.
+It splits the ClientHello into TLS records: the unfragmented hybrid Chrome
+hello timed out on the owned DE Xray 26.6.27 path, while record fragmentation
+connected with the same Windows client and service. Server verification remains
+mandatory. Other TLS outbounds keep their configured fragmentation behavior.
 
 This bounded ingredient inventory does not establish that an arbitrary profile
 or combination is supported. Profile option/contract checks still apply. It is
