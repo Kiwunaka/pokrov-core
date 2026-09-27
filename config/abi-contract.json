@@ -29,6 +29,8 @@
       "pokrovCoreConfirmATSLease",
       "pokrovCoreRevokeATSLease",
       "pokrovCoreStartInterruptibleV1",
+      "pokrovCoreProbeCandidateV1",
+      "pokrovCoreCancelCandidateProbeV1",
       "pokrovCoreAcknowledgeSmartAccessRestrictions",
       "pokrovCoreConfigureSmartAccessRuntimeControl",
       "pokrovCoreConfigureSmartAccessRenewal",

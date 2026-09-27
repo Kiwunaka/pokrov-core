@@ -67,6 +67,7 @@ import (
 	// "os/signal"
 
 	"runtime"
+	"time"
 
 	// "syscall"
 	"unsafe"
@@ -439,6 +440,24 @@ func stop() *C.char {
 
 	_, err := hcore.Stop()
 	return emptyOrErrorC(err)
+}
+
+//export pokrovCoreProbeCandidateV1
+func pokrovCoreProbeCandidateV1(config *C.char, probeID *C.char, timeoutMs C.int, bindInterface *C.char, callback C.pokrov_core_interrupted_v1, owner unsafe.Pointer) *C.char {
+	if config == nil || probeID == nil || bindInterface == nil || C.GoString(bindInterface) == "" {
+		return C.CString((hcore.CandidateProbeResult{FailureKind: "invalid_request"}).JSON())
+	}
+	result := hcore.ProbeCandidate(C.GoString(config), C.GoString(probeID), time.Duration(timeoutMs)*time.Millisecond,
+		C.GoString(bindInterface), nil, func() bool { return C.pokrov_core_is_interrupted_v1(callback, owner) != 0 })
+	return C.CString(result.JSON())
+}
+
+//export pokrovCoreCancelCandidateProbeV1
+func pokrovCoreCancelCandidateProbeV1(probeID *C.char) *C.char {
+	if probeID != nil {
+		hcore.CancelCandidateProbe(C.GoString(probeID))
+	}
+	return C.CString("")
 }
 
 //export restart

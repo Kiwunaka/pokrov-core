@@ -807,3 +807,14 @@ real-time settlement is claimed. No tests, formatter, ABI generation, build,
 native call or runtime proof was performed. Retained binaries are unchanged.
 
 Server inbounds, panel state, provisioning, and traffic accounting remain outside POKROV Core.
+
+Ordinary candidate selection uses an isolated raw-profile Core instance with no
+inbounds, host routes, command server or persistent cache. The selected protected
+outbound performs one TLS-verified GET to the owned public egress endpoint; only
+204 succeeds and redirects fail. Android supplies a captured-network socket and
+DNS adapter; Windows supplies the physical interface. Each probe has its own
+deadline and interruption callback. Cancellation closes the instance and waits
+for the request and observer to return before releasing the caller-owned callback.
+The existing active runtime and its TUN remain untouched by probes. The optional
+desktop ABI 2 exports return only a fixed failure kind and duration, with strings
+released by `freeString`; profiles and transport errors never enter the result.
