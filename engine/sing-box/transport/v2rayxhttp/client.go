@@ -42,12 +42,15 @@ type Client struct {
 	getRequestURL2 func(sessionId string) url.URL
 	getHTTPClient  func() (DialerClient, *XmuxClient)
 	getHTTPClient2 func() (DialerClient, *XmuxClient)
+	clientsMu      sync.Mutex
+	clients        []*DefaultDialerClient
 }
 
 func NewClient(ctx context.Context, dialer N.Dialer, serverAddr M.Socksaddr, options option.V2RayXHTTPOptions, tlsConfig tls.Config) (adapter.V2RayClientTransport, error) {
 	if options.Mode == "" {
 		return nil, E.New("mode is not set")
 	}
+	client := &Client{ctx: ctx, options: &options}
 	dest := serverAddr
 	baseRequestURL, err := getBaseRequestURL(
 		&options.V2RayXHTTPBaseOptions, dest, tlsConfig,
@@ -65,7 +68,7 @@ func NewClient(ctx context.Context, dialer N.Dialer, serverAddr M.Socksaddr, opt
 		xmuxOptions = *options.Xmux
 	}
 	xmuxManager := NewXmuxManager(xmuxOptions, func() XmuxConn {
-		return createHTTPClient(dest, dialer, &options.V2RayXHTTPBaseOptions, tlsConfig)
+		return client.newHTTPClient(dest, dialer, &options.V2RayXHTTPBaseOptions, tlsConfig)
 	})
 	getHTTPClient := func() (DialerClient, *XmuxClient) {
 		xmuxClient := xmuxManager.GetXmuxClient(ctx)
@@ -105,24 +108,33 @@ func NewClient(ctx context.Context, dialer N.Dialer, serverAddr M.Socksaddr, opt
 			xmuxOptions2 = *options2.Xmux
 		}
 		xmuxManager2 := NewXmuxManager(xmuxOptions2, func() XmuxConn {
-			return createHTTPClient(dest2, dialer2, &options2.V2RayXHTTPBaseOptions, tlsConfig2)
+			return client.newHTTPClient(dest2, dialer2, &options2.V2RayXHTTPBaseOptions, tlsConfig2)
 		})
 		getHTTPClient2 = func() (DialerClient, *XmuxClient) {
 			xmuxClient2 := xmuxManager2.GetXmuxClient(ctx)
 			return xmuxClient2.XmuxConn.(DialerClient), xmuxClient2
 		}
 	}
-	return &Client{
-		ctx:            ctx,
-		options:        &options,
-		getHTTPClient:  getHTTPClient,
-		getHTTPClient2: getHTTPClient2,
-		getRequestURL:  getRequestURL,
-		getRequestURL2: getRequestURL2,
-	}, nil
+	client.getHTTPClient = getHTTPClient
+	client.getHTTPClient2 = getHTTPClient2
+	client.getRequestURL = getRequestURL
+	client.getRequestURL2 = getRequestURL2
+	return client, nil
 }
 
-func (c *Client) DialContext(ctx context.Context) (net.Conn, error) {
+func (c *Client) DialContext(dialCtx context.Context) (_ net.Conn, err error) {
+	if err = dialCtx.Err(); err != nil {
+		return nil, err
+	}
+	// A dial deadline bounds establishment, not the returned connection's life.
+	ctx, cancel := context.WithCancel(context.WithoutCancel(dialCtx))
+	stopDialCancel := context.AfterFunc(dialCtx, cancel)
+	defer stopDialCancel()
+	defer func() {
+		if err != nil {
+			cancel()
+		}
+	}()
 	options := c.options
 	mode := c.options.Mode
 	sessionIdUuid := uuid.New()
@@ -144,6 +156,7 @@ func (c *Client) DialContext(ctx context.Context) (net.Conn, error) {
 			if closed.Add(1) > 1 {
 				return
 			}
+			cancel()
 			if xmuxClient != nil {
 				xmuxClient.OpenUsage.Add(-1)
 			}
@@ -152,7 +165,16 @@ func (c *Client) DialContext(ctx context.Context) (net.Conn, error) {
 			}
 		},
 	}
-	var err error
+	defer func() {
+		if err != nil {
+			reader.Close()
+			writer.Close()
+			if conn.reader != nil {
+				conn.reader.Close()
+			}
+			conn.onClose()
+		}
+	}()
 	if mode == "stream-one" {
 		requestURL.Path = options.GetNormalizedPath()
 		if xmuxClient != nil {
@@ -252,7 +274,22 @@ func (c *Client) DialContext(ctx context.Context) (net.Conn, error) {
 }
 
 func (c *Client) Close() error {
+	c.clientsMu.Lock()
+	clients := c.clients
+	c.clients = nil
+	c.clientsMu.Unlock()
+	for _, client := range clients {
+		client.Close()
+	}
 	return nil
+}
+
+func (c *Client) newHTTPClient(dest M.Socksaddr, dialer N.Dialer, options *option.V2RayXHTTPBaseOptions, tlsConfig tls.Config) *DefaultDialerClient {
+	c.clientsMu.Lock()
+	defer c.clientsMu.Unlock()
+	client := createHTTPClient(c.ctx, dest, dialer, options, tlsConfig)
+	c.clients = append(c.clients, client)
+	return client
 }
 
 func decideHTTPVersion(tlsConfig tls.Config) string {
@@ -291,15 +328,27 @@ func getBaseRequestURL(options *option.V2RayXHTTPBaseOptions, dest M.Socksaddr, 
 	return requestURL, nil
 }
 
-func createHTTPClient(dest M.Socksaddr, dialer N.Dialer, options *option.V2RayXHTTPBaseOptions, tlsConfig tls.Config) DialerClient {
+func createHTTPClient(ctx context.Context, dest M.Socksaddr, dialer N.Dialer, options *option.V2RayXHTTPBaseOptions, tlsConfig tls.Config) *DefaultDialerClient {
+	ctx, cancel := context.WithCancel(ctx)
+	client := &DefaultDialerClient{ctx: ctx, cancel: cancel, connections: make(map[*ownedConn]struct{})}
 	httpVersion := decideHTTPVersion(tlsConfig)
 	dialContext := func(ctxInner context.Context) (net.Conn, error) {
+		ctxInner, done := client.requestContext(ctxInner)
+		defer done()
 		conn, err := dialer.DialContext(ctxInner, "tcp", dest)
 		if err != nil {
 			return nil, err
 		}
+		conn, err = client.ownConn(conn)
+		if err != nil {
+			return nil, err
+		}
 		if httpVersion != "3" && tlsConfig != nil {
-			return tls.ClientHandshake(ctxInner, conn, tlsConfig)
+			secured, handshakeErr := tls.ClientHandshake(ctxInner, conn, tlsConfig)
+			if handshakeErr != nil {
+				conn.Close()
+			}
+			return secured, handshakeErr
 		}
 		return conn, nil
 	}
@@ -328,6 +377,10 @@ func createHTTPClient(dest M.Socksaddr, dialer N.Dialer, options *option.V2RayXH
 			QUICConfig: quicConfig,
 			Dial: func(ctx context.Context, addr string, tlsCfg *gotls.Config, cfg *quic.Config) (*quic.Conn, error) {
 				udpConn, dErr := dialer.DialContext(ctx, N.NetworkUDP, dest)
+				if dErr != nil {
+					return nil, dErr
+				}
+				udpConn, dErr = client.ownConn(udpConn)
 				if dErr != nil {
 					return nil, dErr
 				}
@@ -361,14 +414,10 @@ func createHTTPClient(dest M.Socksaddr, dialer N.Dialer, options *option.V2RayXH
 			DisableKeepAlives: true,
 		}
 	}
-	client := &DefaultDialerClient{
-		options: options,
-		client: &http.Client{
-			Transport: transport,
-		},
-		httpVersion:    httpVersion,
-		uploadRawPool:  &sync.Pool{},
-		dialUploadConn: dialContext,
-	}
+	client.options = options
+	client.client = &http.Client{Transport: transport}
+	client.httpVersion = httpVersion
+	client.uploadRawPool = &sync.Pool{}
+	client.dialUploadConn = dialContext
 	return client
 }

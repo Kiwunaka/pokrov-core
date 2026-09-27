@@ -602,6 +602,13 @@ Hysteria2 requires `with_quic`, and the `pokrov.awg31.endpoint.v1` subset requir
 are not capabilities. In particular native V2Ray XHTTP is independent of the
 unimplemented `xray` outbound and does not advertise xray-json ingestion.
 
+Native XHTTP bounds connection establishment by the caller's dial context, then
+keeps an established stream alive until its connection or owning client closes.
+Closing the client cancels pending HTTP work and closes its TCP/UDP sockets,
+including pooled connections. The transport remains reusable after this reset,
+as required by VLESS interface changes. REALITY-XHTTP profiles use an explicit
+`stream-one` mode, HTTP/2 ALPN and an empty VLESS flow.
+
 With `with_utls`, the REALITY client advertises version 26.3.27 and retains
 both the `X25519MLKEM768` and X25519 key shares supplied by the fingerprint.
 It splits the ClientHello into TLS records: the unfragmented hybrid Chrome

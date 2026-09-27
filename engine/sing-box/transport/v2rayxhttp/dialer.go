@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptrace"
 	"sync"
+	"sync/atomic"
 
 	common "github.com/sagernet/sing-box/common/xray"
 	"github.com/sagernet/sing-box/common/xray/signal/done"
@@ -28,20 +29,68 @@ type DialerClient interface {
 
 // implements xhttp.DialerClient in terms of direct network connections
 type DefaultDialerClient struct {
-	options     *option.V2RayXHTTPBaseOptions
-	client      *http.Client
-	closed      bool
-	httpVersion string
+	options       *option.V2RayXHTTPBaseOptions
+	client        *http.Client
+	closed        atomic.Bool
+	ctx           context.Context
+	cancel        context.CancelFunc
+	connectionsMu sync.Mutex
+	connections   map[*ownedConn]struct{}
+	httpVersion   string
 	// pool of net.Conn, created using dialUploadConn
 	uploadRawPool  *sync.Pool
 	dialUploadConn func(ctxInner context.Context) (net.Conn, error)
 }
 
 func (c *DefaultDialerClient) IsClosed() bool {
-	return c.closed
+	return c.closed.Load()
+}
+
+func (c *DefaultDialerClient) requestContext(ctx context.Context) (context.Context, func()) {
+	ctx, cancel := context.WithCancel(ctx)
+	stop := context.AfterFunc(c.ctx, cancel)
+	return ctx, func() { stop(); cancel() }
+}
+
+type ownedConn struct {
+	net.Conn
+	owner *DefaultDialerClient
+}
+
+func (c *ownedConn) Close() error {
+	c.owner.connectionsMu.Lock()
+	delete(c.owner.connections, c)
+	c.owner.connectionsMu.Unlock()
+	return c.Conn.Close()
+}
+
+func (c *DefaultDialerClient) ownConn(conn net.Conn) (net.Conn, error) {
+	c.connectionsMu.Lock()
+	defer c.connectionsMu.Unlock()
+	if c.ctx.Err() != nil {
+		conn.Close()
+		return nil, c.ctx.Err()
+	}
+	owned := &ownedConn{Conn: conn, owner: c}
+	c.connections[owned] = struct{}{}
+	return owned, nil
+}
+
+func (c *DefaultDialerClient) Close() {
+	c.closed.Store(true)
+	c.cancel()
+	c.connectionsMu.Lock()
+	connections := c.connections
+	c.connections = make(map[*ownedConn]struct{})
+	c.connectionsMu.Unlock()
+	for conn := range connections {
+		conn.Close()
+	}
+	c.client.CloseIdleConnections()
 }
 
 func (c *DefaultDialerClient) OpenStream(ctx context.Context, url string, body io.Reader, uploadOnly bool) (wrc io.ReadCloser, remoteAddr, localAddr net.Addr, err error) {
+	ctx, cancel := c.requestContext(ctx)
 	// this is done when the TCP/UDP connection to the server was established,
 	// and we can unblock the Dial function and print correct net addresses in
 	// logs
@@ -57,17 +106,21 @@ func (c *DefaultDialerClient) OpenStream(ctx context.Context, url string, body i
 	if body != nil {
 		method = "POST" // stream-up/one
 	}
-	req, _ := http.NewRequestWithContext(context.WithoutCancel(ctx), method, url, body)
+	req, err := http.NewRequestWithContext(ctx, method, url, body)
+	if err != nil {
+		cancel()
+		return nil, nil, nil, err
+	}
 	req.Header = c.options.GetRequestHeader(url)
 	if method == "POST" && !c.options.NoGRPCHeader {
 		req.Header.Set("Content-Type", "application/grpc")
 	}
-	wrc = &WaitReadCloser{ctx: ctx, Wait: make(chan struct{})}
+	wrc = &WaitReadCloser{ctx: ctx, cancel: cancel, Wait: make(chan struct{})}
 	go func() {
 		resp, err := c.client.Do(req)
 		if err != nil {
 			if !uploadOnly { // stream-down is enough
-				c.closed = true
+				c.closed.Store(true)
 			}
 			gotConn.Close()
 			wrc.Close()
@@ -84,12 +137,16 @@ func (c *DefaultDialerClient) OpenStream(ctx context.Context, url string, body i
 	select {
 	case <-gotConn.Wait():
 	case <-ctx.Done():
+		wrc.Close()
+		err = ctx.Err()
 	}
 	return
 }
 
 func (c *DefaultDialerClient) PostPacket(ctx context.Context, url string, body io.Reader, contentLength int64) error {
-	req, err := http.NewRequestWithContext(context.WithoutCancel(ctx), "POST", url, body)
+	ctx, cancel := c.requestContext(ctx)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, "POST", url, body)
 	if err != nil {
 		return err
 	}
@@ -98,7 +155,7 @@ func (c *DefaultDialerClient) PostPacket(ctx context.Context, url string, body i
 	if c.httpVersion != "1.1" {
 		resp, err := c.client.Do(req)
 		if err != nil {
-			c.closed = true
+			c.closed.Store(true)
 			return err
 		}
 		io.Copy(io.Discard, resp.Body)
@@ -116,7 +173,7 @@ func (c *DefaultDialerClient) PostPacket(ctx context.Context, url string, body i
 			uploadConn = c.uploadRawPool.Get()
 			newConnection := uploadConn == nil
 			if newConnection {
-				newConn, err := c.dialUploadConn(context.WithoutCancel(ctx))
+				newConn, err := c.dialUploadConn(ctx)
 				if err != nil {
 					return err
 				}
@@ -130,7 +187,7 @@ func (c *DefaultDialerClient) PostPacket(ctx context.Context, url string, body i
 				if h1UploadConn.UnreadedResponsesCount > 0 {
 					resp, err := http.ReadResponse(h1UploadConn.RespBufReader, req)
 					if err != nil {
-						c.closed = true
+						c.closed.Store(true)
 						return fmt.Errorf("error while reading response: %s", err.Error())
 					}
 					io.Copy(io.Discard, resp.Body)
@@ -158,18 +215,22 @@ func (c *DefaultDialerClient) PostPacket(ctx context.Context, url string, body i
 }
 
 type WaitReadCloser struct {
-	ctx  context.Context
-	Wait chan struct{}
+	ctx    context.Context
+	cancel func()
+	mu     sync.Mutex
+	closed bool
+	Wait   chan struct{}
 	io.ReadCloser
 }
 
 func (w *WaitReadCloser) Set(rc io.ReadCloser) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.closed {
+		rc.Close()
+		return
+	}
 	w.ReadCloser = rc
-	defer func() {
-		if recover() != nil {
-			rc.Close()
-		}
-	}()
 	close(w.Wait)
 }
 
@@ -180,28 +241,35 @@ func (w *WaitReadCloser) Read(b []byte) (int, error) {
 	default:
 	}
 
-	if w.ReadCloser == nil {
-		select {
-		case <-w.ctx.Done():
-			return 0, w.ctx.Err()
-		case <-w.Wait:
-		}
-		if w.ReadCloser == nil {
-			return 0, io.ErrClosedPipe
-		}
+	select {
+	case <-w.ctx.Done():
+		return 0, w.ctx.Err()
+	case <-w.Wait:
 	}
-	return w.ReadCloser.Read(b)
+	w.mu.Lock()
+	reader := w.ReadCloser
+	w.mu.Unlock()
+	if reader == nil {
+		return 0, io.ErrClosedPipe
+	}
+	return reader.Read(b)
 }
 
 func (w *WaitReadCloser) Close() error {
-	if w.ReadCloser != nil {
-		return w.ReadCloser.Close()
+	w.cancel()
+	w.mu.Lock()
+	if w.closed {
+		w.mu.Unlock()
+		return nil
 	}
-	defer func() {
-		if recover() != nil && w.ReadCloser != nil {
-			w.ReadCloser.Close()
-		}
-	}()
-	close(w.Wait)
+	w.closed = true
+	reader := w.ReadCloser
+	if reader == nil {
+		close(w.Wait)
+	}
+	w.mu.Unlock()
+	if reader != nil {
+		return reader.Close()
+	}
 	return nil
 }

@@ -48,6 +48,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--client", required=True, type=Path)
     parser.add_argument("--xray", required=True, action="append", type=Path)
+    parser.add_argument("--transport", choices=("tcp", "xhttp"), default="tcp")
+    parser.add_argument("--server-name", default="www.cloudflare.com")
+    parser.add_argument("--server-ip", type=ipaddress.IPv4Address)
     parser.add_argument("--url", default="https://www.gstatic.com/generate_204")
     parser.add_argument("--check-pokrov-marker", action="store_true")
     parser.add_argument("--egress-ip", type=ipaddress.IPv4Address)
@@ -74,8 +77,8 @@ def main():
                          "decryption": "none"},
             "streamSettings": {"network": "tcp", "security": "reality",
                                "realitySettings": {
-                                   "dest": "www.cloudflare.com:443",
-                                   "serverNames": ["www.cloudflare.com"],
+                                   "dest": f"{args.server_ip or args.server_name}:443",
+                                   "serverNames": [args.server_name],
                                    "privateKey": private.group(1), "shortIds": [""]}},
         }],
         "outbounds": [freedom],
@@ -88,13 +91,23 @@ def main():
             "type": "vless", "tag": "out", "server": "127.0.0.1",
             "server_port": server_port, "uuid": identity,
             "flow": "xtls-rprx-vision",
-            "tls": {"enabled": True, "server_name": "www.cloudflare.com",
+            "tls": {"enabled": True, "server_name": args.server_name,
                     "utls": {"enabled": True, "fingerprint": "chrome"},
                     "reality": {"enabled": True, "public_key": public.group(1),
                                 "short_id": ""}},
         }],
         "route": {"final": "out"},
     }
+    if args.transport == "xhttp":
+        inbound = server["inbounds"][0]
+        inbound["settings"]["clients"][0].pop("flow")
+        inbound["streamSettings"].update(
+            network="xhttp", xhttpSettings={"mode": "stream-one", "path": "/interop"}
+        )
+        outbound = client["outbounds"][0]
+        outbound.pop("flow")
+        outbound["transport"] = {"type": "xhttp", "mode": "stream-one", "path": "/interop"}
+        outbound["tls"]["alpn"] = ["h2"]
 
     failed = False
     with tempfile.TemporaryDirectory(prefix="pokrov-reality-") as directory:

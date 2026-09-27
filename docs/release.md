@@ -20,8 +20,11 @@ Xray binary via repeated `--xray` arguments. It creates loopback VLESS/REALITY
 servers with disposable credentials and requires HTTPS 204 through the client.
 `--url` and `--check-pokrov-marker` exercise the owned authenticated-egress
 endpoint. If the local resolver supplies a fake or reserved address, pass the
-verified public destination via `--egress-ip`; this applies only to the local
-fixture. This matrix does not replace production-node or installed-app checks.
+verified public destination via `--egress-ip`; `--server-ip` separately pins the
+REALITY handshake destination while `--server-name` retains its SNI. These apply
+only to the local fixture. Use `--transport xhttp` for native REALITY-XHTTP
+`stream-one` over HTTP/2 with an empty VLESS flow. This check does not replace
+production-node or installed-app checks.
 
 `scripts/test.ps1` also checks `config/abi-contract.json` against
 `config/release.json`, every desktop `//export` declaration and the exact
