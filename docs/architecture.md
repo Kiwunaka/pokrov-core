@@ -511,6 +511,13 @@ the result if the selected leaf or runtime instance changed. Direct, block, DNS,
 unsupported groups and cyclic selection cannot supply protected egress proof.
 The shared URL-test cache remains diagnostic data and is not a response channel
 for this verifier. Timeout and late results cannot settle a different call.
+Periodic Android checks use `CommandServer.ProbeRuntimeEgress(tag, timeoutMs,
+cancellation)` with a maximum 3000 ms budget for the selected group or endpoint,
+without the startup endpoint initialization wait. Cancellation reaches the probe
+context, and its native callback watcher is joined before return. The captured
+runtime and exact selected leaf must still be current. The existing transport
+worker may settle later; its result cannot complete another check. Startup probe
+methods keep their existing budgets.
 The shared event ABI and desktop ABI are unchanged. Source-level checks do not
 prove that a retained AAR contains the method; replacement artifact binding and
 device evidence remain required before promoting this behavior.

@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -56,15 +57,24 @@ func TestSelectedProbeCannotConfirmChangedRouteOrDirectLeaf(t *testing.T) {
 			t.Fatal("direct or cyclic selection supplied protected egress")
 		}
 	}
+	leaf := &probeLeaf{tag: "same-tag", kind: "hysteria2"}
+	healthy, _ = probeSelectedOutbound(context.Background(), leaf.tag,
+		func(string) (adapter.Outbound, bool) { return leaf, true },
+		func(context.Context, adapter.Outbound) (uint16, error) {
+			leaf = &probeLeaf{tag: "same-tag", kind: "hysteria2"}
+			return 10, nil
+		})
+	if healthy {
+		t.Fatal("old leaf confirmed its replacement with the same tag")
+	}
 }
 
 func TestSelectedProbeLateSuccessAfterTimeoutCannotSettleNextCall(t *testing.T) {
 	lookup := func(tag string) (adapter.Outbound, bool) {
 		return probeLeaf{tag: tag, kind: "vless"}, true
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
-	defer cancel()
 	startedA, releaseA := make(chan struct{}), make(chan struct{})
+	var probeContext context.Context
 	defer func() {
 		select {
 		case <-releaseA:
@@ -74,12 +84,17 @@ func TestSelectedProbeLateSuccessAfterTimeoutCannotSettleNextCall(t *testing.T) 
 	}()
 	resultA := make(chan bool, 1)
 	go func() {
-		healthy, _ := probeSelectedOutbound(ctx, "a", lookup,
-			func(context.Context, adapter.Outbound) (uint16, error) {
+		healthy, err := probeRuntimeEgress(context.Background(), 30*time.Millisecond,
+			func() bool { return false }, "a", lookup,
+			func(ctx context.Context, _ adapter.Outbound) (uint16, error) {
+				probeContext = ctx
 				close(startedA)
 				<-releaseA // synthetic late success ignores cancellation
 				return 10, nil
 			})
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Error("periodic deadline did not reach the probe context")
+		}
 		resultA <- healthy
 	}()
 	<-startedA
@@ -90,6 +105,9 @@ func TestSelectedProbeLateSuccessAfterTimeoutCannotSettleNextCall(t *testing.T) 
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timed out probe did not settle")
+	}
+	if !errors.Is(probeContext.Err(), context.DeadlineExceeded) {
+		t.Fatal("detached transport kept an uncancelled probe context")
 	}
 	startedB, releaseB := make(chan struct{}), make(chan struct{})
 	resultB := make(chan bool, 1)
@@ -117,5 +135,77 @@ func TestSelectedProbeLateSuccessAfterTimeoutCannotSettleNextCall(t *testing.T) 
 		func(context.Context, adapter.Outbound) (uint16, error) { return 10, nil })
 	if !healthy || err != nil {
 		t.Fatal("fresh successful captured call did not supply proof")
+	}
+}
+
+func TestRuntimeProbeCancellationJoinsCallbackAndUsesEndpointBudget(t *testing.T) {
+	// An endpoint uses the same call budget, with no readiness/init wait.
+	leaf := &probeLeaf{tag: "awg", kind: "awg"}
+	lookup := func(string) (adapter.Outbound, bool) { return leaf, true }
+	var cancelled atomic.Bool
+	var callbackCalls atomic.Int32
+	started, workerDone := make(chan struct{}), make(chan struct{})
+	result := make(chan error, 1)
+	go func() {
+		healthy, err := probeRuntimeEgress(context.Background(), 3*time.Second,
+			func() bool { callbackCalls.Add(1); return cancelled.Load() }, "awg", lookup,
+			func(ctx context.Context, selected adapter.Outbound) (uint16, error) {
+				if selected != leaf {
+					t.Error("endpoint was not the captured protected target")
+				}
+				close(started)
+				<-ctx.Done()
+				close(workerDone)
+				return 10, nil // Late transport success cannot override cancellation.
+			})
+		if healthy {
+			t.Error("cancelled periodic check supplied proof")
+		}
+		result <- err
+	}()
+	<-started
+	cancelled.Store(true)
+	select {
+	case err := <-result:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatal("native cancellation did not cancel the Go probe")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("native cancellation waited for the startup budget")
+	}
+	<-workerDone
+	callsAtReturn := callbackCalls.Load()
+	time.Sleep(30 * time.Millisecond)
+	if callbackCalls.Load() != callsAtReturn {
+		t.Fatal("callback watcher survived the native invocation")
+	}
+	for _, timeout := range []time.Duration{0, 3001 * time.Millisecond} {
+		_, err := probeRuntimeEgress(context.Background(), timeout, func() bool { return false }, "awg", lookup,
+			func(context.Context, adapter.Outbound) (uint16, error) {
+				t.Fatal("invalid periodic budget reached the transport")
+				return 0, nil
+			})
+		if err == nil {
+			t.Fatal("invalid periodic budget was accepted")
+		}
+	}
+}
+
+func TestRuntimeProbeDoesNotWaitForClosingInstance(t *testing.T) {
+	s := NewStartedService(ServiceOptions{Context: context.Background(), LogMaxLines: 1})
+	s.serviceAccess.Lock()
+	defer s.serviceAccess.Unlock()
+	done := make(chan bool, 1)
+	go func() {
+		healthy, err := s.ProbeRuntimeEgressResult("select", 3*time.Second, func() bool { return false })
+		done <- !healthy && err != nil
+	}()
+	select {
+	case rejected := <-done:
+		if !rejected {
+			t.Fatal("busy lifecycle supplied proof")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("periodic probe blocked on lifecycle teardown")
 	}
 }

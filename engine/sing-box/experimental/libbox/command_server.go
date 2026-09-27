@@ -221,6 +221,22 @@ func (s *CommandServer) ProbeSelectedOutbound(tag string) (bool, error) {
 	return s.StartedService.ProbeSelectedOutboundResult(tag)
 }
 
+// RuntimeProbeCancellation must be thread-safe and nonblocking. It is only
+// called until ProbeRuntimeEgress returns; the host retains its generation fence.
+type RuntimeProbeCancellation interface {
+	IsCancelled() bool
+}
+
+// ProbeRuntimeEgress checks a selected group or endpoint within 1..3000ms.
+// It cancels the probe context and joins its callback watcher, not the active
+// transport's shared workers. Late results cannot settle another invocation.
+func (s *CommandServer) ProbeRuntimeEgress(tag string, timeoutMs int32, cancellation RuntimeProbeCancellation) (bool, error) {
+	if cancellation == nil {
+		return false, errors.New("invalid runtime egress probe request")
+	}
+	return s.StartedService.ProbeRuntimeEgressResult(tag, time.Duration(timeoutMs)*time.Millisecond, cancellation.IsCancelled)
+}
+
 func (s *CommandServer) SetOperationalEventContext(runID string, attemptID string, generation int64) error {
 	return s.operationalEvents.configure(runID, attemptID, generation)
 }
