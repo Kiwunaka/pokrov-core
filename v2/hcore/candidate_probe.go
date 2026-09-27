@@ -196,6 +196,17 @@ func candidateOptions(ctx context.Context, config, bindInterface string) (option
 	}
 	options.Route = &option.RouteOptions{Final: target, AutoDetectInterface: bindInterface == "",
 		DefaultInterface: bindInterface, DefaultDomainResolver: options.Route.DefaultDomainResolver}
+	// Bootstrap already materializes Russia/app DNS routing before probing.
+	// Those client rule sets belong to the TUN profile, not this one-request instance.
+	if options.DNS != nil {
+		rules := options.DNS.Rules[:0]
+		for _, rule := range options.DNS.Rules {
+			if !candidateDNSUsesRuleSet(rule) {
+				rules = append(rules, rule)
+			}
+		}
+		options.DNS.Rules = rules
+	}
 	// Background URL tests must not race the exact candidate chosen by the host.
 	for i := range options.Outbounds {
 		outbound := &options.Outbounds[i]
@@ -221,6 +232,18 @@ func candidateOptions(ctx context.Context, config, bindInterface string) (option
 		}
 	}
 	return options, target, nil
+}
+
+func candidateDNSUsesRuleSet(rule option.DNSRule) bool {
+	if len(rule.DefaultOptions.RuleSet) > 0 {
+		return true
+	}
+	for _, child := range rule.LogicalOptions.Rules {
+		if candidateDNSUsesRuleSet(child) {
+			return true
+		}
+	}
+	return false
 }
 
 func candidateProtectedLeaf(tag string, lookup func(string) (adapter.Outbound, bool)) adapter.Outbound {

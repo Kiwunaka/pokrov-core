@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	box "github.com/sagernet/sing-box"
 	"github.com/sagernet/sing-box/experimental/libbox"
 	"github.com/sagernet/sing-box/option"
 	M "github.com/sagernet/sing/common/metadata"
@@ -113,5 +114,35 @@ func TestCandidateProbePreCancelledDoesNotParseOrRetainCallback(t *testing.T) {
 	time.Sleep(25 * time.Millisecond)
 	if calls.Load() != before {
 		t.Fatal("callback retained after return")
+	}
+}
+
+func TestCandidateProbePreparedRussiaDNSDoesNotRequireClientRuleSets(t *testing.T) {
+	// This is the shape emitted by bootstrap's _buildAndroidDnsBlock before
+	// ConnectionManager probes: mode-specific DNS classification is already set.
+	ctx := libbox.BaseContext(nil)
+	options, _, err := candidateOptions(ctx, `{
+		"dns":{"servers":[{"type":"local","tag":"bootstrap"}],"final":"bootstrap",
+		 "rules":[{"domain":["candidate.invalid"],"server":"bootstrap"},
+		 {"rule_set":["ru-whitelist-domains"],"server":"bootstrap"}]},
+		"outbounds":[{"type":"direct","tag":"direct"},
+		 {"type":"selector","tag":"proxy","outbounds":["candidate"]},
+		 {"type":"socks","tag":"candidate","server":"127.0.0.1","server_port":1}],
+		"route":{"final":"proxy","rule_set":[{"type":"local","format":"binary",
+		 "tag":"ru-whitelist-domains","path":"client-only.srs"}]}}
+	`, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	instance, err := box.New(box.Options{Context: ctx, Options: options})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer instance.Close()
+	if err := instance.Start(); err != nil {
+		t.Fatal(err)
+	}
+	if len(options.DNS.Rules) != 1 || len(options.DNS.Rules[0].DefaultOptions.Domain) != 1 || options.DNS.Final != "bootstrap" {
+		t.Fatal("candidate discarded the upstream resolver or kept client routing classification")
 	}
 }
