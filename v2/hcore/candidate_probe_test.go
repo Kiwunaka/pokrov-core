@@ -80,15 +80,15 @@ func TestCandidateProbeOwnsNoHostStateAndUsesProtectedTarget(t *testing.T) {
 		"inbounds":[{"type":"tun","tag":"tun"}],
 		"experimental":{"cache_file":{"enabled":true}},
 		"outbounds":[{"type":"direct","tag":"direct"},
-		 {"type":"selector","tag":"proxy","outbounds":["candidate"]},
+		 {"type":"selector","tag":"🌍 Страны","outbounds":["candidate"]},
 		 {"type":"socks","tag":"candidate","server":"127.0.0.1","server_port":1}],
-		"route":{"final":"direct","rules":[{"domain_suffix":["ru"],"outbound":"direct"}]},
+		"route":{"final":"direct","rules":[{"process_name":["discord.exe"],"outbound":"🌍 Страны"}]},
 		"_meta":{"display":"ignored"}}
 	`, "physical-uplink")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if tag != "proxy" || options.Route.Final != "proxy" || options.Route.DefaultInterface != "physical-uplink" {
+	if tag != "🌍 Страны" || options.Route.Final != "🌍 Страны" || options.Route.DefaultInterface != "physical-uplink" {
 		t.Fatal("candidate did not retain its protected target and physical binding")
 	}
 	if len(options.Inbounds) != 0 || len(options.Services) != 0 || len(options.Route.Rules) != 0 || options.Experimental != nil || !options.Log.Disabled {
@@ -96,6 +96,15 @@ func TestCandidateProbeOwnsNoHostStateAndUsesProtectedTarget(t *testing.T) {
 	}
 	if _, ok := options.Outbounds[1].Options.(*option.SelectorOutboundOptions); !ok {
 		t.Fatal("transport material was rewritten")
+	}
+	_, selectorTag, err := candidateOptions(libbox.BaseContext(nil), `{
+		"outbounds":[{"type":"direct","tag":"direct"},
+		 {"type":"selector","tag":"🌍 Страны","outbounds":["candidate"]},
+		 {"type":"socks","tag":"candidate","server":"127.0.0.1","server_port":1}],
+		"route":{"final":"direct"}}
+	`, "physical-uplink")
+	if err != nil || selectorTag != "🌍 Страны" {
+		t.Fatal("candidate did not fall back to the protected selector")
 	}
 	result := ProbeCandidate(`{"outbounds":[{"type":"direct","tag":"direct"}],"route":{"final":"direct"}}`, "direct-probe", time.Second, "", nil, nil)
 	if result.Success || result.FailureKind != "invalid_profile" {

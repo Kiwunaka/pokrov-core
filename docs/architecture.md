@@ -829,6 +829,9 @@ outbound performs one TLS-verified GET to the owned public egress endpoint; only
 DNS adapter; Windows supplies the physical interface. DNS servers and upstream
 resolvers are retained; client DNS rules referencing stripped route rule sets
 are omitted. Each probe has its own deadline and interruption callback.
+When a selected-app profile routes ordinary traffic directly, the probe uses
+the protected outbound of its process rule, or its first selector if that rule
+is absent. The app's direct final route is not used as proof of the VPN path.
 Cancellation closes the instance and waits
 for the request and observer to return before releasing the caller-owned callback.
 The existing active runtime and its TUN remain untouched by probes. The optional

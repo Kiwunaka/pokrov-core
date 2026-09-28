@@ -182,13 +182,49 @@ func candidateOptions(ctx context.Context, config, bindInterface string) (option
 	if options.Route == nil {
 		options.Route = &option.RouteOptions{}
 	}
+	protectedTag := func(tag string) bool {
+		if tag == "" {
+			return false
+		}
+		for _, outbound := range options.Outbounds {
+			if outbound.Tag == tag {
+				switch outbound.Type {
+				case C.TypeDirect, C.TypeBlock, C.TypeDNS:
+					return false
+				default:
+					return true
+				}
+			}
+		}
+		for _, endpoint := range options.Endpoints {
+			if endpoint.Tag == tag {
+				return true
+			}
+		}
+		return false
+	}
 	target := options.Route.Final
-	// Managed protection modes may intentionally route other traffic directly.
-	// Their protected candidate always lives behind the explicit proxy selector.
-	for _, outbound := range options.Outbounds {
-		if outbound.Tag == "proxy" {
-			target = outbound.Tag
-			break
+	// Selected-apps routes other traffic directly. Probe the process rule's
+	// protected outbound before removing host-owned route rules below.
+	if !protectedTag(target) {
+		target = ""
+		for _, rule := range options.Route.Rules {
+			if rule.Type != C.RuleTypeDefault || len(rule.DefaultOptions.ProcessName) == 0 {
+				continue
+			}
+			candidate := rule.DefaultOptions.RouteOptions.Outbound
+			if protectedTag(candidate) {
+				target = candidate
+				break
+			}
+		}
+	}
+	if target == "" {
+		for _, outbound := range options.Outbounds {
+			if outbound.Type == C.TypeSelector || outbound.Type == C.TypeURLTest {
+				target = outbound.Tag
+				break
+			}
 		}
 	}
 	if target == "" && len(options.Outbounds) > 0 {
