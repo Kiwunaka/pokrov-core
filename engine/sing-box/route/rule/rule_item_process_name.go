@@ -2,6 +2,7 @@ package rule
 
 import (
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/sagernet/sing-box/adapter"
@@ -20,6 +21,9 @@ func NewProcessItem(processNameList []string) *ProcessItem {
 		processMap: make(map[string]bool),
 	}
 	for _, processName := range processNameList {
+		if runtime.GOOS == "windows" {
+			processName = strings.ToLower(processName)
+		}
 		rule.processMap[processName] = true
 	}
 	return rule
@@ -29,7 +33,11 @@ func (r *ProcessItem) Match(metadata *adapter.InboundContext) bool {
 	if metadata.ProcessInfo == nil || metadata.ProcessInfo.ProcessPath == "" {
 		return false
 	}
-	return r.processMap[filepath.Base(metadata.ProcessInfo.ProcessPath)]
+	processName := filepath.Base(metadata.ProcessInfo.ProcessPath)
+	if runtime.GOOS == "windows" {
+		processName = strings.ToLower(processName)
+	}
+	return r.processMap[processName]
 }
 
 func (r *ProcessItem) String() string {
