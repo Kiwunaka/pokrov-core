@@ -7,10 +7,10 @@ $root = Split-Path -Parent $PSScriptRoot
 $release = Get-Content -Raw -LiteralPath (Join-Path $root "config\release.json") | ConvertFrom-Json
 $version = (Get-Content -Raw -LiteralPath (Join-Path $root "VERSION")).Trim()
 if ($version -ne $release.version -or
-    $release.version -ne "1.1.0" -or
+    $release.version -ne "1.1.1" -or
     $release.state -ne "RELEASED" -or
     $release.candidate_created -ne $true) {
-  throw "VERSION and config/release.json must identify the Core 1.1.0 release."
+  throw "VERSION and config/release.json must identify the Core 1.1.1 release."
 }
 $retained = $release.retained_public_release
 if ($retained.version -ne "1.0.3" -or
