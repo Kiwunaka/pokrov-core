@@ -1,11 +1,17 @@
 # Changelog
 
-## 1.1.0 — unreleased (`PRE_CANDIDATE_LOCAL`)
+## 1.1.0 — 2026-09-29
 
 - Added the backward-compatible structured operational-event ABI to desktop
   and Android hosts, with typed lifecycle events and fail-closed negotiation.
 - Added the stable Windows `POKROV` TUN ownership name required by service
   crash/reboot recovery.
+- Matched Windows process names without case sensitivity and made selected-app
+  candidate probes verify the protected route.
+- Built Android Core with compiler optimizations enabled.
+- Disabled outbound monitoring by default; explicit monitoring probes only the
+  selected path and no longer queries third-party IP information services.
+- Exposed the loaded Core version through Android and desktop host bindings.
 - Raised the pinned Go/dependency floor after reachable-vulnerability review.
 - Added the pinned `pokrov.awg2.endpoint.v1` capability contract, schema,
   synthetic fixture, dependency/license gate and focused typed-endpoint tests.
@@ -31,8 +37,6 @@
   validation and the active client's 100-cycle proxy backtest.
 - Kept Linux explicitly outside the POKROV 1.2.0 shipped artifact matrix and
   kept CI evidence separate from signing, candidate creation and publication.
-- This section names source intent only. No `1.1.0` artifact, tag or candidate
-  exists until the exact release gates complete.
 
 ## 1.0.3 — 2026-08-13
 

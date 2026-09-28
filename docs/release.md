@@ -19,11 +19,9 @@ the client seed.
 6. Record remaining physical-device and Apple checks without converting them into passes.
 7. Commit the exact source, create an annotated `vX.Y.Z` tag, then publish artifacts from that commit.
 
-The current source target is Core `1.1.0` in `PRE_CANDIDATE_LOCAL` state for
-POKROV product `1.2.0`. This component-version decision does not create a tag,
-artifact or candidate. `config/release.json` retains the immutable public
-`1.0.3` evidence in a separate `retained_public_release` block until exact
-`1.1.0` artifacts are built twice and accepted by the client manifest.
+Core `1.1.0` is the release target for these Android and Windows libraries.
+`config/release.json` retains the immutable prior `1.0.3` evidence in a
+separate `retained_public_release` block.
 
 For the REALITY version gate, build the current `engine/sing-box` CLI with
 `with_utls` and run `scripts/test-reality-xray-matrix.py` with each official
@@ -130,8 +128,8 @@ file trees before writing bounded provenance:
 
 `scripts/new-release-artifact-evidence.ps1` records source, release-contract,
 SBOM and artifact hashes and rejects dirty source or mismatched build trees.
-The jobs upload only SBOM/evidence JSON with `PRE_CANDIDATE_LOCAL` and
-`candidate_proven=false`; they do not publish binaries, sign, attest, tag or
+The jobs upload only SBOM/evidence JSON with `candidate_proven=false`; they do
+not publish binaries, sign, attest, tag or
 promote a release. Hosted workflow results, exact-candidate reproduction,
 physical-device proof and public/RU-origin evidence remain separate gates.
 

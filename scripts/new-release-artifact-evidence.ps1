@@ -94,8 +94,9 @@ if ($RequireCleanSource -and $dirty.Count -gt 0) {
 
 $releasePath = Join-Path $RepositoryRoot "config\release.json"
 $release = Get-Content -Raw -LiteralPath $releasePath | ConvertFrom-Json
-if ($release.state -ne "PRE_CANDIDATE_LOCAL" -or $release.candidate_created -ne $false) {
-  throw "This CI evidence writer is restricted to honest pre-candidate source state."
+if (($release.state -ne "PRE_CANDIDATE_LOCAL" -or $release.candidate_created -ne $false) -and
+    ($release.state -ne "RELEASED" -or $release.candidate_created -ne $true)) {
+  throw "Core release state is inconsistent."
 }
 $goCommand = Get-Command go -ErrorAction Stop
 $goVersion = (& $goCommand.Source env GOVERSION).Trim()
@@ -137,10 +138,10 @@ foreach ($sbomPath in $Sbom) {
 
 $manifestDigest = Get-ManifestDigest $first
 $report = [ordered]@{
-  schema = "pokrov.core.pre-candidate-artifact-evidence/v1"
+  schema = "pokrov.core.artifact-evidence/v1"
   lane = $Lane
-  state = "PRE_CANDIDATE_LOCAL"
-  candidate_created = $false
+  state = [string]$release.state
+  candidate_created = [bool]$release.candidate_created
   candidate_proven = $false
   promotion_authorized = $false
   provenance_status = "UNSIGNED_CI_BUILD_EVIDENCE"

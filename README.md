@@ -1,9 +1,8 @@
 # POKROV Core
 
-POKROV Core is the network runtime used by POKROV clients. `1.1.0` is the
-unreleased local target for POKROV product `1.2.0`; no candidate has been
-created. The current retained public Core release remains `1.0.3` with its
-original reproducible artifact hashes.
+POKROV Core is the network runtime used by POKROV clients. The current Core
+release is `1.1.0`. `config/release.json` retains the original `1.0.3` build
+evidence separately.
 
 The repository contains:
 
@@ -76,7 +75,7 @@ client's 100-cycle proxy backtest.
 
 `scripts/new-release-artifact-evidence.ps1` rejects dirty source and differing
 build trees and records source, contract, SBOM and artifact hashes. CI retains
-only bounded `PRE_CANDIDATE_LOCAL` evidence JSON and source SBOMs; it does not
+only bounded build evidence JSON and source SBOMs; it does not
 upload release binaries, sign, attest, tag, publish or promote them. A passing
 workflow is source/build proof for that revision, not physical-device, signed
 candidate, public-release or RU-origin proof. CycloneDX license detection is
