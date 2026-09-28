@@ -72,6 +72,7 @@ import (
 	// "syscall"
 	"unsafe"
 
+	"github.com/Kiwunaka/POKROV-core/v2/hcommon/constants"
 	hcore "github.com/Kiwunaka/POKROV-core/v2/hcore"
 	"github.com/Kiwunaka/POKROV-core/v2/hutils"
 	"github.com/sagernet/sing-box/experimental/libbox"
@@ -134,6 +135,11 @@ const pokrovCoreCapabilitiesJSON = `{"schema_version":1,"desktop_abi":2,"event_a
 //export pokrovCoreAbiVersion
 func pokrovCoreAbiVersion() C.int {
 	return C.int(pokrovDesktopABIVersion)
+}
+
+//export pokrovCoreVersion
+func pokrovCoreVersion() *C.char {
+	return C.CString(constants.Version)
 }
 
 //export pokrovCoreCapabilities

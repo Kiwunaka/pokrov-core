@@ -1,6 +1,7 @@
 package mobile
 
 import (
+	"github.com/Kiwunaka/POKROV-core/v2/hcommon/constants"
 	hcore "github.com/Kiwunaka/POKROV-core/v2/hcore"
 
 	_ "net/http/pprof"
@@ -71,6 +72,10 @@ func Close(mode int) {
 
 func Test() string {
 	return "Hello from mobile"
+}
+
+func CoreVersion() string {
+	return constants.Version
 }
 
 func Pause() {

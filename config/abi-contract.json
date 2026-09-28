@@ -24,6 +24,7 @@
       "closeGrpc",
       "freeString",
       "pokrovCoreAbiVersion",
+      "pokrovCoreVersion",
       "pokrovCoreCapabilities",
       "pokrovCoreTransportCapabilities",
       "pokrovCoreConfirmATSLease",

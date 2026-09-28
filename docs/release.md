@@ -6,6 +6,11 @@ Outbound monitoring is disabled unless the sing-box profile sets
 use the currently selected outbound path and do not query third-party IP
 information services.
 
+Android `mobile.CoreVersion()` and desktop `pokrovCoreVersion()` return the
+version compiled into the loaded library. The desktop string is released with
+`freeString`; the host can show this value in diagnostics without guessing from
+the client seed.
+
 1. Update `VERSION`, `config/release.json`, and `CHANGELOG.md`.
 2. Run `scripts/test.ps1`.
 3. Build Android and Windows twice and compare SHA-256 hashes.
