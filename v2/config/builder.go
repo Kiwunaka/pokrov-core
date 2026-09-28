@@ -404,13 +404,17 @@ func setExperimental(options *option.Options, hopt *PokrovOptions) {
 				StoreWARPConfig: true,
 				Path:            "data/clash.db",
 			},
-
-			Monitoring: &option.MonitoringOptions{
-				URLs:           hopt.ConnectionTestUrls,
-				Interval:       badoption.Duration(hopt.URLTestInterval.Duration()),
-				DebounceWindow: badoption.Duration(time.Millisecond * 500),
-				IdleTimeout:    badoption.Duration(hopt.URLTestInterval.Duration().Nanoseconds() * 3),
-			},
+		}
+	}
+	if hopt.EnableOutboundMonitoring {
+		if options.Experimental == nil {
+			options.Experimental = &option.ExperimentalOptions{}
+		}
+		options.Experimental.Monitoring = &option.MonitoringOptions{
+			URLs:           hopt.ConnectionTestUrls,
+			Interval:       badoption.Duration(hopt.URLTestInterval.Duration()),
+			DebounceWindow: badoption.Duration(time.Millisecond * 500),
+			IdleTimeout:    badoption.Duration(hopt.URLTestInterval.Duration().Nanoseconds() * 3),
 		}
 	}
 }

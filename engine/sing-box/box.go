@@ -386,14 +386,15 @@ func New(options Options) (*Box, error) {
 			service.MustRegister[adapter.V2RayServer](ctx, v2rayServer)
 		}
 	}
-	monitor, err := monitoring.NewOutboundMonitoring(ctx, logFactory.NewLogger("monitoring"), common.PtrValueOrDefault(experimentalOptions.Monitoring))
-	if err != nil {
-		return nil, E.Cause(err, "create outbound monitoring")
+	if experimentalOptions.Monitoring != nil {
+		monitor, err := monitoring.NewOutboundMonitoring(ctx, logFactory.NewLogger("monitoring"), *experimentalOptions.Monitoring)
+		if err != nil {
+			return nil, E.Cause(err, "create outbound monitoring")
+		}
+		internalServices = append(internalServices, monitor)
+		service.MustRegisterPtr[monitoring.OutboundMonitoring](ctx, monitor)
+		router.AppendTracker(monitor)
 	}
-	internalServices = append(internalServices, monitor)
-	service.MustRegisterPtr[monitoring.OutboundMonitoring](ctx, monitor)
-
-	router.AppendTracker(monitor)
 
 	if ntpOptions.Enabled {
 		ntpDialer, err := dialer.New(ctx, ntpOptions.DialerOptions, ntpOptions.ServerIsDomain())

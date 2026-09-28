@@ -147,7 +147,9 @@ func (w *Endpoint) readyChecker() {
 			// case <-time.After(time.Second):
 			// }
 			w.started = true
-			monitoring.Get(w.ctx).TestNow(w.Tag())
+			if monitor := monitoring.Get(w.ctx); monitor != nil {
+				monitor.TestNow(w.Tag())
+			}
 			return
 		}
 	}

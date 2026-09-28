@@ -148,6 +148,10 @@ func (s *Selector) SelectOutbound(tag string) bool {
 	return true
 }
 func (s *Selector) pingSelected() {
+	monitor := monitoring.Get(s.ctx)
+	if monitor == nil {
+		return
+	}
 	selected := s.selected.Load()
 	if selected == nil {
 		s.logger.Warn("no outbound selected")
@@ -158,10 +162,10 @@ func (s *Selector) pingSelected() {
 	if r, ok := s.outbound.Outbound(realTag); ok {
 		// s.logger.Debug("found real tag: ", selected.Tag(), " (real tag: ", r.Tag(), ")")
 		if _, ok := r.(adapter.OutboundGroup); !ok {
-			monitoring.Get(s.ctx).TestNow(realTag)
+			monitor.TestNow(realTag)
 		} else {
 			// s.logger.Debug(" real tag: is a group so skipping ping", selected.Tag(), " (real tag: ", r.Tag(), ")")
-			monitoring.Get(s.ctx).SignalChange(s.Tag())
+			monitor.SignalChange(s.Tag())
 		}
 	}
 }

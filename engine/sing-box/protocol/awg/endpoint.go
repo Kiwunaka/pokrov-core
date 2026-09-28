@@ -337,7 +337,9 @@ func (o *Endpoint) Start(stage adapter.StartStage) error {
 		}
 		o.started = true
 	case adapter.StartStatePostStart:
-		monitoring.Get(o.ctx).TestNow(o.Tag())
+		if monitor := monitoring.Get(o.ctx); monitor != nil {
+			monitor.TestNow(o.Tag())
+		}
 	}
 	return nil
 }

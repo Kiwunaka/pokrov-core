@@ -160,7 +160,9 @@ func (p *Psiphon) Start() error {
 					select {
 					case connected <- struct{}{}:
 						p.connected = true
-						monitoring.Get(p.ctx).TestNow(p.tag)
+						if monitor := monitoring.Get(p.ctx); monitor != nil {
+							monitor.TestNow(p.tag)
+						}
 					default:
 					}
 				}

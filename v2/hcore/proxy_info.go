@@ -181,6 +181,9 @@ func (h *PokrovInstance) AllProxiesInfoStream(stream grpc.ServerStreamingServer[
 
 	if ctx, urlTestHistory := h.Context(), h.UrlTestHistory(); ctx != nil && urlTestHistory != nil {
 		monitor := monitoring.Get(ctx)
+		if monitor == nil {
+			return stream.Send(h.GetAllProxiesInfo(nil, onlyMain))
+		}
 
 		stream.Send(h.GetAllProxiesInfo(monitor.OutboundsHistory(""), onlyMain))
 

@@ -324,6 +324,9 @@ func (h *PokrovInstance) UrlTest(in *UrlTestRequest) (*hcommon.Response, error) 
 		return nil, E.New("service not ready")
 	}
 	monitor := monitoring.Get(h.Context())
+	if monitor == nil {
+		return nil, E.New("outbound monitoring is disabled")
+	}
 	monitor.TestNow(in.Tag)
 	// router := box.Outbound()
 	// abstractOutboundGroup, isLoaded := router.Outbound(groupTag)

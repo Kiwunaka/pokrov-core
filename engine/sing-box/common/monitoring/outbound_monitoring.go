@@ -4,9 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net"
-	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -18,7 +16,6 @@ import (
 	E "github.com/sagernet/sing/common/exceptions"
 	"github.com/sagernet/sing/service"
 
-	"github.com/sagernet/sing-box/pokrov/ipinfo"
 	"github.com/sagernet/sing/common/x/list"
 
 	"github.com/sagernet/sing/common"
@@ -368,7 +365,9 @@ func (m *OutboundMonitoring) SignalChange(outboundTag string) error {
 
 }
 func (m *OutboundMonitoring) TestNow(outboundTag string) error {
-	m.testParents(outboundTag, true)
+	if outboundTag != m.selectedTag() {
+		return errors.New("outbound is not selected")
+	}
 	return m.testNow(outboundTag, true)
 }
 func (m *OutboundMonitoring) testNow(outboundTag string, priority bool) error {
@@ -396,23 +395,11 @@ func (m *OutboundMonitoring) testNow(outboundTag string, priority bool) error {
 	return nil
 }
 
-func (m *OutboundMonitoring) testParents(outboundTag string, first bool) {
-	state := m.getState(outboundTag)
-	if state == nil {
-		return
-	}
-	if _, ok := m.groups[outboundTag]; !ok && !first {
-		m.logger.Info("testing outbound ", outboundTag)
-		m.testNow(outboundTag, true)
-	}
-	for _, dep := range state.dependenciesInverse {
-		m.logger.Info("testing parent outbound ", dep, " of ", outboundTag)
-		m.testParents(dep, false)
-	}
-}
-
 // InvalidateTest marks the cached test result as invalid so it will be retested.
 func (m *OutboundMonitoring) InvalidateTest(outboundTag string) error {
+	if outboundTag != m.selectedTag() {
+		return errors.New("outbound is not selected")
+	}
 	state := m.getState(outboundTag)
 	if state == nil {
 		return errors.New("outbound not registered")
@@ -512,9 +499,25 @@ func (m *OutboundMonitoring) executeTask(task *testTask) {
 		return
 	default:
 	}
-
 	state := m.outbounds[task.outboundTag]
 	if state == nil {
+		return
+	}
+	if task.outboundTag != m.selectedTag() {
+		state.mu.Lock()
+		if task.priority {
+			state.priorityQueued = false
+		} else if state.enqueuedCycle == task.cycleID {
+			state.queued = false
+			state.enqueuedCycle = 0
+		}
+		state.mu.Unlock()
+		if task.resultCh != nil {
+			select {
+			case task.resultCh <- testOutcome{err: errors.New("selection changed")}:
+			case <-m.ctx.Done():
+			}
+		}
 		return
 	}
 
@@ -603,24 +606,7 @@ func (m *OutboundMonitoring) tester(parent context.Context, tag string) (adapter
 		return his, parent.Err()
 	default:
 	}
-	if out.history.IpInfo == nil || out.from_cache {
-
-		ctx, cancel2 := context.WithTimeout(parent, m.urlTestTimeout)
-		defer cancel2()
-
-		newip, t, err := ipinfo.GetIpInfo(m.logger, ctx, out.outbound)
-		if err == nil {
-			his.IpInfo = mergeIpInfo(out.history.IpInfo, newip)
-			if t < his.Delay {
-				his.Delay = t
-			}
-		}
-	}
-	if his.IpInfo != nil {
-		m.logger.Info("outbound ", tag, " IP ", fmt.Sprint(his.IpInfo), " (", his.Delay, "ms): ", err)
-	} else {
-		m.logger.Info("outbound ", tag, " , IP: -          (", his.Delay, "ms)")
-	}
+	m.logger.Info("outbound ", tag, " URL test delay ", his.Delay, "ms")
 	return his, nil
 }
 
@@ -650,6 +636,9 @@ func (m *OutboundMonitoring) runCycle() {
 	}()
 
 	for idx, _ := range m.urls {
+		if m.selectedTag() != tags[0] {
+			return
+		}
 		outcomes := m.runStage(cycleID, tags)
 		success := 0
 		for _, result := range outcomes {
@@ -764,64 +753,50 @@ func (m *OutboundMonitoring) applyResult(outcome testOutcome) *adapter.URLTestHi
 	state.enqueuedCycle = 0
 	state.invalid = outcome.err != nil
 	state.lastURL = outcome.url
-	if (outcome.history.Delay != state.history.Delay) || state.history.IpInfo == nil || (outcome.history.IpInfo != nil) {
+	if outcome.history.Delay != state.history.Delay || state.history.IpInfo != nil {
 		m.cacheDirty.Store(true)
 	}
 	state.history.Delay = outcome.history.Delay
 	state.history.Time = outcome.history.Time
 	state.from_cache = false
-	if outcome.history.IpInfo != nil {
-		state.history.IpInfo = outcome.history.IpInfo
-	}
+	state.history.IpInfo = nil
 	m.history.StoreURLTestHistory(outcome.outboundTag, &state.history)
 
 	m.emitGroupEvent(state.groupTags)
 	return &state.history
 }
 
-func mergeIpInfo(old, new *ipinfo.IpInfo) *ipinfo.IpInfo {
-	if old == nil {
-		return new
+func (m *OutboundMonitoring) collectCycleTargets() []string {
+	tag := m.selectedTag()
+	state := m.getState(tag)
+	if state == nil {
+		return nil
 	}
-	if new == nil {
-		return old
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if state.testing || state.queued || state.priorityQueued {
+		return nil
 	}
-	new2 := *new // copy
-	if new2.CountryCode == "" {
-		new2.CountryCode = old.CountryCode
+	if state.invalid || time.Since(state.history.Time) >= m.mainInterval {
+		return []string{tag}
 	}
-	if new2.Org == "" {
-		new2.Org = old.Org
-	}
-	return &new2
+	return nil
 }
 
-func (m *OutboundMonitoring) collectCycleTargets() []string {
-
-	tags := make([]string, 0, len(m.outbounds))
-
-	delays := make(map[string]uint16, len(tags))
-
-	for tag, state := range m.outbounds {
-		if _, ok := m.groups[tag]; ok {
-			continue
+func (m *OutboundMonitoring) selectedTag() string {
+	outbound := m.outboundManager.Default()
+	for outbound != nil {
+		group, ok := outbound.(adapter.OutboundGroup)
+		if !ok {
+			return outbound.Tag()
 		}
-		state.mu.Lock()
-		if state.testing || state.queued || state.priorityQueued {
-			state.mu.Unlock()
-			continue
+		tag := group.Now()
+		if tag == "" || tag == outbound.Tag() {
+			return ""
 		}
-		if state.invalid || time.Since(state.history.Time) >= m.mainInterval {
-			tags = append(tags, tag)
-			delays[tag] = state.history.Delay
-		}
-		state.mu.Unlock()
+		outbound, _ = m.outboundManager.Outbound(tag)
 	}
-
-	sort.SliceStable(tags, func(i, j int) bool {
-		return delays[tags[i]] < delays[tags[j]]
-	})
-	return tags
+	return ""
 }
 
 func (m *OutboundMonitoring) makeGroup(tag string) *groupState {
@@ -1054,6 +1029,7 @@ func (m *OutboundMonitoring) loadHistory() *History {
 	}
 	for tag, his := range history.OutboundData {
 		if state, ok := m.outbounds[tag]; ok && his != nil {
+			his.IpInfo = nil
 			if _, ok := m.groups[tag]; ok {
 				continue
 			}

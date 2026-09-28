@@ -1,5 +1,11 @@
 # Release process
 
+Outbound monitoring is disabled unless the sing-box profile sets
+`experimental.monitoring` or a legacy Core profile explicitly sets
+`enable-outbound-monitoring`. When enabled, its periodic and requested probes
+use the currently selected outbound path and do not query third-party IP
+information services.
+
 1. Update `VERSION`, `config/release.json`, and `CHANGELOG.md`.
 2. Run `scripts/test.ps1`.
 3. Build Android and Windows twice and compare SHA-256 hashes.

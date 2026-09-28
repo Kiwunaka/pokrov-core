@@ -108,7 +108,9 @@ func (s *Balancer) Start() error {
 }
 
 func (s *Balancer) PostStart() error {
-	go s.worker()
+	if s.monitor != nil {
+		go s.worker()
+	}
 
 	return nil
 }
@@ -176,7 +178,9 @@ func (s *Balancer) DialContext(ctx context.Context, network string, destination 
 		return s.interruptGroup.NewConn(conn, interrupt.IsExternalConnectionFromContext(ctx)), nil
 	}
 	s.logger.ErrorContext(ctx, err)
-	s.monitor.InvalidateTest(outbound.Tag())
+	if s.monitor != nil {
+		s.monitor.InvalidateTest(outbound.Tag())
+	}
 
 	return nil, err
 }
@@ -199,7 +203,9 @@ func (s *Balancer) ListenPacket(ctx context.Context, destination M.Socksaddr) (n
 		return s.interruptGroup.NewPacketConn(conn, interrupt.IsExternalConnectionFromContext(ctx)), nil
 	}
 	s.logger.ErrorContext(ctx, err)
-	s.monitor.InvalidateTest(outbound.Tag())
+	if s.monitor != nil {
+		s.monitor.InvalidateTest(outbound.Tag())
+	}
 	return nil, err
 }
 
