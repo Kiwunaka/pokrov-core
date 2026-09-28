@@ -121,7 +121,6 @@ try {
       -trimpath `
       -ldflags "-w -s -checklinkname=0 -buildid= -X github.com/Kiwunaka/POKROV-core/v2/hcommon/constants.Version=$($release.version)" `
       -target android `
-      -gcflags "all=-N -l" `
       -o $outputPath `
       "github.com/sagernet/sing-box/experimental/libbox" `
       "./platform/mobile"
