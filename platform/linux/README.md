@@ -98,3 +98,29 @@ signed packaging or desktop-session acceptance. The daemon's durable recovery
 is a client L03 responsibility; exact host evidence remains separate from this
 adapter's build. Android/Windows artifact bindings and
 public release scope are unchanged by this private adapter.
+
+## Fixed candidate probe on Linux ARM64
+
+`platform/probecli` is a separate, source-only command for scheduled fixed probes.
+It calls the same isolated `hcore.ProbeCandidate` used by clients, with a four-second
+deadline and the caller's physical uplink interface. It starts no TUN and changes
+no host routes. The command accepts a materialized sing-box JSON profile whose
+`route.final` selects the technical account's protected outbound; a subscription
+link is not a profile. Install that profile in a root-owned private directory as
+mode 0600. The command rejects profiles readable by group or others and profiles
+over 512 KiB. Supply the real uplink interface, not the tunnel interface.
+
+Build on a Linux ARM64 host, or cross-compile with `GOOS=linux GOARCH=arm64`:
+
+```sh
+CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -buildvcs=false \
+  -tags with_gvisor,with_quic,with_wireguard,with_utls,with_clash_api,with_grpc,with_awg,tfogo_checklinkname0 \
+  -ldflags '-w -s -checklinkname=0' -o pokrov-candidate-probe ./platform/probecli
+sudo ./pokrov-candidate-probe /etc/pokrov/probes/technical.json <physical-uplink>
+```
+
+One invocation makes one probe. Stdout is one JSON object with the client fields
+`success`, `failure_kind`, and `duration_ms`; exit status is zero on success and
+one on failure. It never prints the profile, destination, key, or raw error.
+Schedule separate invocations every 15–30 minutes outside Core. This command has
+not been run on Pi4 and is not a Core release asset.
