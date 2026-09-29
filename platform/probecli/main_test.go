@@ -33,6 +33,13 @@ func TestRunRejectsInvalidProfileWithoutEcho(t *testing.T) {
 	if result.Success || result.FailureKind != "invalid_profile" {
 		t.Fatalf("unexpected result: %s", result.JSON())
 	}
+	// Windows does not preserve Unix file modes in this test. Both stages are safe.
+	if result.Stage != "parse_profile" && result.Stage != "profile_file" {
+		t.Fatalf("unexpected safe failure stage: %q", result.Stage)
+	}
+	if !strings.Contains(result.JSON(), `"stage":"`+result.Stage+`"`) {
+		t.Fatal("failure stage missing from JSON output")
+	}
 	for _, secret := range []string{"address-private", "key-s3cr3t", "uplink-private"} {
 		if strings.Contains(result.JSON(), secret) {
 			t.Fatal("profile or request material leaked into result")

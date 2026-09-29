@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -214,6 +215,19 @@ func TestCandidateProbePreCancelledDoesNotParseOrRetainCallback(t *testing.T) {
 	time.Sleep(25 * time.Millisecond)
 	if calls.Load() != before {
 		t.Fatal("callback retained after return")
+	}
+}
+
+func TestCandidateProbeStageDoesNotExposeProfile(t *testing.T) {
+	const profile = `{"server":"address-private.example","password":"key-s3cr3t"}`
+	stage := ""
+	result := ProbeCandidate(profile, "safe-stage", time.Second, "", nil, nil,
+		func(name string) { stage = name })
+	if result.Success || result.FailureKind != "invalid_profile" || stage != "parse_profile" {
+		t.Fatal("invalid profile did not retain its safe stage")
+	}
+	if strings.Contains(stage, "address-private") || strings.Contains(stage, "key-s3cr3t") {
+		t.Fatal("connection material leaked into stage")
 	}
 }
 

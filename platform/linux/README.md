@@ -120,7 +120,10 @@ sudo ./pokrov-candidate-probe /etc/pokrov/probes/technical.json <physical-uplink
 ```
 
 One invocation makes one probe. Stdout is one JSON object with the client fields
-`success`, `failure_kind`, and `duration_ms`; exit status is zero on success and
-one on failure. It never prints the profile, destination, key, or raw error.
+`success`, `failure_kind`, and `duration_ms`; failures also include a fixed `stage`
+name (`profile_file`, `parse_profile`, `create_instance`, `start_instance`,
+`select_outbound`, `proxy_dial`, or `egress_check`). The stage names contain no endpoint
+or profile data. Exit status is zero on success and one on failure. It never prints
+the profile, destination, key, or raw error.
 Schedule separate invocations every 15–30 minutes outside Core. This command has
 not been run on Pi4 and is not a Core release asset.

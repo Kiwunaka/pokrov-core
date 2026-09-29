@@ -72,10 +72,16 @@ func CancelCandidateProbe(id string) {
 
 // ProbeCandidate never touches the active Core, TUN, routes, or command server.
 // interrupted must be thread-safe and remain callable until this call returns.
+// stage, when supplied, receives only fixed phase names and runs synchronously.
 func ProbeCandidate(config, id string, timeout time.Duration, bindInterface string,
-	platform libbox.PlatformInterface, interrupted func() bool) (result CandidateProbeResult) {
+	platform libbox.PlatformInterface, interrupted func() bool, stage ...func(string)) (result CandidateProbeResult) {
 	started := time.Now()
 	defer func() { result.DurationMS = time.Since(started).Milliseconds() }()
+	reportStage := func(name string) {
+		if len(stage) > 0 && stage[0] != nil {
+			stage[0](name)
+		}
+	}
 	result.FailureKind = "invalid_request"
 	if !candidateProbeID.MatchString(id) || timeout <= 0 || timeout > 30*time.Second {
 		return
@@ -139,11 +145,13 @@ func ProbeCandidate(config, id string, timeout time.Duration, bindInterface stri
 	if ctx.Err() != nil {
 		return
 	}
+	reportStage("parse_profile")
 	options, target, err := candidateOptions(ctx, config, bindInterface)
 	if err != nil {
 		result.FailureKind = "invalid_profile"
 		return
 	}
+	reportStage("create_instance")
 	instance, err := box.New(box.Options{Context: ctx, Options: options})
 	if err != nil {
 		result.FailureKind = "invalid_profile"
@@ -152,6 +160,7 @@ func ProbeCandidate(config, id string, timeout time.Duration, bindInterface stri
 	var closeOnce sync.Once
 	closeInstance := func() { closeOnce.Do(func() { _ = instance.Close() }) }
 	defer closeInstance()
+	reportStage("start_instance")
 	if err = instance.Start(); err != nil {
 		result.FailureKind = "start_failed"
 		return
@@ -168,12 +177,21 @@ func ProbeCandidate(config, id string, timeout time.Duration, bindInterface stri
 		}
 	}()
 	defer func() { close(closeStop); <-closeDone }()
+	reportStage("select_outbound")
 	selected := candidateProtectedLeaf(target, instance.Outbound().Outbound)
 	if selected == nil {
 		result.FailureKind = "invalid_profile"
 		return
 	}
-	result.FailureKind = candidateHTTPProbe(ctx, selected.DialContext)
+	probeDial := func(ctx context.Context, network string, destination M.Socksaddr) (net.Conn, error) {
+		reportStage("proxy_dial")
+		conn, err := selected.DialContext(ctx, network, destination)
+		if err == nil {
+			reportStage("egress_check")
+		}
+		return conn, err
+	}
+	result.FailureKind = candidateHTTPProbe(ctx, probeDial)
 	result.Success = result.FailureKind == ""
 	return
 }
