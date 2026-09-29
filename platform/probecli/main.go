@@ -12,7 +12,7 @@ import (
 	"github.com/Kiwunaka/POKROV-core/v2/linuxruntime"
 )
 
-const probeTimeout = 4 * time.Second
+const probeTimeout = 12 * time.Second
 
 func main() {
 	result := run(os.Args[1:])

@@ -102,7 +102,7 @@ public release scope are unchanged by this private adapter.
 ## Fixed candidate probe on Linux ARM64
 
 `platform/probecli` is a separate, source-only command for scheduled fixed probes.
-It calls the same isolated `hcore.ProbeCandidate` used by clients, with a four-second
+It calls the same isolated `hcore.ProbeCandidate` used by clients, with a twelve-second
 deadline and the caller's physical uplink interface. It starts no TUN and changes
 no host routes. The command accepts a materialized sing-box JSON profile whose
 `route.final` selects the technical account's protected outbound; a subscription

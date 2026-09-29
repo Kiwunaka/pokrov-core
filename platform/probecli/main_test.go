@@ -5,7 +5,14 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
+
+func TestFixedProbeTimeout(t *testing.T) {
+	if probeTimeout != 12*time.Second {
+		t.Fatal("fixed probe must allow the 204 and 64 KiB checks within a 12-second budget")
+	}
+}
 
 func TestRunRejectsInvalidRequestWithoutEcho(t *testing.T) {
 	result := run([]string{"key-s3cr3t"})
