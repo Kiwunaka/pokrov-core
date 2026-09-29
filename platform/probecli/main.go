@@ -11,6 +11,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/Kiwunaka/POKROV-core/v2/config"
 	"github.com/Kiwunaka/POKROV-core/v2/hcore"
 	"github.com/Kiwunaka/POKROV-core/v2/linuxruntime"
 )
@@ -71,6 +72,10 @@ func run(args []string) probeResult {
 // Give hostname-based VLESS its own direct DNS lane, as the Linux client does.
 // The content DNS final and all outbound connection material remain unchanged.
 func materializeFixedBootstrap(profile []byte) ([]byte, error) {
+	profile, err := config.NormalizeLegacyDNS(profile)
+	if err != nil {
+		return nil, err
+	}
 	var config map[string]any
 	if json.Unmarshal(profile, &config) != nil || config == nil {
 		return nil, errFixedBootstrap
@@ -127,7 +132,10 @@ func materializeFixedBootstrap(profile []byte) ([]byte, error) {
 			return nil, errFixedBootstrap
 		}
 		if server["tag"] == final {
-			address, _ = server["address"].(string)
+			if server["type"] != "udp" {
+				return nil, errFixedBootstrap
+			}
+			address, _ = server["server"].(string)
 		}
 	}
 	resolved, err := netip.ParseAddr(address)
@@ -135,7 +143,7 @@ func materializeFixedBootstrap(profile []byte) ([]byte, error) {
 		return nil, errFixedBootstrap
 	}
 	dns["servers"] = append(servers, map[string]any{
-		"tag": fixedBootstrapTag, "address": address, "detour": directTag,
+		"type": "udp", "tag": fixedBootstrapTag, "server": address, "detour": directTag,
 	})
 	route["default_domain_resolver"] = map[string]any{
 		"server": fixedBootstrapTag, "strategy": "ipv4_only",

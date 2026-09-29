@@ -37,7 +37,7 @@ func ParseConfig(ctx context.Context, opt *ReadOptions, debug bool, configOpt *P
 	if err != nil {
 		return nil, err
 	}
-	return parseConfigContent(ctx, content, debug, nil, false)
+	return parseConfigContent(ctx, content, debug, configOpt, fullConfig)
 }
 
 func ParseConfigBytes(ctx context.Context, opt *ReadOptions, debug bool, configOpt *PokrovOptions, fullConfig bool) ([]byte, error) {
@@ -62,8 +62,11 @@ func parseConfigContent(ctx context.Context, content []byte, debug bool, configO
 	if err := jsonDecoder.Decode(&tmpJsonResult); err == nil {
 		fmt.Printf("Convert using json\n")
 		if tmpJsonObj, ok := tmpJsonResult.(map[string]interface{}); ok {
+			if isNativeXrayJSON(tmpJsonObj) {
+				return nil, fmt.Errorf("native Xray JSON is unsupported; import supported proxy URIs or a sing-box configuration")
+			}
 			if tmpJsonObj["outbounds"] == nil && tmpJsonObj["endpoints"] == nil {
-				jsonObj["outbounds"] = []interface{}{jsonObj}
+				jsonObj["outbounds"] = []interface{}{tmpJsonObj}
 			} else {
 				if fullConfig || (configOpt != nil && configOpt.EnableFullConfig) {
 					jsonObj = tmpJsonObj
@@ -114,14 +117,31 @@ func parseConfigContent(ctx context.Context, content []byte, debug bool, configO
 }
 
 func patchConfigStr(ctx context.Context, content []byte, name string, configOpt *PokrovOptions) (*option.Options, error) {
+	content, err := NormalizeLegacyDNS(content)
+	if err != nil {
+		return nil, err
+	}
 	options := option.Options{}
-	err := options.UnmarshalJSONContext(ctx, content)
+	err = options.UnmarshalJSONContext(ctx, content)
 
 	if err != nil {
 		return nil, fmt.Errorf("[SingboxParser] unmarshal error: %w", err)
 	}
 
 	return patchConfigOptions(ctx, &options, name, configOpt)
+}
+
+func isNativeXrayJSON(root map[string]interface{}) bool {
+	if root["protocol"] != nil && root["type"] == nil {
+		return true
+	}
+	outbounds, _ := root["outbounds"].([]interface{})
+	for _, value := range outbounds {
+		if outbound, ok := value.(map[string]interface{}); ok && outbound["protocol"] != nil && outbound["type"] == nil {
+			return true
+		}
+	}
+	return false
 }
 func patchConfigOptions(ctx context.Context, options *option.Options, name string, configOpt *PokrovOptions) (*option.Options, error) {
 	b, _ := batch.New(ctx, batch.WithConcurrencyNum[*option.Endpoint](2))

@@ -547,6 +547,7 @@ github.com/sagernet/cronet-go/lib/linux_386_musl v0.0.0-20260117110516-f21660bef
 github.com/sagernet/cronet-go/lib/linux_386_musl v0.0.0-20260912104006-c10c03c318db/go.mod h1:JFE0/cxaKkx0wqPMZU7MgaplQlU0zudv82dROJjClKU=
 github.com/sagernet/cronet-go/lib/linux_amd64 v0.0.0-20260117110516-f21660bef13f h1:OpXBa2WlRU+Mam9oRe9Nn4/zf7gQ+qiBTNK8A5RwbfQ=
 github.com/sagernet/cronet-go/lib/linux_amd64 v0.0.0-20260117110516-f21660bef13f/go.mod h1:vU8VftFeSt7fURCa3JXD6+k6ss1YAX+idQjPvHmJ2tI=
+github.com/sagernet/cronet-go/lib/linux_amd64 v0.0.0-20260912104006-c10c03c318db h1:yNdO+HC5OkgKgwqVYd49FRVt5A2jfxsyrSKrf2uM0aM=
 github.com/sagernet/cronet-go/lib/linux_amd64 v0.0.0-20260912104006-c10c03c318db/go.mod h1:vU8VftFeSt7fURCa3JXD6+k6ss1YAX+idQjPvHmJ2tI=
 github.com/sagernet/cronet-go/lib/linux_amd64_musl v0.0.0-20260117110516-f21660bef13f h1:nJpGFi+6hI85tl4zoyNFEnFEQ5+xEV5gyvsUoMvd8g0=
 github.com/sagernet/cronet-go/lib/linux_amd64_musl v0.0.0-20260117110516-f21660bef13f/go.mod h1:vCe4OUuL+XOUge9v3MyTD45BnuAXiH+DkjN9quDXJzQ=

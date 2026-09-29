@@ -150,7 +150,7 @@ func GenerateConfigLite(input string, useXrayWhenPossible bool) (*option.Options
 			outend, err := processSingleConfig(chain, useXrayWhenPossible)
 
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "Error in %s \n %v\n", config, err)
+				fmt.Fprintln(os.Stderr, "Proxy URI conversion failed")
 
 				continue
 			}
@@ -212,7 +212,7 @@ func Ray2SingboxOptions(ctx context.Context, configs string, useXrayWhenPossible
 			stackTrace := make([]byte, 1024)
 			s := runtime.Stack(stackTrace, false)
 			stackStr := fmt.Sprint(string(stackTrace[:s]))
-			err = E.New("Error in Parsing", configs, r, "Stack trace:", stackStr)
+			err = E.New("Error in Parsing", r, "Stack trace:", stackStr)
 
 		}
 	}()

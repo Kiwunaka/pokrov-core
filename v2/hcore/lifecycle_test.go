@@ -170,6 +170,9 @@ func TestStartStopReleasesServiceObservers(t *testing.T) {
 		// LevelDB.Close leaves an empty memory-pool drain waiting for one second.
 		time.Sleep(time.Second)
 		time.Sleep(100 * time.Millisecond)
+		// Match the final GC drain before accepting the process-wide thread-cache baseline.
+		runtime.GC()
+		time.Sleep(20 * time.Millisecond)
 		warmResources := countLifecycleResources(t)
 		t.Logf("warm batch=%d OS resources=%d", warmBatch+1, warmResources)
 		if warmResources == previousWarmResources {

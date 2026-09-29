@@ -7,15 +7,18 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	coreconfig "github.com/Kiwunaka/POKROV-core/v2/config"
 	box "github.com/sagernet/sing-box"
 	"github.com/sagernet/sing-box/experimental/libbox"
 	"github.com/sagernet/sing-box/option"
 	M "github.com/sagernet/sing/common/metadata"
+	"github.com/sagernet/sing/service/filemanager"
 )
 
 func TestCandidateProbeGETRequires204AndMarker(t *testing.T) {
@@ -258,5 +261,48 @@ func TestCandidateProbePreparedRussiaDNSDoesNotRequireClientRuleSets(t *testing.
 	}
 	if len(options.DNS.Rules) != 1 || len(options.DNS.Rules[0].DefaultOptions.Domain) != 1 || options.DNS.Final != "bootstrap" {
 		t.Fatal("candidate discarded the upstream resolver or kept client routing classification")
+	}
+}
+
+func TestCandidateProbeParsesLegacyManagedDNS(t *testing.T) {
+	const profile = `{
+	 "log":{"disabled":true},
+	 "dns":{"servers":[{"tag":"bootstrap","address":"local"},
+	 {"tag":"tunnel","address":"8.8.8.8","detour":"countries"}],"final":"tunnel"},
+	 "outbounds":[{"type":"selector","tag":"countries","outbounds":["candidate"]},
+	 {"type":"socks","tag":"candidate","server":"192.0.2.1","server_port":1080},
+	 {"type":"direct","tag":"direct"},{"type":"dns","tag":"dns-out"}],
+	 "route":{"final":"countries","default_domain_resolver":{"server":"bootstrap","strategy":"prefer_ipv4"},
+	 "rules":[{"protocol":"dns","outbound":"dns-out"}]},
+	 "_meta":{"title":"synthetic managed profile"}}`
+	optionsForStartup, err := coreconfig.ReadSingOptions(libbox.BaseContext(nil), &coreconfig.ReadOptions{Content: profile})
+	if err != nil {
+		t.Fatal(err)
+	}
+	workingPath := t.TempDir()
+	startupContext := filemanager.WithDefault(libbox.BaseContext(nil), workingPath, workingPath, os.Getuid(), os.Getgid())
+	service, err := NewService(startupContext, *optionsForStartup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.Close(); err != nil {
+		t.Fatal(err)
+	}
+	ctx := libbox.BaseContext(nil)
+	options, target, err := candidateOptions(ctx, profile, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if target != "countries" || options.DNS == nil || options.DNS.Final != "tunnel" || options.DNS.Servers[1].Type != "udp" ||
+		options.DNS.Servers[1].Options.(*option.RemoteDNSServerOptions).Detour != "countries" || options.Route.DefaultDomainResolver.Server != "bootstrap" {
+		t.Fatal("probe lost managed DNS, selector or bootstrap resolver")
+	}
+	instance, err := box.New(box.Options{Context: ctx, Options: options})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer instance.Close()
+	if err := instance.Start(); err != nil {
+		t.Fatal(err)
 	}
 }

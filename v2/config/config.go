@@ -21,6 +21,10 @@ func ReadSingOptions(ctx context.Context, opt *ReadOptions) (*option.Options, er
 	if err != nil {
 		return nil, err
 	}
+	content, err = NormalizeLegacyDNS(content)
+	if err != nil {
+		return nil, err
+	}
 	var options option.Options
 	err = options.UnmarshalJSONContext(ctx, content)
 	return &options, err

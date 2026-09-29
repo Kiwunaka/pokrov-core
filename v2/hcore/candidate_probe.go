@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	coreconfig "github.com/Kiwunaka/POKROV-core/v2/config"
 	box "github.com/sagernet/sing-box"
 	"github.com/sagernet/sing-box/adapter"
 	C "github.com/sagernet/sing-box/constant"
@@ -207,6 +208,10 @@ func candidateOptions(ctx context.Context, config, bindInterface string) (option
 	}
 	raw["log"] = json.RawMessage(`{"disabled":true}`)
 	encoded, _ := json.Marshal(raw)
+	encoded, err := coreconfig.NormalizeLegacyDNS(encoded)
+	if err != nil {
+		return option.Options{}, "", err
+	}
 	options, err := SJSON.UnmarshalExtendedContext[option.Options](ctx, encoded)
 	if err != nil {
 		return option.Options{}, "", err
