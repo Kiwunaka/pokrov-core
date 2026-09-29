@@ -14,6 +14,7 @@ import (
 
 type XmuxConn interface {
 	IsClosed() bool
+	Close()
 }
 
 type XmuxClient struct {
@@ -22,6 +23,20 @@ type XmuxClient struct {
 	leftUsage    int32
 	LeftRequests atomic.Int32
 	UnreusableAt time.Time
+	retired      atomic.Bool
+}
+
+func (c *XmuxClient) release() {
+	if c.OpenUsage.Add(-1) == 0 && c.retired.Load() {
+		c.XmuxConn.Close()
+	}
+}
+
+func (c *XmuxClient) retire() {
+	c.retired.Store(true)
+	if c.OpenUsage.Load() == 0 {
+		c.XmuxConn.Close()
+	}
 }
 
 type XmuxManager struct {
@@ -59,6 +74,7 @@ func (m *XmuxManager) newXmuxClient() *XmuxClient {
 		xmuxClient.UnreusableAt = time.Now().Add(time.Duration(x) * time.Second)
 	}
 	m.xmuxClients = append(m.xmuxClients, xmuxClient)
+	xmuxClient.OpenUsage.Add(1)
 	return xmuxClient
 }
 
@@ -71,6 +87,7 @@ func (m *XmuxManager) GetXmuxClient(ctx context.Context) *XmuxClient {
 			xmuxClient.leftUsage == 0 ||
 			xmuxClient.LeftRequests.Load() <= 0 ||
 			(xmuxClient.UnreusableAt != time.Time{} && time.Now().After(xmuxClient.UnreusableAt)) {
+			xmuxClient.retire()
 			m.xmuxClients = append(m.xmuxClients[:i], m.xmuxClients[i+1:]...)
 		} else {
 			i++
@@ -100,5 +117,6 @@ func (m *XmuxManager) GetXmuxClient(ctx context.Context) *XmuxClient {
 	if xmuxClient.leftUsage > 0 {
 		xmuxClient.leftUsage -= 1
 	}
+	xmuxClient.OpenUsage.Add(1)
 	return xmuxClient
 }

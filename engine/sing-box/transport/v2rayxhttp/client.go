@@ -18,6 +18,7 @@ import (
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/common/tls"
 	"github.com/sagernet/sing-box/common/xray/buf"
+	Xbadoption "github.com/sagernet/sing-box/common/xray/json/badoption"
 	"github.com/sagernet/sing-box/common/xray/net"
 	"github.com/sagernet/sing-box/common/xray/pipe"
 	"github.com/sagernet/sing-box/common/xray/signal/done"
@@ -63,9 +64,9 @@ func NewClient(ctx context.Context, dialer N.Dialer, serverAddr M.Socksaddr, opt
 		requestURL.Path += sessionId
 		return requestURL
 	}
-	var xmuxOptions option.V2RayXHTTPXmuxOptions
-	if options.Xmux != nil {
-		xmuxOptions = *options.Xmux
+	xmuxOptions, err := normalizedXmuxOptions(options.Xmux)
+	if err != nil {
+		return nil, err
 	}
 	xmuxManager := NewXmuxManager(xmuxOptions, func() XmuxConn {
 		return client.newHTTPClient(dest, dialer, &options.V2RayXHTTPBaseOptions, tlsConfig)
@@ -103,9 +104,9 @@ func NewClient(ctx context.Context, dialer N.Dialer, serverAddr M.Socksaddr, opt
 			requestURL2.Path += sessionId
 			return requestURL2
 		}
-		var xmuxOptions2 option.V2RayXHTTPXmuxOptions
-		if options2.Xmux != nil {
-			xmuxOptions2 = *options2.Xmux
+		xmuxOptions2, err := normalizedXmuxOptions(options2.Xmux)
+		if err != nil {
+			return nil, err
 		}
 		xmuxManager2 := NewXmuxManager(xmuxOptions2, func() XmuxConn {
 			return client.newHTTPClient(dest2, dialer2, &options2.V2RayXHTTPBaseOptions, tlsConfig2)
@@ -120,6 +121,21 @@ func NewClient(ctx context.Context, dialer N.Dialer, serverAddr M.Socksaddr, opt
 	client.getRequestURL = getRequestURL
 	client.getRequestURL2 = getRequestURL2
 	return client, nil
+}
+
+func normalizedXmuxOptions(input *option.V2RayXHTTPXmuxOptions) (option.V2RayXHTTPXmuxOptions, error) {
+	if input == nil || *input == (option.V2RayXHTTPXmuxOptions{}) {
+		// Match Xray v26.7.28's client defaults, including finite reuse.
+		return option.V2RayXHTTPXmuxOptions{
+			MaxConnections:   Xbadoption.Range{From: 3, To: 3},
+			HMaxRequestTimes: Xbadoption.Range{From: 600, To: 900},
+			HMaxReusableSecs: Xbadoption.Range{From: 1800, To: 3000},
+		}, nil
+	}
+	if input.MaxConnections.To > 0 && input.MaxConcurrency.To > 0 {
+		return option.V2RayXHTTPXmuxOptions{}, E.New("xmux maxConnections cannot be specified together with maxConcurrency")
+	}
+	return *input, nil
 }
 
 func (c *Client) DialContext(dialCtx context.Context) (_ net.Conn, err error) {
@@ -141,13 +157,12 @@ func (c *Client) DialContext(dialCtx context.Context) (_ net.Conn, err error) {
 	requestURL := c.getRequestURL(sessionIdUuid.String())
 	requestURL2 := c.getRequestURL2(sessionIdUuid.String())
 	httpClient, xmuxClient := c.getHTTPClient()
-	httpClient2, xmuxClient2 := c.getHTTPClient2()
-	if xmuxClient != nil {
-		xmuxClient.OpenUsage.Add(1)
+	var httpClient2 DialerClient
+	var xmuxClient2 *XmuxClient
+	if mode != "stream-one" {
+		httpClient2, xmuxClient2 = c.getHTTPClient2()
 	}
-	if xmuxClient2 != nil && xmuxClient2 != xmuxClient {
-		xmuxClient2.OpenUsage.Add(1)
-	}
+	uploadStarted := false
 	var closed atomic.Int32
 	reader, writer := io.Pipe()
 	conn := splitConn{
@@ -157,11 +172,11 @@ func (c *Client) DialContext(dialCtx context.Context) (_ net.Conn, err error) {
 				return
 			}
 			cancel()
-			if xmuxClient != nil {
-				xmuxClient.OpenUsage.Add(-1)
+			if mode == "stream-one" || mode == "stream-up" || !uploadStarted {
+				xmuxClient.release()
 			}
-			if xmuxClient2 != nil && xmuxClient2 != xmuxClient {
-				xmuxClient2.OpenUsage.Add(-1)
+			if xmuxClient2 != nil {
+				xmuxClient2.release()
 			}
 		},
 	}
@@ -219,7 +234,9 @@ func (c *Client) DialContext(dialCtx context.Context) (_ net.Conn, err error) {
 		uploadPipeWriter,
 		maxUploadSize,
 	}
+	uploadStarted = true
 	go func() {
+		defer func() { xmuxClient.release() }()
 		var seq int64
 		var lastWrite time.Time
 		for {
@@ -247,10 +264,15 @@ func (c *Client) DialContext(dialCtx context.Context) (_ net.Conn, err error) {
 			lastWrite = time.Now()
 			if xmuxClient != nil && (xmuxClient.LeftRequests.Add(-1) <= 0 ||
 				(xmuxClient.UnreusableAt != time.Time{} && lastWrite.After(xmuxClient.UnreusableAt))) {
-				httpClient, xmuxClient = c.getHTTPClient()
+				nextHTTPClient, nextXmuxClient := c.getHTTPClient()
+				xmuxClient.release()
+				httpClient, xmuxClient = nextHTTPClient, nextXmuxClient
 			}
+			requestClient, requestXmuxClient := httpClient, xmuxClient
+			requestXmuxClient.OpenUsage.Add(1)
 			go func() {
-				err := httpClient.PostPacket(
+				defer requestXmuxClient.release()
+				err := requestClient.PostPacket(
 					ctx,
 					url.String(),
 					&buf.MultiBufferContainer{MultiBuffer: chunk},
@@ -288,6 +310,18 @@ func (c *Client) newHTTPClient(dest M.Socksaddr, dialer N.Dialer, options *optio
 	c.clientsMu.Lock()
 	defer c.clientsMu.Unlock()
 	client := createHTTPClient(c.ctx, dest, dialer, options, tlsConfig)
+	client.onClose = func() {
+		c.clientsMu.Lock()
+		defer c.clientsMu.Unlock()
+		for index, owned := range c.clients {
+			if owned == client {
+				copy(c.clients[index:], c.clients[index+1:])
+				c.clients[len(c.clients)-1] = nil
+				c.clients = c.clients[:len(c.clients)-1]
+				break
+			}
+		}
+	}
 	c.clients = append(c.clients, client)
 	return client
 }

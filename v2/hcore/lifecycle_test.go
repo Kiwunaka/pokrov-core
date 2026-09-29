@@ -3,10 +3,12 @@
 package hcore
 
 import (
+	"bufio"
 	"errors"
 	"fmt"
 	"io"
 	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -61,13 +63,41 @@ func TestStartStopReleasesServiceObservers(t *testing.T) {
 	port := portReservation.Addr().(*net.TCPAddr).Port
 	_ = portReservation.Close()
 	request := &StartRequest{
-		ConfigContent:      fmt.Sprintf(`{"log":{"disabled":true},"inbounds":[{"type":"mixed","listen":"127.0.0.1","listen_port":%d}],"outbounds":[{"type":"direct","tag":"direct"}],"route":{"final":"direct"}}`, port),
+		ConfigContent:      fmt.Sprintf(`{"log":{"disabled":true},"inbounds":[{"type":"mixed","listen":"127.0.0.1","listen_port":%d,"users":[{"username":"test","password":"test-password"}]}],"outbounds":[{"type":"direct","tag":"direct"}],"route":{"final":"direct"}}`, port),
 		EnableRawConfig:    true,
 		DisableMemoryLimit: true,
 	}
+	authenticationChecked := false
 	connect := func() net.Conn {
 		t.Helper()
-		dialer, err := proxy.SOCKS5("tcp", fmt.Sprintf("127.0.0.1:%d", port), nil, &net.Dialer{Timeout: time.Second})
+		if !authenticationChecked {
+			anonymous, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), time.Second)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_ = anonymous.SetDeadline(time.Now().Add(time.Second))
+			_, _ = anonymous.Write([]byte{5, 1, 0})
+			var selection [2]byte
+			_, err = io.ReadFull(anonymous, selection[:])
+			_ = anonymous.Close()
+			if err != nil || selection != [2]byte{5, 255} {
+				t.Fatalf("SOCKS accepted unauthenticated access: %v", err)
+			}
+			anonymous, err = net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), time.Second)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_ = anonymous.SetDeadline(time.Now().Add(time.Second))
+			_, _ = io.WriteString(anonymous, "GET http://127.0.0.1:1/ HTTP/1.1\r\nHost: 127.0.0.1:1\r\n\r\n")
+			response, err := http.ReadResponse(bufio.NewReader(anonymous), nil)
+			_ = anonymous.Close()
+			if err != nil || response.StatusCode != http.StatusProxyAuthRequired {
+				t.Fatalf("HTTP accepted unauthenticated access: %v", err)
+			}
+			_ = response.Body.Close()
+			authenticationChecked = true
+		}
+		dialer, err := proxy.SOCKS5("tcp", fmt.Sprintf("127.0.0.1:%d", port), &proxy.Auth{User: "test", Password: "test-password"}, &net.Dialer{Timeout: time.Second})
 		if err != nil {
 			t.Fatal(err)
 		}

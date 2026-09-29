@@ -3,6 +3,7 @@ package hcore
 import (
 	"context"
 
+	"github.com/Kiwunaka/POKROV-core/v2/config"
 	box "github.com/sagernet/sing-box"
 
 	"github.com/sagernet/sing-box/adapter"
@@ -15,6 +16,9 @@ import (
 )
 
 func NewService(ctx context.Context, options option.Options) (*daemon.StartedService, error) {
+	if err := config.ValidateProxyInbounds(&options); err != nil {
+		return nil, err
+	}
 
 	// ctx = filemanager.WithDefault(ctx, sWorkingPath, sTempPath, sUserID, sGroupID)
 	logInterface := LogInterface{}

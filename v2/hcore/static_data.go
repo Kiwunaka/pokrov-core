@@ -10,6 +10,7 @@ import (
 	"github.com/sagernet/sing-box/daemon"
 	"github.com/sagernet/sing-box/experimental/libbox"
 	"github.com/sagernet/sing-box/log"
+	"github.com/sagernet/sing/common/auth"
 )
 
 type PokrovInstance struct {
@@ -28,6 +29,7 @@ type PokrovInstance struct {
 	previousStartRequest      *StartRequest
 	debug                     bool
 	ListenPort                uint16
+	proxyUser                 auth.User
 	BaseContext               context.Context
 	endPauseTimer             *time.Timer // only for ios
 

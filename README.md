@@ -23,6 +23,12 @@ sessions when switching. Android exposes both calls through `mobile`; desktop
 ABI 2 adds optional `pokrovCoreSelectOutboundV1` and `pokrovCoreResetNetworkV1`
 exports whose returned strings must be released with `freeString`.
 
+Client profiles no longer create a mixed proxy by default. SOCKS, HTTP and
+mixed inbounds require nonempty usernames and passwords on every interface,
+including loopback. Empty XHTTP xmux uses the Xray 26.7.28 client defaults with
+three pooled clients and finite reuse; retired clients preserve active streams
+and close after their last user. This does not change the bridge Xray pin.
+
 ## Supported release targets
 
 | Target | Artifact | State |

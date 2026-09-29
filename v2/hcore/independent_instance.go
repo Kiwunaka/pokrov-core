@@ -2,6 +2,7 @@ package hcore
 
 import (
 	"context"
+	"crypto/rand"
 	"fmt"
 	"io"
 	"net"
@@ -12,6 +13,7 @@ import (
 	"golang.org/x/net/proxy"
 
 	"github.com/sagernet/sing-box/option"
+	"github.com/sagernet/sing/common/auth"
 )
 
 func getRandomAvailblePort() uint16 {
@@ -42,6 +44,9 @@ func RunInstance(ctx context.Context, pokrovSettings *config.PokrovOptions, sing
 	}
 	pokrovSettings.EnableClashApi = false
 	pokrovSettings.InboundOptions.MixedPort = getRandomAvailblePort()
+	proxyUser := auth.User{Username: rand.Text(), Password: rand.Text()}
+	pokrovSettings.InboundOptions.MixedUsers = []auth.User{proxyUser}
+	pokrovSettings.AllowConnectionFromLAN = false
 	pokrovSettings.InboundOptions.EnableTun = false
 	pokrovSettings.InboundOptions.EnableTunService = false
 	pokrovSettings.InboundOptions.SetSystemProxy = false
@@ -65,6 +70,7 @@ func RunInstance(ctx context.Context, pokrovSettings *config.PokrovOptions, sing
 	<-time.After(250 * time.Millisecond)
 	hservice := &PokrovInstance{
 		StartedService: instance,
+		proxyUser:      proxyUser,
 		ListenPort:     pokrovSettings.InboundOptions.MixedPort}
 	hservice.PingCloudflare()
 	return hservice, nil
@@ -93,7 +99,7 @@ func (s *PokrovInstance) ContentFromURL(method string, url string, timeout time.
 		return "", err
 	}
 
-	dialer, err := proxy.SOCKS5("tcp", fmt.Sprintf("127.0.0.1:%d", s.ListenPort), nil, proxy.Direct)
+	dialer, err := proxy.SOCKS5("tcp", fmt.Sprintf("127.0.0.1:%d", s.ListenPort), &proxy.Auth{User: s.proxyUser.Username, Password: s.proxyUser.Password}, proxy.Direct)
 	if err != nil {
 		return "", err
 	}

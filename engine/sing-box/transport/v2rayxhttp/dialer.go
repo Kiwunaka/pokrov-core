@@ -32,6 +32,8 @@ type DefaultDialerClient struct {
 	options       *option.V2RayXHTTPBaseOptions
 	client        *http.Client
 	closed        atomic.Bool
+	closeOnce     sync.Once
+	onClose       func()
 	ctx           context.Context
 	cancel        context.CancelFunc
 	connectionsMu sync.Mutex
@@ -77,16 +79,21 @@ func (c *DefaultDialerClient) ownConn(conn net.Conn) (net.Conn, error) {
 }
 
 func (c *DefaultDialerClient) Close() {
-	c.closed.Store(true)
-	c.cancel()
-	c.connectionsMu.Lock()
-	connections := c.connections
-	c.connections = make(map[*ownedConn]struct{})
-	c.connectionsMu.Unlock()
-	for conn := range connections {
-		conn.Close()
-	}
-	c.client.CloseIdleConnections()
+	c.closeOnce.Do(func() {
+		c.closed.Store(true)
+		c.cancel()
+		c.connectionsMu.Lock()
+		connections := c.connections
+		c.connections = make(map[*ownedConn]struct{})
+		c.connectionsMu.Unlock()
+		for conn := range connections {
+			conn.Close()
+		}
+		c.client.CloseIdleConnections()
+		if c.onClose != nil {
+			c.onClose()
+		}
+	})
 }
 
 func (c *DefaultDialerClient) OpenStream(ctx context.Context, url string, body io.Reader, uploadOnly bool) (wrc io.ReadCloser, remoteAddr, localAddr net.Addr, err error) {

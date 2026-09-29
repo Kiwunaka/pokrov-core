@@ -93,6 +93,9 @@ func BuildConfig(ctx context.Context, hopts *PokrovOptions, inputOpt *ReadOption
 	if err := setRoutingOptions(&options, hopts); err != nil {
 		return nil, err
 	}
+	if err := ValidateProxyInbounds(&options); err != nil {
+		return nil, err
+	}
 
 	return &options, nil
 }
@@ -503,25 +506,28 @@ func setInbound(options *option.Options, hopt *PokrovOptions) {
 	for _, bind := range binds {
 		addr := badoption.Addr(netip.MustParseAddr(bind))
 
-		options.Inbounds = append(
-			options.Inbounds,
-			option.Inbound{
-				Type: C.TypeMixed,
-				Tag:  InboundMixedTag + bind,
-				Options: &option.HTTPMixedInboundOptions{
-					ListenOptions: option.ListenOptions{
-						Listen:     &addr,
-						ListenPort: hopt.MixedPort,
-						// InboundOptions: option.InboundOptions{
-						// 	SniffEnabled:             true,
-						// 	SniffOverrideDestination: true,
-						// 	DomainStrategy:           inboundDomainStrategy,
-						// },
+		if hopt.MixedPort > 0 {
+			options.Inbounds = append(
+				options.Inbounds,
+				option.Inbound{
+					Type: C.TypeMixed,
+					Tag:  InboundMixedTag + bind,
+					Options: &option.HTTPMixedInboundOptions{
+						ListenOptions: option.ListenOptions{
+							Listen:     &addr,
+							ListenPort: hopt.MixedPort,
+							// InboundOptions: option.InboundOptions{
+							// 	SniffEnabled:             true,
+							// 	SniffOverrideDestination: true,
+							// 	DomainStrategy:           inboundDomainStrategy,
+							// },
+						},
+						SetSystemProxy: hopt.SetSystemProxy,
+						Users:          hopt.MixedUsers,
 					},
-					SetSystemProxy: hopt.SetSystemProxy,
 				},
-			},
-		)
+			)
+		}
 		if C.IsLinux && !C.IsAndroid && hopt.TProxyPort > 0 && hutils.IsAdmin() {
 			options.Inbounds = append(
 				options.Inbounds,

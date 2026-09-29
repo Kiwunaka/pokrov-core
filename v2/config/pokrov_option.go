@@ -8,6 +8,7 @@ import (
 
 	"github.com/sagernet/sing-box/option"
 	dns "github.com/sagernet/sing-dns"
+	"github.com/sagernet/sing/common/auth"
 )
 
 type PokrovOptions struct {
@@ -48,16 +49,17 @@ type DNSOptions struct {
 }
 
 type InboundOptions struct {
-	EnableTun        bool   `json:"enable-tun,omitempty"`
-	EnableTunService bool   `json:"enable-tun-service,omitempty"`
-	SetSystemProxy   bool   `json:"set-system-proxy,omitempty"`
-	MixedPort        uint16 `json:"mixed-port,omitempty"`
-	TProxyPort       uint16 `json:"tproxy-port,omitempty"`
-	RedirectPort     uint16 `json:"redirect-port,omitempty"`
-	DirectPort       uint16 `json:"direct-port,omitempty"`
-	MTU              uint32 `json:"mtu,omitempty"`
-	StrictRoute      bool   `json:"strict-route,omitempty"`
-	TUNStack         string `json:"tun-implementation,omitempty"`
+	EnableTun        bool        `json:"enable-tun,omitempty"`
+	EnableTunService bool        `json:"enable-tun-service,omitempty"`
+	SetSystemProxy   bool        `json:"set-system-proxy,omitempty"`
+	MixedPort        uint16      `json:"mixed-port,omitempty"`
+	MixedUsers       []auth.User `json:"mixed-users,omitempty"`
+	TProxyPort       uint16      `json:"tproxy-port,omitempty"`
+	RedirectPort     uint16      `json:"redirect-port,omitempty"`
+	DirectPort       uint16      `json:"direct-port,omitempty"`
+	MTU              uint32      `json:"mtu,omitempty"`
+	StrictRoute      bool        `json:"strict-route,omitempty"`
+	TUNStack         string      `json:"tun-implementation,omitempty"`
 }
 
 type URLTestOptions struct {
@@ -121,7 +123,7 @@ func DefaultPokrovOptions() *PokrovOptions {
 		InboundOptions: InboundOptions{
 			EnableTun:      false,
 			SetSystemProxy: false,
-			MixedPort:      12334,
+			MixedPort:      0,
 			TProxyPort:     12335,
 			RedirectPort:   12336,
 			DirectPort:     12337,
