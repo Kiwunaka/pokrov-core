@@ -7,7 +7,9 @@ import (
 
 	box "github.com/sagernet/sing-box"
 	"github.com/sagernet/sing-box/adapter"
+	"github.com/sagernet/sing-box/common/trafficcontrol"
 	"github.com/sagernet/sing-box/common/urltest"
+	"github.com/sagernet/sing-box/experimental/clashmode"
 	"github.com/sagernet/sing-box/experimental/deprecated"
 	"github.com/sagernet/sing-box/include"
 	"github.com/sagernet/sing-box/option"
@@ -22,12 +24,13 @@ type Instance struct {
 	ctx                   context.Context
 	cancel                context.CancelFunc
 	instance              *box.Box
-	clashServer           adapter.ClashServer
+	clashMode             *clashmode.Manager
+	trafficManager        *trafficcontrol.Manager
 	cacheFile             adapter.CacheFile
 	pauseManager          pause.Manager
 	urlTestHistoryStorage *urltest.HistoryStorage
 	// Accessed only under StartedService.serviceAccess; worker context is owned by this instance.
-	smartAccessControl    *smartAccessRuntimeControlWorker
+	smartAccessControl            *smartAccessRuntimeControlWorker
 	smartAccessRestrictionExpires time.Time
 }
 
@@ -115,7 +118,8 @@ func (s *StartedService) newInstanceOptions(options option.Options, overrideOpti
 	}
 	i.instance = boxInstance
 	i.smartAccessRestrictionExpires = smartAccessProfileRestrictionExpiry(options)
-	i.clashServer = service.FromContext[adapter.ClashServer](ctx)
+	i.clashMode = service.PtrFromContext[clashmode.Manager](ctx)
+	i.trafficManager = service.PtrFromContext[trafficcontrol.Manager](ctx)
 	i.pauseManager = service.FromContext[pause.Manager](ctx)
 	i.cacheFile = service.FromContext[adapter.CacheFile](ctx)
 	return i, nil
@@ -158,6 +162,6 @@ func (i *Instance) Context() context.Context {
 func (i *Instance) CacheFile() adapter.CacheFile {
 	return i.cacheFile
 }
-func (i *Instance) ClashServer() adapter.ClashServer {
-	return i.clashServer
+func (i *Instance) TrafficManager() *trafficcontrol.Manager {
+	return i.trafficManager
 }

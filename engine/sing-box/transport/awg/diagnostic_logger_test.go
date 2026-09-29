@@ -20,6 +20,10 @@ func testSafeDeviceLogger(t *testing.T) (*bytes.Buffer, func(string, ...any), fu
 		nil,
 		false,
 	)
+	if err := factory.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = factory.Close() })
 	deviceLogger := newSafeDeviceLogger(factory.Logger())
 	return &output, deviceLogger.Verbosef, deviceLogger.Errorf
 }

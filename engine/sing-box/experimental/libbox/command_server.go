@@ -295,7 +295,7 @@ func (s *CommandServer) ResetNetwork() {
 	if instance == nil || instance.Box() == nil {
 		return
 	}
-	instance.Box().Router().ResetNetwork()
+	instance.Box().Network().ResetNetwork(instance.Context())
 }
 
 func (s *CommandServer) UpdateWIFIState() {
@@ -303,7 +303,7 @@ func (s *CommandServer) UpdateWIFIState() {
 	if instance == nil || instance.Box() == nil {
 		return
 	}
-	instance.Box().Network().UpdateWIFIState()
+	instance.Box().Network().UpdateWIFIState(instance.Context())
 }
 
 type platformHandler CommandServer

@@ -3,6 +3,8 @@ package option
 import "github.com/sagernet/sing/common/json/badoption"
 
 type SSHOutboundOptions struct {
+	UDPOverTCP *UDPOverTCPOptions `json:"udp_over_tcp,omitempty"`
+	Network    NetworkList        `json:"network,omitempty"`
 	DialerOptions
 	ServerOptions
 	User                 string                     `json:"user,omitempty"`
@@ -13,8 +15,9 @@ type SSHOutboundOptions struct {
 	HostKey              badoption.Listable[string] `json:"host_key,omitempty"`
 	HostKeyAlgorithms    badoption.Listable[string] `json:"host_key_algorithms,omitempty"`
 	ClientVersion        string                     `json:"client_version,omitempty"`
-	UDPOverTCP           *UDPOverTCPOptions         `json:"udp_over_tcp,omitempty"`
-	Network              NetworkList                `json:"network,omitempty"`
+	Cipher               badoption.Listable[string] `json:"cipher,omitempty"`
+	MAC                  badoption.Listable[string] `json:"mac,omitempty"`
+	KexAlgorithm         badoption.Listable[string] `json:"kex_algorithm,omitempty"`
 }
 
 type SSHInboundOptions struct {

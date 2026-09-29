@@ -132,7 +132,7 @@ func (i *Service) Close() error {
 	return i.listener.Close()
 }
 
-func (i *Service) NewConnectionEx(ctx context.Context, conn net.Conn, metadata adapter.InboundContext, onClose N.CloseHandlerFunc) {
+func (i *Service) NewConnection(ctx context.Context, conn net.Conn, metadata adapter.InboundContext, onClose N.CloseHandlerFunc) {
 	metadata.Inbound = i.Tag()
 	metadata.InboundType = i.Type()
 	metadata.Destination = M.Socksaddr{}
@@ -146,7 +146,7 @@ func (i *Service) NewConnectionEx(ctx context.Context, conn net.Conn, metadata a
 	}
 }
 
-func (i *Service) NewPacketEx(buffer *buf.Buffer, oob []byte, source M.Socksaddr) {
+func (i *Service) NewPacket(buffer *buf.Buffer, oob []byte, source M.Socksaddr) {
 	go i.exchangePacket(buffer, oob, source)
 }
 
@@ -173,7 +173,7 @@ func (i *Service) exchangePacket0(ctx context.Context, buffer *buf.Buffer, oob [
 	if err != nil {
 		return err
 	}
-	responseBuffer, err := dns.TruncateDNSMessage(&message, response, 0)
+	responseBuffer, err := dns.TruncateDNSMessage(&message, response, 0, 0)
 	if err != nil {
 		return err
 	}
@@ -185,12 +185,12 @@ func (i *Service) exchangePacket0(ctx context.Context, buffer *buf.Buffer, oob [
 func (i *Service) onNetworkUpdate() {
 	i.linkAccess.Lock()
 	defer i.linkAccess.Unlock()
-	var deleteIfIndex []int
 	for ifIndex, link := range i.links {
-		iif, err := i.network.InterfaceFinder().ByIndex(int(ifIndex))
-		if err != nil || iif != link.iif {
-			deleteIfIndex = append(deleteIfIndex, int(ifIndex))
+		netInterface, err := net.InterfaceByIndex(int(ifIndex))
+		if err == nil && netInterface.Name == link.iif.Name {
+			continue
 		}
+		delete(i.links, ifIndex)
 		i.defaultRouteSequence = common.Filter(i.defaultRouteSequence, func(it int32) bool {
 			return it != ifIndex
 		})
@@ -198,16 +198,15 @@ func (i *Service) onNetworkUpdate() {
 			i.deleteCallback(link)
 		}
 	}
-	for _, ifIndex := range deleteIfIndex {
-		delete(i.links, int32(ifIndex))
-	}
 }
 
 func (conf *TransportLink) nameList(ndots int, name string) []string {
-	search := common.Map(common.Filter(conf.domain, func(it LinkDomain) bool {
+	search := common.Filter(common.Map(common.Filter(conf.domain, func(it LinkDomain) bool {
 		return !it.RoutingOnly
 	}), func(it LinkDomain) string {
-		return it.Domain
+		return mDNS.Fqdn(it.Domain)
+	}), func(it string) bool {
+		return it != "."
 	})
 
 	l := len(name)

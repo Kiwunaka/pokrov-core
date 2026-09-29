@@ -6,6 +6,26 @@ POKROV Core is one client runtime with three layers:
 2. `v2/` owns setup, configuration, lifecycle, WARP, DNS, and safe shutdown behavior.
 3. `engine/sing-box/` owns transports, routing, TLS, TUN, and protocol implementations.
 
+The opt-in `pokrov-telegram-ws` outbound accepts an explicit Telegram DC address
+table and an existing encrypted `vpn_outbound`. Only native obfuscated TCP:443
+flows in that table can use TLS-verified `kwsN.web.telegram.org/apiws` with the
+binary WebSocket protocol and the existing protected platform dialer. The
+original initialization and ciphertext stay unchanged. Unsupported formats,
+other destinations, UDP, and failed WSS setup retain the VPN path; a WSS failure
+after transmission closes that stream and sends subsequent DC flows through
+VPN until the runtime restarts, without replaying ciphertext. Host policy must
+keep explicit VPN application choices ahead of this service rule. This source
+addition is not advertised as a compiled capability or enabled by the app.
+
+The device-local WARP path registers on the device and caches its material by
+`install_unique_id`; a caller must use its own authenticated installation ID
+and cannot reuse another installation's material. First TCP and UDP operations
+wait for initialization through their context, while Close wakes pending
+operations and closes an endpoint that arrives later. Cloudflare `client_id`
+supplies the three reserved bytes, IPv6 peer addresses are preserved, and
+malformed addresses return an error. Existing packet masking remains in place;
+network updates reach the internal WireGuard bind.
+
 The pinned `replace/sing-tun` module closes the Windows adapter immediately if
 session creation fails. Its finalizer passes the actual adapter handle to
 `WintunCloseAdapter`. The [patch record](../engine/sing-box/replace/sing-tun/POKROV-PATCHES.md)

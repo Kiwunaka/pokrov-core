@@ -90,10 +90,14 @@ func (o *tunOptions) GetInet6Address() RoutePrefixIterator {
 }
 
 func (o *tunOptions) GetDNSServerAddress() (*StringBox, error) {
-	if len(o.Inet4Address) == 0 || o.Inet4Address[0].Bits() == 32 {
-		return nil, E.New("need one more IPv4 address for DNS hijacking")
+	dnsServers, err := o.Options.DNSServerAddress()
+	if err != nil {
+		return nil, err
 	}
-	return wrapString(o.Inet4Address[0].Addr().Next().String()), nil
+	if len(dnsServers) == 0 {
+		return nil, E.New("no DNS server address configured")
+	}
+	return wrapString(dnsServers[0].String()), nil
 }
 
 func (o *tunOptions) GetMTU() int32 {

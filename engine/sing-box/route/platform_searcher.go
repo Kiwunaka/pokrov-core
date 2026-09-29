@@ -43,3 +43,10 @@ func (s *platformSearcher) FindProcessInfo(ctx context.Context, network string, 
 
 	return s.platform.FindConnectionOwner(request)
 }
+
+func (s *platformSearcher) ResetCache() {
+}
+
+func (s *platformSearcher) Close() error {
+	return nil
+}

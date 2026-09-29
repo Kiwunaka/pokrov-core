@@ -149,19 +149,18 @@ func nftablesCreateIPSet(
 		if (family == nftables.TableFamilyIPv4) != rr.From().Is4() {
 			continue
 		}
-		endAddr := rr.To().Next()
-		if !endAddr.IsValid() {
-			endAddr = rr.From()
-		}
 		setElements = append(setElements, nftables.SetElement{
 			Key: rr.From().AsSlice(),
 		})
-		setElements = append(setElements, nftables.SetElement{
-			Key:         endAddr.AsSlice(),
-			IntervalEnd: true,
-		})
+		endAddr := rr.To().Next()
+		if endAddr.IsValid() {
+			setElements = append(setElements, nftables.SetElement{
+				Key:         endAddr.AsSlice(),
+				IntervalEnd: true,
+			})
+		}
 	}
-	if len(prefixList) == 0 && appendDefault {
+	if appendDefault && len(setElements) == 0 {
 		if family == nftables.TableFamilyIPv4 {
 			setElements = append(setElements, nftables.SetElement{
 				Key: netip.IPv4Unspecified().AsSlice(),

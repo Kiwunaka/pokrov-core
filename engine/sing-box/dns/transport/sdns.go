@@ -71,3 +71,7 @@ func (t *SDNSTransport) Exchange(ctx context.Context, message *mDNS.Msg) (*mDNS.
 
 func (t *SDNSTransport) Reset() {
 }
+
+func (t *SDNSTransport) ExchangeAsync(ctx context.Context, message *mDNS.Msg, callback func(response *mDNS.Msg, err error)) {
+	go func() { callback(t.Exchange(ctx, message)) }()
+}

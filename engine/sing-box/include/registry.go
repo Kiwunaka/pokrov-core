@@ -1,3 +1,5 @@
+//go:build !pokrov_client
+
 package include
 
 import (
@@ -28,6 +30,7 @@ import (
 	"github.com/sagernet/sing-box/protocol/pokrov/atslease"
 	"github.com/sagernet/sing-box/protocol/pokrov/hinvalid"
 	"github.com/sagernet/sing-box/protocol/pokrov/smartaccess"
+	"github.com/sagernet/sing-box/protocol/pokrov/telegramws"
 
 	"github.com/sagernet/sing-box/protocol/pokrov/xray"
 	"github.com/sagernet/sing-box/protocol/http"
@@ -52,7 +55,7 @@ import (
 )
 
 func Context(ctx context.Context) context.Context {
-	return box.Context(ctx, InboundRegistry(), OutboundRegistry(), EndpointRegistry(), DNSTransportRegistry(), ServiceRegistry())
+	return box.Context(ctx, InboundRegistry(), OutboundRegistry(), EndpointRegistry(), DNSTransportRegistry(), ServiceRegistry(), CertificateProviderRegistry())
 }
 
 func InboundRegistry() *inbound.Registry {
@@ -89,6 +92,7 @@ func OutboundRegistry() *outbound.Registry {
 	direct.RegisterOutbound(registry)
 	atslease.RegisterOutbound(registry)
 	smartaccess.RegisterOutbound(registry)
+	telegramws.RegisterOutbound(registry)
 
 	block.RegisterOutbound(registry)
 	protocolDNS.RegisterOutbound(registry)

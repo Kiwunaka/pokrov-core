@@ -18,7 +18,7 @@
   },
   "dependency": {
     "module": "github.com/sagernet/sing-box",
-    "version": "v1.13.0",
+    "version": "v1.14.2",
     "license": "GPL-3.0-or-later",
     "notice": "engine/sing-box/LICENSE"
   },

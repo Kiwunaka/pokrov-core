@@ -1,4 +1,4 @@
-// Copyright (c) Tailscale Inc & AUTHORS
+// Copyright (c) Tailscale Inc & contributors
 // SPDX-License-Identifier: BSD-3-Clause
 
 // Package netns contains the common code for using the Go net package
@@ -19,13 +19,47 @@ import (
 	"net/netip"
 	"runtime"
 	"sync/atomic"
+	"syscall"
 
 	"github.com/sagernet/tailscale/net/netknob"
 	"github.com/sagernet/tailscale/net/netmon"
 	"github.com/sagernet/tailscale/types/logger"
+	"github.com/sagernet/tailscale/types/nettype"
 )
 
 var disabled atomic.Bool
+
+var controlOverride atomic.Pointer[func(network, address string, c syscall.RawConn) error]
+
+// SetControlFunc sets a custom control function that overrides the
+// platform-specific socket control (SO_MARK, SO_BINDTODEVICE, etc.)
+// for both Listener and FromDialer paths.
+// Pass nil to restore the default platform behavior.
+func SetControlFunc(f func(network, address string, c syscall.RawConn) error) {
+	if f != nil {
+		controlOverride.Store(&f)
+	} else {
+		controlOverride.Store(nil)
+	}
+}
+
+var listenPacketOverride atomic.Pointer[func(ctx context.Context, network, address string) (nettype.PacketConn, error)]
+
+func SetListenPacketFunc(listenPacketFunc func(ctx context.Context, network, address string) (nettype.PacketConn, error)) {
+	if listenPacketFunc != nil {
+		listenPacketOverride.Store(&listenPacketFunc)
+	} else {
+		listenPacketOverride.Store(nil)
+	}
+}
+
+func ListenPacketFunc() func(ctx context.Context, network, address string) (nettype.PacketConn, error) {
+	listenPacketFunc := listenPacketOverride.Load()
+	if listenPacketFunc != nil {
+		return *listenPacketFunc
+	}
+	return nil
+}
 
 // SetEnabled enables or disables netns for the process.
 // It defaults to being enabled.
@@ -43,6 +77,18 @@ var bindToInterfaceByRoute atomic.Bool
 func SetBindToInterfaceByRoute(logf logger.Logf, v bool) {
 	if bindToInterfaceByRoute.Swap(v) != v {
 		logf("netns: bindToInterfaceByRoute changed to %v", v)
+	}
+}
+
+// When true, disableAndroidBindToActiveNetwork skips binding sockets to the currently
+// active network on Android.
+var disableAndroidBindToActiveNetwork atomic.Bool
+
+// SetDisableAndroidBindToActiveNetwork disables the default behavior of binding
+// sockets to the currently active network on Android.
+func SetDisableAndroidBindToActiveNetwork(logf logger.Logf, v bool) {
+	if runtime.GOOS == "android" && disableAndroidBindToActiveNetwork.Swap(v) != v {
+		logf("netns: disableAndroidBindToActiveNetwork changed to %v", v)
 	}
 }
 
@@ -81,6 +127,9 @@ func Listener(logf logger.Logf, netMon *netmon.Monitor) *net.ListenConfig {
 	}
 	if disabled.Load() {
 		return new(net.ListenConfig)
+	}
+	if f := controlOverride.Load(); f != nil {
+		return &net.ListenConfig{Control: *f}
 	}
 	return &net.ListenConfig{Control: control(logf, netMon)}
 }
@@ -121,7 +170,11 @@ func FromDialer(logf logger.Logf, netMon *netmon.Monitor, d *net.Dialer, ad bool
 	if disabled.Load() {
 		return d
 	}
-	d.Control = control(logf, netMon)
+	if f := controlOverride.Load(); f != nil {
+		d.Control = *f
+	} else {
+		d.Control = control(logf, netMon)
+	}
 	if wrapDialer != nil {
 		return wrapDialer(d)
 	}

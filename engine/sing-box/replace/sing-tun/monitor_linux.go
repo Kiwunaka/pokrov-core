@@ -1,12 +1,12 @@
 package tun
 
 import (
+	"errors"
 	"os"
 	"runtime"
 	"sync"
 	"time"
 
-	"github.com/sagernet/netlink"
 	E "github.com/sagernet/sing/common/exceptions"
 	"github.com/sagernet/sing/common/logger"
 	"github.com/sagernet/sing/common/x/list"
@@ -14,10 +14,19 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+const (
+	netlinkGroups = unix.RTMGRP_LINK |
+		unix.RTMGRP_IPV4_IFADDR |
+		unix.RTMGRP_IPV6_IFADDR |
+		unix.RTMGRP_IPV4_ROUTE |
+		unix.RTMGRP_IPV6_ROUTE
+	netlinkReceiveBufferSize = 1 << 20
+)
+
 type networkUpdateMonitor struct {
-	routeUpdate chan netlink.RouteUpdate
-	linkUpdate  chan netlink.LinkUpdate
-	close       chan struct{}
+	socket *os.File
+	update chan struct{}
+	close  chan struct{}
 
 	access    sync.Mutex
 	callbacks list.List[NetworkUpdateCallback]
@@ -32,10 +41,9 @@ var ErrNetlinkBanned = E.New(
 
 func NewNetworkUpdateMonitor(logger logger.Logger) (NetworkUpdateMonitor, error) {
 	monitor := &networkUpdateMonitor{
-		routeUpdate: make(chan netlink.RouteUpdate, 2),
-		linkUpdate:  make(chan netlink.LinkUpdate, 2),
-		close:       make(chan struct{}),
-		logger:      logger,
+		update: make(chan struct{}, 1),
+		close:  make(chan struct{}),
+		logger: logger,
 	}
 	// check is netlink banned by google
 	if runtime.GOOS == "android" {
@@ -55,36 +63,77 @@ func NewNetworkUpdateMonitor(logger logger.Logger) (NetworkUpdateMonitor, error)
 }
 
 func (m *networkUpdateMonitor) Start() error {
-	err := netlink.RouteSubscribe(m.routeUpdate, m.close)
+	netlinkSocket, err := unix.Socket(unix.AF_NETLINK, unix.SOCK_RAW|unix.SOCK_CLOEXEC|unix.SOCK_NONBLOCK, unix.NETLINK_ROUTE)
 	if err != nil {
-		return err
+		return E.Cause(err, "create netlink socket")
 	}
-	err = netlink.LinkSubscribe(m.linkUpdate, m.close)
+	err = unix.Bind(netlinkSocket, &unix.SockaddrNetlink{
+		Family: unix.AF_NETLINK,
+		Groups: netlinkGroups,
+	})
 	if err != nil {
-		return err
+		unix.Close(netlinkSocket)
+		return E.Cause(err, "subscribe netlink groups")
 	}
-	go m.loopUpdate()
+	err = unix.SetsockoptInt(netlinkSocket, unix.SOL_SOCKET, unix.SO_RCVBUFFORCE, netlinkReceiveBufferSize)
+	if err != nil {
+		unix.SetsockoptInt(netlinkSocket, unix.SOL_SOCKET, unix.SO_RCVBUF, netlinkReceiveBufferSize)
+	}
+	m.socket = os.NewFile(uintptr(netlinkSocket), "netlink")
+	go m.loopRead()
+	go m.loopUpdate(time.Second)
 	return nil
 }
 
-func (m *networkUpdateMonitor) loopUpdate() {
-	const minDuration = time.Second
+func (m *networkUpdateMonitor) loopRead() {
+	buffer := make([]byte, unix.Getpagesize())
+	for {
+		_, err := m.socket.Read(buffer)
+		if err != nil && !errors.Is(err, unix.ENOBUFS) {
+			select {
+			case <-m.close:
+			default:
+				m.logger.Error("read netlink socket: ", err)
+			}
+			return
+		}
+		select {
+		case m.update <- struct{}{}:
+		default:
+		}
+	}
+}
+
+func (m *networkUpdateMonitor) loopUpdate(minDuration time.Duration) {
 	timer := time.NewTimer(minDuration)
+	timer.Stop()
 	defer timer.Stop()
+	var (
+		timerC  <-chan time.Time
+		pending bool
+	)
 	for {
 		select {
 		case <-m.close:
 			return
-		case <-m.routeUpdate:
-		case <-m.linkUpdate:
+		case <-m.update:
+		case <-timerC:
+			if pending {
+				m.emit()
+				pending = false
+				timer.Reset(minDuration)
+				continue
+			}
+			timerC = nil
+			continue
+		}
+		if timerC != nil {
+			pending = true
+			continue
 		}
 		m.emit()
-		select {
-		case <-m.close:
-			return
-		case <-timer.C:
-			timer.Reset(minDuration)
-		}
+		timer.Reset(minDuration)
+		timerC = timer.C
 	}
 }
 
@@ -95,5 +144,8 @@ func (m *networkUpdateMonitor) Close() error {
 	default:
 	}
 	close(m.close)
+	if m.socket != nil {
+		return m.socket.Close()
+	}
 	return nil
 }

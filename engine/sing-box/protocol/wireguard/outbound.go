@@ -4,17 +4,14 @@ import (
 	"context"
 	"net"
 	"net/netip"
-	"time"
 
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/adapter/outbound"
 	"github.com/sagernet/sing-box/common/dialer"
 	C "github.com/sagernet/sing-box/constant"
-	"github.com/sagernet/sing-box/experimental/deprecated"
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing-box/transport/wireguard"
-	tun "github.com/sagernet/sing-tun"
 	"github.com/sagernet/sing/common"
 	E "github.com/sagernet/sing/common/exceptions"
 	"github.com/sagernet/sing/common/logger"
@@ -39,10 +36,6 @@ type Outbound struct {
 }
 
 func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, options option.LegacyWireGuardOutboundOptions) (adapter.Outbound, error) {
-	deprecated.Report(ctx, deprecated.OptionWireGuardOutbound)
-	if options.GSO {
-		deprecated.Report(ctx, deprecated.OptionWireGuardGSO)
-	}
 	outbound := &Outbound{
 		Adapter:        outbound.NewAdapterWithDialerOptions(C.TypeWireGuard, tag, []string{N.NetworkTCP, N.NetworkUDP, N.NetworkICMP}, options.DialerOptions),
 		ctx:            ctx,
@@ -85,25 +78,25 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 	}
 
 	wgEndpoint, err := wireguard.NewEndpoint(wireguard.EndpointOptions{
-		Context: ctx,
-		Logger:  logger,
-		System:  options.SystemInterface,
-		Dialer:  outboundDialer,
+		Tag:             tag,
+		InterfaceFinder: service.FromContext[adapter.NetworkManager](ctx).InterfaceFinder(),
+		Context:         ctx,
+		Logger:          logger,
+		System:          options.SystemInterface,
+		Dialer:          outboundDialer,
 		CreateDialer: func(interfaceName string) N.Dialer {
 			return common.Must1(dialer.NewDefault(ctx, option.DialerOptions{
-				BindInterface: interfaceName,
+				AbstractDialerOptions: option.AbstractDialerOptions{
+					BindInterface: interfaceName,
+				},
 			}))
 		},
 		Name:       options.InterfaceName,
 		MTU:        options.MTU,
 		Address:    options.LocalAddress,
 		PrivateKey: options.PrivateKey,
-		ResolvePeer: func(domain string) (netip.Addr, error) {
-			endpointAddresses, lookupErr := outbound.dnsRouter.Lookup(ctx, domain, outboundDialer.(dialer.ResolveDialer).QueryOptions())
-			if lookupErr != nil {
-				return netip.Addr{}, lookupErr
-			}
-			return endpointAddresses[0], nil
+		ResolvePeer: func(domain string) ([]netip.Addr, error) {
+			return outbound.dnsRouter.Lookup(ctx, domain, outboundDialer.(dialer.ResolveDialer).QueryOptions())
 		},
 		Peers:                      peers,
 		Workers:                    options.Workers,
@@ -167,14 +160,10 @@ func (o *Outbound) ListenPacket(ctx context.Context, destination M.Socksaddr) (n
 	return o.endpoint.ListenPacket(ctx, destination)
 }
 
-func (o *Outbound) PreferredDomain(domain string) bool {
+func (o *Outbound) PreferredDomain(metadata *adapter.InboundContext, domain string) bool {
 	return false
 }
 
-func (o *Outbound) PreferredAddress(address netip.Addr) bool {
+func (o *Outbound) PreferredAddress(metadata *adapter.InboundContext, address netip.Addr) bool {
 	return o.endpoint.Lookup(address) != nil
-}
-
-func (o *Outbound) NewDirectRouteConnection(metadata adapter.InboundContext, routeContext tun.DirectRouteContext, timeout time.Duration) (tun.DirectRouteDestination, error) {
-	return o.endpoint.NewDirectRouteConnection(metadata, routeContext, timeout)
 }

@@ -77,15 +77,9 @@ func NewInbound(ctx context.Context, router adapter.Router, logger log.ContextLo
 		ReceiveBPS:    receiveBps,
 		XPlusPassword: options.Obfs,
 		TLSConfig:     tlsConfig,
+		QUICOptions:   buildInboundQUICOptions(options),
 		UDPTimeout:    udpTimeout,
 		Handler:       inbound,
-
-		// Legacy options
-
-		ConnReceiveWindow:   options.ReceiveWindowConn,
-		StreamReceiveWindow: options.ReceiveWindowClient,
-		MaxIncomingStreams:  int64(options.MaxConnClient),
-		DisableMTUDiscovery: options.DisableMTUDiscovery,
 	})
 	if err != nil {
 		return nil, err
@@ -118,7 +112,6 @@ func (h *Inbound) NewConnectionEx(ctx context.Context, conn net.Conn, source M.S
 	//nolint:staticcheck
 	metadata.InboundDetour = h.listener.ListenOptions().Detour
 	//nolint:staticcheck
-	metadata.InboundOptions = h.listener.ListenOptions().InboundOptions
 	metadata.OriginDestination = h.listener.UDPAddr()
 	metadata.Source = source
 	metadata.Destination = destination
@@ -141,7 +134,6 @@ func (h *Inbound) NewPacketConnectionEx(ctx context.Context, conn N.PacketConn, 
 	//nolint:staticcheck
 	metadata.InboundDetour = h.listener.ListenOptions().Detour
 	//nolint:staticcheck
-	metadata.InboundOptions = h.listener.ListenOptions().InboundOptions
 	metadata.OriginDestination = h.listener.UDPAddr()
 	metadata.Source = source
 	metadata.Destination = destination

@@ -14,20 +14,21 @@ import (
 )
 
 const catalogTimeLayout = "2006-01-02T15:04:05Z"
+
 var catalogLeaseIDPattern = regexp.MustCompile(`^[a-f0-9]{32}$`)
 var catalogServiceIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
 
 type catalogRuleWindow struct {
-	issuedAt  time.Time
-	expiresAt time.Time
-	deadline  time.Time
-	expired   atomic.Bool
-	leaseID string
-	serviceID string
-	outbounds adapter.OutboundManager
-	lease *smartaccess.Outbound
+	issuedAt      time.Time
+	expiresAt     time.Time
+	deadline      time.Time
+	expired       atomic.Bool
+	leaseID       string
+	serviceID     string
+	outbounds     adapter.OutboundManager
+	lease         *smartaccess.Outbound
 	leaseGroupIDs []string
-	leaseGroup *smartaccess.ServiceLeaseGroup
+	leaseGroup    *smartaccess.ServiceLeaseGroup
 }
 
 func newCatalogRuleWindow(ctx context.Context, options *option.PokrovCatalogWindow, invert bool, domains int) (*catalogRuleWindow, error) {
@@ -61,7 +62,9 @@ func newCatalogRuleWindow(ctx context.Context, options *option.PokrovCatalogWind
 		}
 		window.leaseID = options.LeaseID
 		window.outbounds = service.FromContext[adapter.OutboundManager](ctx)
-		if window.outbounds == nil { return nil, errors.New("catalog_window_lease_unavailable") }
+		if window.outbounds == nil {
+			return nil, errors.New("catalog_window_lease_unavailable")
+		}
 	}
 	if options.ServiceID != "" {
 		if !catalogServiceIDPattern.MatchString(options.ServiceID) {
@@ -75,10 +78,14 @@ func newCatalogRuleWindow(ctx context.Context, options *option.PokrovCatalogWind
 		}
 		seen := make(map[string]bool)
 		for _, id := range options.LeaseGroup {
-			if !catalogLeaseIDPattern.MatchString(id) || seen[id] { return nil, errors.New("catalog_window_group_invalid") }
+			if !catalogLeaseIDPattern.MatchString(id) || seen[id] {
+				return nil, errors.New("catalog_window_group_invalid")
+			}
 			seen[id] = true
 		}
-		if !seen[window.leaseID] { return nil, errors.New("catalog_window_group_invalid") }
+		if !seen[window.leaseID] {
+			return nil, errors.New("catalog_window_group_invalid")
+		}
 		window.leaseGroupIDs = append([]string(nil), options.LeaseGroup...)
 	}
 	if !now.Before(expires) {
@@ -88,7 +95,9 @@ func newCatalogRuleWindow(ctx context.Context, options *option.PokrovCatalogWind
 }
 
 func (w *catalogRuleWindow) start() error {
-	if w.leaseID == "" { return nil }
+	if w.leaseID == "" {
+		return nil
+	}
 	raw, found := w.outbounds.Outbound("pokrov-smart-access-" + w.leaseID)
 	lease, supported := raw.(*smartaccess.Outbound)
 	if !found || !supported || lease.LeaseID() != w.leaseID {
@@ -100,11 +109,15 @@ func (w *catalogRuleWindow) start() error {
 		for _, id := range w.leaseGroupIDs {
 			raw, found := w.outbounds.Outbound("pokrov-smart-access-" + id)
 			member, supported := raw.(*smartaccess.Outbound)
-			if !found || !supported || member.LeaseID() != id { return errors.New("catalog_window_group_unavailable") }
+			if !found || !supported || member.LeaseID() != id {
+				return errors.New("catalog_window_group_unavailable")
+			}
 			members = append(members, member)
 		}
 		group, err := members[0].ServiceLeaseGroup(w.serviceID, members)
-		if err != nil { return err }
+		if err != nil {
+			return err
+		}
 		w.leaseGroup = group
 	}
 	return nil
@@ -130,7 +143,9 @@ func (w *catalogRuleWindow) selected() bool {
 }
 
 func (w *catalogRuleWindow) smartAccessDNSFailed() bool {
-	if w == nil || w.leaseGroup == nil || w.lease == nil { return false }
+	if w == nil || w.leaseGroup == nil || w.lease == nil {
+		return false
+	}
 	w.leaseGroup.DNSFailed(w.lease)
 	return true
 }

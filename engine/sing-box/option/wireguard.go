@@ -9,6 +9,9 @@ import (
 )
 
 type WireGuardEndpointOptions struct {
+	PreallocatedBuffersPerPool uint32                           `json:"preallocated_buffers_per_pool,omitempty"`
+	DisablePauses              bool                             `json:"disable_pauses,omitempty"`
+	Noise                      pokrov.NoiseOptions              `json:"noise,omitempty"`
 	System                     bool                             `json:"system,omitempty"`
 	Name                       string                           `json:"name,omitempty"`
 	MTU                        uint32                           `json:"mtu,omitempty"`
@@ -17,12 +20,11 @@ type WireGuardEndpointOptions struct {
 	ListenPort                 uint16                           `json:"listen_port,omitempty"`
 	Peers                      []WireGuardPeer                  `json:"peers,omitempty"`
 	UDPTimeout                 badoption.Duration               `json:"udp_timeout,omitempty"`
+	UDPMapping                 UDPNATBehavior                   `json:"udp_mapping,omitempty"`
+	UDPFiltering               UDPNATBehavior                   `json:"udp_filtering,omitempty"`
+	UDPNATMax                  uint32                           `json:"udp_nat_max,omitempty"`
 	Workers                    int                              `json:"workers,omitempty"`
-	PreallocatedBuffersPerPool uint32                           `json:"preallocated_buffers_per_pool,omitempty"`
-	DisablePauses              bool                             `json:"disable_pauses,omitempty"`
 	DialerOptions
-
-	Noise pokrov.NoiseOptions `json:"noise,omitempty"`
 }
 
 type WireGuardPeer struct {
@@ -46,11 +48,11 @@ type WireGuardWARPEndpointOptions struct {
 	Profile                    WARPProfile        `json:"profile,omitempty"`
 	DialerOptions
 
-	UniqueIdentifier string               `json:"unique_identifier,omitempty"` //h
-	ServerOptions                         //H
+	UniqueIdentifier string              `json:"unique_identifier,omitempty"` //h
+	ServerOptions                        //H
 	Noise            pokrov.NoiseOptions `json:"noise,omitempty"` //H
-	*C.WARPConfig                         //H
-	MTU              uint32               `json:"mtu,omitempty"`
+	*C.WARPConfig                        //H
+	MTU              uint32              `json:"mtu,omitempty"`
 }
 
 type WARPProfile struct {

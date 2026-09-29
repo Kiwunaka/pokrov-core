@@ -38,7 +38,7 @@ The public ID is the SHA-256 hash of the private ID, encoded as hex.
 
 The private ID is used to write logs. The only copy of the private ID
 should be on the machine sending logs. Ideally it is generated on the
-machine. Logs can be written as soon as a private ID is generated.
+machine. Logs can be written as soon as a private ID is generated. 
 
 The public ID is used to read and adopt logs. It is designed to be sent
 to a service that also holds a logs service API key.
@@ -80,7 +80,7 @@ A future version of the logs service API will also support:
 
 On receipt by the server the `client_time_offset` is transformed into a
 `client_time` based on the `server_time` when the first (or
-client_time_reset) event was received.
+client_time_reset) event was received. 
 
 If any other properties are set in the logtail object they are moved into
 the "error" field, the message is saved and a 4xx status code is returned.
@@ -155,8 +155,8 @@ The caller can query-encode the following fields:
 In **stream=false** mode, the response is a single JSON object:
 
     {
-        // TODO: header fields
-        "logs": [ {}, {}, ... ]
+    	// TODO: header fields
+    	"logs": [ {}, {}, ... ]
     }
 
 In **stream=true** mode, the response begins with a JSON header object

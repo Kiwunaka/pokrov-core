@@ -27,6 +27,7 @@ type ClientBind struct {
 	bindCtx             context.Context
 	bindDone            context.CancelFunc
 	dialer              N.Dialer
+	reservedAccess      sync.RWMutex
 	reservedForEndpoint map[netip.AddrPort][3]uint8
 	connAccess          sync.Mutex
 	conn                *wireConn
@@ -138,7 +139,7 @@ func (c *ClientBind) receive(packets [][]byte, sizes []int, eps []conn.Endpoint)
 	sizes[0] = n
 	if n > 3 {
 		b := packets[0]
-		common.ClearArray(b[1:4])
+		clear(b[1:4])
 	}
 	eps[0] = remoteEndpoint(M.SocksaddrFromNet(addr).Unwrap().AddrPort())
 	count = 1
@@ -204,7 +205,9 @@ func (c *ClientBind) Send(bufs [][]byte, ep conn.Endpoint, offset int) error {
 			buf = buf[offset:]
 		}
 		if len(buf) > 3 {
+			c.reservedAccess.RLock()
 			reserved, loaded := c.reservedForEndpoint[destination]
+			c.reservedAccess.RUnlock()
 			if !loaded {
 				reserved = c.reserved
 			}
@@ -232,7 +235,9 @@ func (c *ClientBind) BatchSize() int {
 }
 
 func (c *ClientBind) SetReservedForEndpoint(destination netip.AddrPort, reserved [3]byte) {
+	c.reservedAccess.Lock()
 	c.reservedForEndpoint[destination] = reserved
+	c.reservedAccess.Unlock()
 }
 
 type wireConn struct {
@@ -274,16 +279,16 @@ func (e remoteEndpoint) SrcToString() string {
 }
 
 func (e remoteEndpoint) DstToString() string {
-	return (netip.AddrPort)(e).String()
+	return netip.AddrPort(e).String()
 }
 
 func (e remoteEndpoint) DstToBytes() []byte {
-	b, _ := (netip.AddrPort)(e).MarshalBinary()
+	b, _ := netip.AddrPort(e).MarshalBinary()
 	return b
 }
 
 func (e remoteEndpoint) DstIP() netip.Addr {
-	return (netip.AddrPort)(e).Addr()
+	return netip.AddrPort(e).Addr()
 }
 
 func (e remoteEndpoint) SrcIP() netip.Addr {

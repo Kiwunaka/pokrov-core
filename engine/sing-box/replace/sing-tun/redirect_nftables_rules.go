@@ -3,6 +3,7 @@
 package tun
 
 import (
+	"net"
 	"net/netip"
 	_ "unsafe"
 
@@ -11,6 +12,7 @@ import (
 	"github.com/sagernet/nftables/expr"
 	"github.com/sagernet/nftables/userdata"
 	"github.com/sagernet/sing/common"
+	E "github.com/sagernet/sing/common/exceptions"
 	"github.com/sagernet/sing/common/ranges"
 
 	"golang.org/x/exp/slices"
@@ -38,13 +40,13 @@ func (r *autoRedirect) nftablesCreateAddressSets(
 		if r.enableIPv4 {
 			_, err := nftablesCreateIPSet(nft, table, 1, "inet4_route_address_set", nftables.TableFamilyIPv4, routeAddressSet, nil, true, update)
 			if err != nil {
-				return err
+				return E.Cause(err, "create ipv4 route address set")
 			}
 		}
 		if r.enableIPv6 {
 			_, err := nftablesCreateIPSet(nft, table, 2, "inet6_route_address_set", nftables.TableFamilyIPv6, routeAddressSet, nil, true, update)
 			if err != nil {
-				return err
+				return E.Cause(err, "create ipv6 route address set")
 			}
 		}
 	}
@@ -53,13 +55,13 @@ func (r *autoRedirect) nftablesCreateAddressSets(
 		if r.enableIPv4 {
 			_, err := nftablesCreateIPSet(nft, table, 3, "inet4_route_exclude_address_set", nftables.TableFamilyIPv4, routeExcludeAddressSet, nil, false, update)
 			if err != nil {
-				return err
+				return E.Cause(err, "create ipv4 route exclude address set")
 			}
 		}
 		if r.enableIPv6 {
 			_, err := nftablesCreateIPSet(nft, table, 4, "inet6_route_exclude_address_set", nftables.TableFamilyIPv6, routeExcludeAddressSet, nil, false, update)
 			if err != nil {
-				return err
+				return E.Cause(err, "create ipv6 route exclude address set")
 			}
 		}
 	}
@@ -74,19 +76,18 @@ func (r *autoRedirect) nftablesCreateLocalAddressSets(
 		localAddresses4 := common.Filter(localAddresses, func(it netip.Prefix) bool {
 			return it.Addr().Is4()
 		})
-		updateAddresses4 := common.Filter(localAddresses, func(it netip.Prefix) bool {
-			return it.Addr().Is4()
-		})
 		var update bool
 		if len(lastAddresses) != 0 {
-			if !slices.Equal(localAddresses4, updateAddresses4) {
+			if !slices.Equal(localAddresses4, common.Filter(lastAddresses, func(it netip.Prefix) bool {
+				return it.Addr().Is4()
+			})) {
 				update = true
 			}
 		}
 		if len(lastAddresses) == 0 || update {
 			_, err := nftablesCreateIPSet(nft, table, 5, "inet4_local_address_set", nftables.TableFamilyIPv4, nil, localAddresses4, false, update)
 			if err != nil {
-				return err
+				return E.Cause(err, "create ipv4 local address set")
 			}
 		}
 	}
@@ -94,19 +95,18 @@ func (r *autoRedirect) nftablesCreateLocalAddressSets(
 		localAddresses6 := common.Filter(localAddresses, func(it netip.Prefix) bool {
 			return it.Addr().Is6()
 		})
-		updateAddresses6 := common.Filter(localAddresses, func(it netip.Prefix) bool {
-			return it.Addr().Is6()
-		})
 		var update bool
 		if len(lastAddresses) != 0 {
-			if !slices.Equal(localAddresses6, updateAddresses6) {
+			if !slices.Equal(localAddresses6, common.Filter(lastAddresses, func(it netip.Prefix) bool {
+				return it.Addr().Is6()
+			})) {
 				update = true
 			}
 		}
 		if len(lastAddresses) == 0 || update {
 			_, err := nftablesCreateIPSet(nft, table, 6, "inet6_local_address_set", nftables.TableFamilyIPv6, nil, localAddresses6, false, update)
 			if err != nil {
-				return err
+				return E.Cause(err, "create ipv6 local address set")
 			}
 		}
 	}
@@ -119,20 +119,20 @@ func (r *autoRedirect) nftablesCreateLoopbackAddressSets(
 	if r.enableIPv4 && len(r.tunOptions.Inet4LoopbackAddress) > 0 {
 		_, err := nftablesCreateIPConst(nft, table, 7, "inet4_local_redirect_address_set", nftables.TableFamilyIPv4, r.tunOptions.Inet4LoopbackAddress)
 		if err != nil {
-			return err
+			return E.Cause(err, "create ipv4 loopback address set")
 		}
 	}
 	if r.enableIPv6 && len(r.tunOptions.Inet6LoopbackAddress) > 0 {
 		_, err := nftablesCreateIPConst(nft, table, 8, "inet6_local_redirect_address_set", nftables.TableFamilyIPv6, r.tunOptions.Inet6LoopbackAddress)
 		if err != nil {
-			return err
+			return E.Cause(err, "create ipv6 loopback address set")
 		}
 	}
 	return nil
 }
 
 func (r *autoRedirect) nftablesCreateExcludeRules(nft *nftables.Conn, table *nftables.Table, chain *nftables.Chain) error {
-	if r.tunOptions.AutoRedirectMarkMode && chain.Hooknum == nftables.ChainHookOutput {
+	if r.tunOptions.AutoRedirectMarkMode && chain.Hooknum == nftables.ChainHookOutput && chain.Type != nftables.ChainTypeFilter && chain.Name != "output_prematch" {
 		if chain.Type == nftables.ChainTypeRoute {
 			ipProto := &nftables.Set{
 				Table:     table,
@@ -146,7 +146,7 @@ func (r *autoRedirect) nftablesCreateExcludeRules(nft *nftables.Conn, table *nft
 				{Key: []byte{unix.IPPROTO_ICMPV6}},
 			})
 			if err != nil {
-				return err
+				return E.Cause(err, "add ip protocol set")
 			}
 			nft.AddRule(&nftables.Rule{
 				Table: table,
@@ -209,48 +209,21 @@ func (r *autoRedirect) nftablesCreateExcludeRules(nft *nftables.Conn, table *nft
 			})
 		}
 	}
-	if r.nfqueueEnabled && chain.Hooknum == nftables.ChainHookPrerouting && chain.Type == nftables.ChainTypeNAT {
-		nft.AddRule(&nftables.Rule{
-			Table: table,
-			Chain: chain,
-			Exprs: []expr.Any{
-				&expr.Ct{
-					Key:      expr.CtKeyMARK,
-					Register: 1,
+	if r.nfqueueEnabled && chain.Type == nftables.ChainTypeNAT {
+		for _, mark := range []uint32{r.effectiveOutputMark(), r.tunOptions.AutoRedirectInputMark} {
+			nft.AddRule(&nftables.Rule{
+				Table: table,
+				Chain: chain,
+				Exprs: []expr.Any{
+					&expr.Ct{Key: expr.CtKeyMARK, Register: 1},
+					&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: binaryutil.NativeEndian.PutUint32(mark)},
+					&expr.Counter{},
+					&expr.Verdict{Kind: expr.VerdictReturn},
 				},
-				&expr.Cmp{
-					Op:       expr.CmpOpEq,
-					Register: 1,
-					Data:     binaryutil.NativeEndian.PutUint32(r.effectiveOutputMark()),
-				},
-				&expr.Counter{},
-				&expr.Verdict{
-					Kind: expr.VerdictReturn,
-				},
-			},
-		})
+			})
+		}
 	}
-	if r.nfqueueEnabled && chain.Hooknum == nftables.ChainHookOutput && chain.Type == nftables.ChainTypeNAT {
-		nft.AddRule(&nftables.Rule{
-			Table: table,
-			Chain: chain,
-			Exprs: []expr.Any{
-				&expr.Ct{
-					Key:      expr.CtKeyMARK,
-					Register: 1,
-				},
-				&expr.Cmp{
-					Op:       expr.CmpOpEq,
-					Register: 1,
-					Data:     binaryutil.NativeEndian.PutUint32(r.effectiveOutputMark()),
-				},
-				&expr.Counter{},
-				&expr.Verdict{
-					Kind: expr.VerdictReturn,
-				},
-			},
-		})
-	}
+
 	if chain.Hooknum == nftables.ChainHookPrerouting {
 		nft.AddRule(&nftables.Rule{
 			Table: table,
@@ -274,10 +247,11 @@ func (r *autoRedirect) nftablesCreateExcludeRules(nft *nftables.Conn, table *nft
 		if len(r.tunOptions.IncludeInterface) > 0 {
 			if len(r.tunOptions.IncludeInterface) > 1 {
 				includeInterface := &nftables.Set{
-					Table:     table,
-					Anonymous: true,
-					Constant:  true,
-					KeyType:   nftables.TypeIFName,
+					Table:        table,
+					Anonymous:    true,
+					Constant:     true,
+					KeyType:      nftables.TypeIFName,
+					KeyByteOrder: binaryutil.NativeEndian,
 				}
 				err := nft.AddSet(includeInterface, common.Map(r.tunOptions.IncludeInterface, func(it string) nftables.SetElement {
 					return nftables.SetElement{
@@ -285,7 +259,7 @@ func (r *autoRedirect) nftablesCreateExcludeRules(nft *nftables.Conn, table *nft
 					}
 				}))
 				if err != nil {
-					return err
+					return E.Cause(err, "add include interface set")
 				}
 				nft.AddRule(&nftables.Rule{
 					Table: table,
@@ -327,10 +301,11 @@ func (r *autoRedirect) nftablesCreateExcludeRules(nft *nftables.Conn, table *nft
 		if len(r.tunOptions.ExcludeInterface) > 0 {
 			if len(r.tunOptions.ExcludeInterface) > 1 {
 				excludeInterface := &nftables.Set{
-					Table:     table,
-					Anonymous: true,
-					Constant:  true,
-					KeyType:   nftables.TypeIFName,
+					Table:        table,
+					Anonymous:    true,
+					Constant:     true,
+					KeyType:      nftables.TypeIFName,
+					KeyByteOrder: binaryutil.NativeEndian,
 				}
 				err := nft.AddSet(excludeInterface, common.Map(r.tunOptions.ExcludeInterface, func(it string) nftables.SetElement {
 					return nftables.SetElement{
@@ -338,7 +313,7 @@ func (r *autoRedirect) nftablesCreateExcludeRules(nft *nftables.Conn, table *nft
 					}
 				}))
 				if err != nil {
-					return err
+					return E.Cause(err, "add exclude interface set")
 				}
 				nft.AddRule(&nftables.Rule{
 					Table: table,
@@ -375,6 +350,149 @@ func (r *autoRedirect) nftablesCreateExcludeRules(nft *nftables.Conn, table *nft
 				})
 			}
 		}
+		if len(r.tunOptions.IncludeMACAddress) > 0 {
+			nft.AddRule(&nftables.Rule{
+				Table: table,
+				Chain: chain,
+				Exprs: []expr.Any{
+					&expr.Meta{Key: expr.MetaKeyIIFTYPE, Register: 1},
+					&expr.Cmp{
+						Op:       expr.CmpOpNeq,
+						Register: 1,
+						Data:     binaryutil.NativeEndian.PutUint16(unix.ARPHRD_ETHER),
+					},
+					&expr.Counter{},
+					&expr.Verdict{
+						Kind: expr.VerdictReturn,
+					},
+				},
+			})
+			if len(r.tunOptions.IncludeMACAddress) > 1 {
+				includeMACSet := &nftables.Set{
+					Table:     table,
+					Anonymous: true,
+					Constant:  true,
+					KeyType:   nftables.TypeEtherAddr,
+				}
+				err := nft.AddSet(includeMACSet, common.Map(r.tunOptions.IncludeMACAddress, func(it net.HardwareAddr) nftables.SetElement {
+					return nftables.SetElement{
+						Key: []byte(it),
+					}
+				}))
+				if err != nil {
+					return err
+				}
+				nft.AddRule(&nftables.Rule{
+					Table: table,
+					Chain: chain,
+					Exprs: []expr.Any{
+						&expr.Payload{
+							OperationType: expr.PayloadLoad,
+							DestRegister:  1,
+							Base:          expr.PayloadBaseLLHeader,
+							Offset:        6,
+							Len:           6,
+						},
+						&expr.Lookup{
+							SourceRegister: 1,
+							SetID:          includeMACSet.ID,
+							SetName:        includeMACSet.Name,
+							Invert:         true,
+						},
+						&expr.Counter{},
+						&expr.Verdict{
+							Kind: expr.VerdictReturn,
+						},
+					},
+				})
+			} else {
+				nft.AddRule(&nftables.Rule{
+					Table: table,
+					Chain: chain,
+					Exprs: []expr.Any{
+						&expr.Payload{
+							OperationType: expr.PayloadLoad,
+							DestRegister:  1,
+							Base:          expr.PayloadBaseLLHeader,
+							Offset:        6,
+							Len:           6,
+						},
+						&expr.Cmp{
+							Op:       expr.CmpOpNeq,
+							Register: 1,
+							Data:     []byte(r.tunOptions.IncludeMACAddress[0]),
+						},
+						&expr.Counter{},
+						&expr.Verdict{
+							Kind: expr.VerdictReturn,
+						},
+					},
+				})
+			}
+		}
+		if len(r.tunOptions.ExcludeMACAddress) > 0 {
+			if len(r.tunOptions.ExcludeMACAddress) > 1 {
+				excludeMACSet := &nftables.Set{
+					Table:     table,
+					Anonymous: true,
+					Constant:  true,
+					KeyType:   nftables.TypeEtherAddr,
+				}
+				err := nft.AddSet(excludeMACSet, common.Map(r.tunOptions.ExcludeMACAddress, func(it net.HardwareAddr) nftables.SetElement {
+					return nftables.SetElement{
+						Key: []byte(it),
+					}
+				}))
+				if err != nil {
+					return err
+				}
+				nft.AddRule(&nftables.Rule{
+					Table: table,
+					Chain: chain,
+					Exprs: []expr.Any{
+						&expr.Payload{
+							OperationType: expr.PayloadLoad,
+							DestRegister:  1,
+							Base:          expr.PayloadBaseLLHeader,
+							Offset:        6,
+							Len:           6,
+						},
+						&expr.Lookup{
+							SourceRegister: 1,
+							SetID:          excludeMACSet.ID,
+							SetName:        excludeMACSet.Name,
+						},
+						&expr.Counter{},
+						&expr.Verdict{
+							Kind: expr.VerdictReturn,
+						},
+					},
+				})
+			} else {
+				nft.AddRule(&nftables.Rule{
+					Table: table,
+					Chain: chain,
+					Exprs: []expr.Any{
+						&expr.Payload{
+							OperationType: expr.PayloadLoad,
+							DestRegister:  1,
+							Base:          expr.PayloadBaseLLHeader,
+							Offset:        6,
+							Len:           6,
+						},
+						&expr.Cmp{
+							Op:       expr.CmpOpEq,
+							Register: 1,
+							Data:     []byte(r.tunOptions.ExcludeMACAddress[0]),
+						},
+						&expr.Counter{},
+						&expr.Verdict{
+							Kind: expr.VerdictReturn,
+						},
+					},
+				})
+			}
+		}
 	} else {
 		if len(r.tunOptions.IncludeUID) > 0 {
 			if len(r.tunOptions.IncludeUID) > 1 || r.tunOptions.IncludeUID[0].Start != r.tunOptions.IncludeUID[0].End {
@@ -397,7 +515,7 @@ func (r *autoRedirect) nftablesCreateExcludeRules(nft *nftables.Conn, table *nft
 					}
 				}))
 				if err != nil {
-					return err
+					return E.Cause(err, "add include uid set")
 				}
 				nft.AddRule(&nftables.Rule{
 					Table: table,
@@ -426,7 +544,7 @@ func (r *autoRedirect) nftablesCreateExcludeRules(nft *nftables.Conn, table *nft
 						&expr.Cmp{
 							Op:       expr.CmpOpNeq,
 							Register: 1,
-							Data:     binaryutil.BigEndian.PutUint32(r.tunOptions.IncludeUID[0].Start),
+							Data:     binaryutil.NativeEndian.PutUint32(r.tunOptions.IncludeUID[0].Start),
 						},
 						&expr.Counter{},
 						&expr.Verdict{
@@ -458,7 +576,7 @@ func (r *autoRedirect) nftablesCreateExcludeRules(nft *nftables.Conn, table *nft
 					}
 				}))
 				if err != nil {
-					return err
+					return E.Cause(err, "add exclude uid set")
 				}
 				nft.AddRule(&nftables.Rule{
 					Table: table,
@@ -501,7 +619,7 @@ func (r *autoRedirect) nftablesCreateExcludeRules(nft *nftables.Conn, table *nft
 	if len(r.tunOptions.Inet4RouteAddress) > 0 {
 		inet4RouteAddress, err := nftablesCreateIPSet(nft, table, 0, "", nftables.TableFamilyIPv4, nil, r.tunOptions.Inet4RouteAddress, false, false)
 		if err != nil {
-			return err
+			return E.Cause(err, "create ipv4 route address set")
 		}
 		nftablesCreateExcludeDestinationIPSet(nft, table, chain, inet4RouteAddress.ID, inet4RouteAddress.Name, nftables.TableFamilyIPv4, true)
 	}
@@ -509,7 +627,7 @@ func (r *autoRedirect) nftablesCreateExcludeRules(nft *nftables.Conn, table *nft
 	if len(r.tunOptions.Inet6RouteAddress) > 0 {
 		inet6RouteAddress, err := nftablesCreateIPSet(nft, table, 0, "", nftables.TableFamilyIPv6, nil, r.tunOptions.Inet6RouteAddress, false, false)
 		if err != nil {
-			return err
+			return E.Cause(err, "create ipv6 route address set")
 		}
 		nftablesCreateExcludeDestinationIPSet(nft, table, chain, inet6RouteAddress.ID, inet6RouteAddress.Name, nftables.TableFamilyIPv6, true)
 	}
@@ -517,7 +635,7 @@ func (r *autoRedirect) nftablesCreateExcludeRules(nft *nftables.Conn, table *nft
 	if len(r.tunOptions.Inet4RouteExcludeAddress) > 0 {
 		inet4RouteExcludeAddress, err := nftablesCreateIPSet(nft, table, 0, "", nftables.TableFamilyIPv4, nil, r.tunOptions.Inet4RouteExcludeAddress, false, false)
 		if err != nil {
-			return err
+			return E.Cause(err, "create ipv4 route exclude address set")
 		}
 		nftablesCreateExcludeDestinationIPSet(nft, table, chain, inet4RouteExcludeAddress.ID, inet4RouteExcludeAddress.Name, nftables.TableFamilyIPv4, false)
 	}
@@ -525,23 +643,25 @@ func (r *autoRedirect) nftablesCreateExcludeRules(nft *nftables.Conn, table *nft
 	if len(r.tunOptions.Inet6RouteExcludeAddress) > 0 {
 		inet6RouteExcludeAddress, err := nftablesCreateIPSet(nft, table, 0, "", nftables.TableFamilyIPv6, nil, r.tunOptions.Inet6RouteExcludeAddress, false, false)
 		if err != nil {
-			return err
+			return E.Cause(err, "create ipv6 route exclude address set")
 		}
 		nftablesCreateExcludeDestinationIPSet(nft, table, chain, inet6RouteExcludeAddress.ID, inet6RouteExcludeAddress.Name, nftables.TableFamilyIPv6, false)
 	}
 
-	if !r.tunOptions.EXP_DisableDNSHijack && ((chain.Hooknum == nftables.ChainHookPrerouting && chain.Type == nftables.ChainTypeNAT) ||
-		(r.tunOptions.AutoRedirectMarkMode && chain.Hooknum == nftables.ChainHookOutput && chain.Type == nftables.ChainTypeNAT)) {
+	if r.tunOptions.DNSModeOrDefault() == DNSModeHijack &&
+		(chain.Type == nftables.ChainTypeNAT || chain.Type == nftables.ChainTypeFilter || chain.Name == "output_prematch") &&
+		(chain.Hooknum == nftables.ChainHookPrerouting ||
+			(r.tunOptions.AutoRedirectMarkMode && chain.Hooknum == nftables.ChainHookOutput)) {
 		if r.enableIPv4 {
 			err := r.nftablesCreateDNSHijackRulesForFamily(nft, table, chain, nftables.TableFamilyIPv4, 5, "inet4_local_address_set")
 			if err != nil {
-				return err
+				return E.Cause(err, "create ipv4 dns hijack rules")
 			}
 		}
 		if r.enableIPv6 {
 			err := r.nftablesCreateDNSHijackRulesForFamily(nft, table, chain, nftables.TableFamilyIPv6, 6, "inet6_local_address_set")
 			if err != nil {
-				return err
+				return E.Cause(err, "create ipv6 dns hijack rules")
 			}
 		}
 	}
@@ -572,10 +692,52 @@ func (r *autoRedirect) nftablesCreateExcludeRules(nft *nftables.Conn, table *nft
 		nftablesCreateExcludeDestinationIPSet(nft, table, chain, 4, "inet6_route_exclude_address_set", nftables.TableFamilyIPv6, false)
 	}
 
-	mptcpVerdict := expr.VerdictDrop
-	if r.tunOptions.ExcludeMPTCP {
-		mptcpVerdict = expr.VerdictReturn
+	if chain.Type == nftables.ChainTypeNAT || r.tunOptions.ExcludeMPTCP {
+		mptcpVerdict := expr.VerdictDrop
+		if r.tunOptions.ExcludeMPTCP {
+			mptcpVerdict = expr.VerdictReturn
+		}
+		nft.AddRule(&nftables.Rule{
+			Table: table,
+			Chain: chain,
+			Exprs: []expr.Any{
+				&expr.Meta{
+					Key:      expr.MetaKeyL4PROTO,
+					Register: 1,
+				},
+				&expr.Cmp{
+					Op:       expr.CmpOpEq,
+					Register: 1,
+					Data:     []byte{unix.IPPROTO_TCP},
+				},
+				&expr.Exthdr{
+					DestRegister: 1,
+					Type:         30,
+					Offset:       0,
+					Len:          1,
+					Flags:        unix.NFT_EXTHDR_F_PRESENT,
+					Op:           expr.ExthdrOpTcpopt,
+				},
+				&expr.Cmp{
+					Op:       expr.CmpOpEq,
+					Register: 1,
+					Data:     []byte{1},
+				},
+				&expr.Counter{},
+				&expr.Verdict{
+					Kind: mptcpVerdict,
+				},
+			},
+		})
 	}
+
+	return nil
+}
+
+// IPS_DST_NAT in linux/netfilter/nf_conntrack_common.h, not exported by golang.org/x/sys
+const conntrackStatusDstNAT = 1 << 5
+
+func (r *autoRedirect) nftablesCreateRedirectPortReject(nft *nftables.Conn, table *nftables.Table, chain *nftables.Chain) {
 	nft.AddRule(&nftables.Rule{
 		Table: table,
 		Chain: chain,
@@ -589,27 +751,40 @@ func (r *autoRedirect) nftablesCreateExcludeRules(nft *nftables.Conn, table *nft
 				Register: 1,
 				Data:     []byte{unix.IPPROTO_TCP},
 			},
-			&expr.Exthdr{
-				DestRegister: 1,
-				Type:         30,
-				Offset:       0,
-				Len:          1,
-				Flags:        unix.NFT_EXTHDR_F_PRESENT,
-				Op:           expr.ExthdrOpTcpopt,
+			&expr.Payload{
+				OperationType: expr.PayloadLoad,
+				DestRegister:  1,
+				Base:          expr.PayloadBaseTransportHeader,
+				Offset:        2,
+				Len:           2,
 			},
 			&expr.Cmp{
 				Op:       expr.CmpOpEq,
 				Register: 1,
-				Data:     []byte{1},
+				Data:     binaryutil.BigEndian.PutUint16(r.redirectPort()),
+			},
+			&expr.Ct{
+				Key:      expr.CtKeySTATUS,
+				Register: 1,
+			},
+			&expr.Bitwise{
+				SourceRegister: 1,
+				DestRegister:   1,
+				Len:            4,
+				Mask:           binaryutil.NativeEndian.PutUint32(conntrackStatusDstNAT),
+				Xor:            make([]byte, 4),
+			},
+			&expr.Cmp{
+				Op:       expr.CmpOpEq,
+				Register: 1,
+				Data:     make([]byte, 4),
 			},
 			&expr.Counter{},
-			&expr.Verdict{
-				Kind: mptcpVerdict,
+			&expr.Reject{
+				Type: unix.NFT_REJECT_TCP_RST,
 			},
 		},
 	})
-
-	return nil
 }
 
 func (r *autoRedirect) nftablesCreateMark(nft *nftables.Conn, table *nftables.Table, chain *nftables.Chain) {
@@ -629,7 +804,7 @@ func (r *autoRedirect) nftablesCreateMark(nft *nftables.Conn, table *nftables.Ta
 			&expr.Meta{
 				Key:      expr.MetaKeyMARK,
 				Register: 1,
-			}, // output meta mark set myMark ct mark set meta mark
+			},
 			&expr.Ct{
 				Key:            expr.CtKeyMARK,
 				Register:       1,
@@ -850,25 +1025,21 @@ func (r *autoRedirect) nftablesCreateDNSHijackRulesForFamily(
 		{Key: []byte{unix.IPPROTO_UDP}},
 	})
 	if err != nil {
+		return E.Cause(err, "add dns protocol set")
+	}
+	var dnsServers []netip.Addr
+	if family == nftables.TableFamilyIPv4 {
+		dnsServers, err = r.tunOptions.Inet4DNSAddress()
+	} else {
+		dnsServers, err = r.tunOptions.Inet6DNSAddress()
+	}
+	if err != nil {
 		return err
 	}
-	dnsServer := common.Find(r.tunOptions.DNSServers, func(it netip.Addr) bool {
-		return it.Is4() == (family == nftables.TableFamilyIPv4)
-	})
-	if !dnsServer.IsValid() {
-		if family == nftables.TableFamilyIPv4 {
-			if HasNextAddress(r.tunOptions.Inet4Address[0], 1) {
-				dnsServer = r.tunOptions.Inet4Address[0].Addr().Next()
-			}
-		} else {
-			if HasNextAddress(r.tunOptions.Inet6Address[0], 1) {
-				dnsServer = r.tunOptions.Inet6Address[0].Addr().Next()
-			}
-		}
-	}
-	if !dnsServer.IsValid() {
+	if len(dnsServers) == 0 {
 		return nil
 	}
+	dnsServer := dnsServers[0]
 	exprs := []expr.Any{
 		&expr.Meta{
 			Key:      expr.MetaKeyNFPROTO,
@@ -946,16 +1117,24 @@ func (r *autoRedirect) nftablesCreateDNSHijackRulesForFamily(
 			Data:     binaryutil.BigEndian.PutUint16(53),
 		},
 		&expr.Counter{},
-		&expr.Immediate{
-			Register: 1,
-			Data:     dnsServer.AsSlice(),
-		},
-		&expr.NAT{
-			Type:       expr.NATTypeDestNAT,
-			Family:     uint32(family),
-			RegAddrMin: 1,
-		},
 	)
+	if chain.Type != nftables.ChainTypeNAT {
+		exprs = append(exprs, &expr.Verdict{
+			Kind: expr.VerdictReturn,
+		})
+	} else {
+		exprs = append(exprs,
+			&expr.Immediate{
+				Register: 1,
+				Data:     dnsServer.AsSlice(),
+			},
+			&expr.NAT{
+				Type:       expr.NATTypeDestNAT,
+				Family:     uint32(family),
+				RegAddrMin: 1,
+			},
+		)
+	}
 	nft.AddRule(&nftables.Rule{
 		Table: table,
 		Chain: chain,

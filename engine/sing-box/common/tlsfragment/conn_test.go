@@ -11,6 +11,18 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+type emptyWriteConn struct{ net.Conn }
+
+func (emptyWriteConn) Write([]byte) (int, error) { return 0, nil }
+
+func TestEmptyWriteKeepsFragmentation(t *testing.T) {
+	conn := tf.NewConn(emptyWriteConn{}, context.Background(), true, false, 0)
+	n, err := conn.Write(nil)
+	require.NoError(t, err)
+	require.Zero(t, n)
+	require.False(t, conn.WriterReplaceable(), "empty writes must not allow bypassing ClientHello fragmentation")
+}
+
 func TestTLSFragment(t *testing.T) {
 	t.Parallel()
 	tcpConn, err := net.Dial("tcp", "1.1.1.1:443")

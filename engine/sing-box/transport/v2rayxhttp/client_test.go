@@ -152,6 +152,62 @@ func TestStreamOneCancellationClosesPendingTLS(t *testing.T) {
 	}
 }
 
+type pendingUDPDialer struct {
+	loopbackDialer
+	connected chan net.Conn
+}
+
+func (d *pendingUDPDialer) DialContext(ctx context.Context, network string, address M.Socksaddr) (net.Conn, error) {
+	conn, err := d.loopbackDialer.DialContext(ctx, network, address)
+	if err == nil {
+		d.connected <- conn
+	}
+	return conn, err
+}
+
+func TestStreamOneCancellationClosesPendingQUIC(t *testing.T) {
+	listener, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close() // Keep the port open without answering the QUIC handshake.
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	tlsConfig, err := tls.NewClient(ctx, logger.NOP(), "test.invalid", option.OutboundTLSOptions{
+		Enabled: true, ServerName: "test.invalid", ALPN: []string{"h3"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dialer := &pendingUDPDialer{connected: make(chan net.Conn, 1)}
+	client, err := NewClient(ctx, dialer, M.ParseSocksaddr(listener.LocalAddr().String()),
+		option.V2RayXHTTPOptions{Mode: "stream-one", V2RayXHTTPBaseOptions: option.V2RayXHTTPBaseOptions{Path: "/test"}}, tlsConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	conn, _ := client.DialContext(ctx)
+	if conn != nil {
+		_ = conn.Close()
+	}
+	select {
+	case udpConn := <-dialer.connected:
+		defer udpConn.Close()
+		deadline := time.Now().Add(500 * time.Millisecond)
+		for {
+			if _, err := udpConn.Write([]byte("closed")); err != nil {
+				return
+			}
+			if time.Now().After(deadline) {
+				t.Fatal("XHTTP QUIC socket survived candidate cancellation")
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	default:
+		t.Fatal("XHTTP did not open its connected UDP socket")
+	}
+}
+
 func TestXmuxMaxConnectionsBoundsPendingTLS(t *testing.T) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

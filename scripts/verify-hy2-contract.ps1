@@ -51,7 +51,7 @@ if (
 }
 if (
   $contract.dependency.module -ne "github.com/sagernet/sing-box" -or
-  $contract.dependency.version -ne "v1.13.0" -or
+  $contract.dependency.version -ne "v1.14.2" -or
   $contract.dependency.license -ne "GPL-3.0-or-later"
 ) {
   throw "Hysteria2 dependency identity is invalid."
@@ -61,8 +61,8 @@ if (-not (Test-Path -LiteralPath $noticePath -PathType Leaf)) {
   throw "Hysteria2 dependency license notice is missing."
 }
 $rootMod = Get-Content -Raw -LiteralPath (Join-Path $root "go.mod")
-if (-not $rootMod.Contains("github.com/sagernet/sing-box v1.13.0")) {
-  throw "Root go.mod does not pin sing-box v1.13.0."
+if (-not $rootMod.Contains("github.com/sagernet/sing-box v1.14.2")) {
+  throw "Root go.mod does not pin sing-box v1.14.2."
 }
 foreach ($path in @("scripts\build-android.ps1", "scripts\build-windows.ps1")) {
   $content = Get-Content -Raw -LiteralPath (Join-Path $root $path)

@@ -89,6 +89,7 @@ type HistoryStorage struct {
 	access       sync.RWMutex
 	delayHistory map[string]*adapter.URLTestHistory
 	updateHook   *observable.Subscriber[struct{}]
+	updateHooks  []*observable.Subscriber[struct{}]
 }
 
 func NewHistoryStorage() *HistoryStorage {
@@ -154,9 +155,13 @@ func (s *HistoryStorage) AddOnlyIpToHistory(tag string, history *adapter.URLTest
 func (s *HistoryStorage) notifyUpdated() {
 	s.access.RLock()
 	updateHook := s.updateHook
+	updateHooks := append([]*observable.Subscriber[struct{}](nil), s.updateHooks...)
 	s.access.RUnlock()
 	if updateHook != nil {
 		updateHook.Emit(struct{}{})
+	}
+	for _, hook := range updateHooks {
+		hook.Emit(struct{}{})
 	}
 }
 
@@ -164,6 +169,7 @@ func (s *HistoryStorage) Close() error {
 	s.access.Lock()
 	defer s.access.Unlock()
 	s.updateHook = nil
+	s.updateHooks = nil
 	return nil
 }
 
@@ -315,3 +321,10 @@ func resolveURLTestLink(link string) string {
 	}
 	return defaultURLTestLink
 }
+
+func (s *HistoryStorage) AddUpdateHook(hook *observable.Subscriber[struct{}]) {
+	s.access.Lock()
+	defer s.access.Unlock()
+	s.updateHooks = append(s.updateHooks, hook)
+}
+func (s *HistoryStorage) NotifyUpdated() { s.notifyUpdated() }

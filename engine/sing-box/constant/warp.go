@@ -2,6 +2,7 @@ package constant
 
 type WARPConfig struct {
 	PrivateKey string `json:"private_key"`
+	ClientID   string `json:"client_id,omitempty"`
 	Interface  struct {
 		Addresses struct {
 			V4 string `json:"v4"`

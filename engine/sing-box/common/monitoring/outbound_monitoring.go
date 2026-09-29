@@ -13,6 +13,7 @@ import (
 	"github.com/sagernet/sing-box/common/urltest"
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
+	tun "github.com/sagernet/sing-tun"
 	E "github.com/sagernet/sing/common/exceptions"
 	"github.com/sagernet/sing/service"
 
@@ -92,7 +93,7 @@ type OutboundMonitoring struct {
 }
 
 // InterfaceUpdated implements [adapter.InterfaceUpdateListener].
-func (m *OutboundMonitoring) InterfaceUpdated() {
+func (m *OutboundMonitoring) InterfaceUpdated(ctx context.Context) {
 	m.startCycleOnce()
 }
 
@@ -221,8 +222,7 @@ func NewOutboundMonitoring(ctx context.Context, logger log.ContextLogger, option
 	var history adapter.URLTestHistoryStorage
 	if historyFromCtx := service.PtrFromContext[urltest.HistoryStorage](ctx); historyFromCtx != nil {
 		history = historyFromCtx
-	} else if clashServer := service.FromContext[adapter.ClashServer](ctx); clashServer != nil {
-		history = clashServer.HistoryStorage()
+
 	} else {
 		history = urltest.NewHistoryStorage()
 	}
@@ -1043,4 +1043,9 @@ func (m *OutboundMonitoring) loadHistory() *History {
 		}
 	}
 	return history
+}
+
+func (m *OutboundMonitoring) RoutedFlow(ctx context.Context, metadata adapter.InboundContext, matchedRule adapter.Rule, matchOutbound adapter.Outbound) tun.FlowTracker {
+	m.Touch()
+	return nil
 }

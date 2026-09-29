@@ -47,6 +47,7 @@ if (-not $objdumpPath) {
 
 $outputPath = Join-Path $OutputDirectory $release.artifacts.windows
 $tags = @(
+  "pokrov_client",
   "with_gvisor",
   "with_quic",
   "with_wireguard",

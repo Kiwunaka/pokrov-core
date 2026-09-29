@@ -8,18 +8,17 @@ import (
 	"encoding/base64"
 	"encoding/pem"
 	"net"
-	"os"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/dns"
-	"github.com/sagernet/sing-box/experimental/deprecated"
 	"github.com/sagernet/sing-box/option"
 	E "github.com/sagernet/sing/common/exceptions"
 	aTLS "github.com/sagernet/sing/common/tls"
 	"github.com/sagernet/sing/service"
+	"github.com/sagernet/sing/service/filemanager"
 
 	mDNS "github.com/miekg/dns"
 	"golang.org/x/crypto/cryptobyte"
@@ -30,7 +29,7 @@ func parseECHClientConfig(ctx context.Context, clientConfig ECHCapableConfig, op
 	if len(options.ECH.Config) > 0 {
 		echConfig = []byte(strings.Join(options.ECH.Config, "\n"))
 	} else if options.ECH.ConfigPath != "" {
-		content, err := os.ReadFile(options.ECH.ConfigPath)
+		content, err := filemanager.ReadFile(ctx, options.ECH.ConfigPath)
 		if err != nil {
 			return nil, E.Cause(err, "read ECH config")
 		}
@@ -38,7 +37,7 @@ func parseECHClientConfig(ctx context.Context, clientConfig ECHCapableConfig, op
 	}
 	//nolint:staticcheck
 	if options.ECH.PQSignatureSchemesEnabled || options.ECH.DynamicRecordSizingDisabled {
-		deprecated.Report(ctx, deprecated.OptionLegacyECHOptions)
+		return nil, E.New("legacy ECH options are deprecated in sing-box 1.12.0 and removed in sing-box 1.13.0")
 	}
 	if len(echConfig) > 0 {
 		block, rest := pem.Decode(echConfig)
@@ -61,7 +60,7 @@ func parseECHServerConfig(ctx context.Context, options option.InboundTLSOptions,
 	if len(options.ECH.Key) > 0 {
 		echKey = []byte(strings.Join(options.ECH.Key, "\n"))
 	} else if options.ECH.KeyPath != "" {
-		content, err := os.ReadFile(options.ECH.KeyPath)
+		content, err := filemanager.ReadFile(ctx, options.ECH.KeyPath)
 		if err != nil {
 			return E.Cause(err, "read ECH keys")
 		}
@@ -77,7 +76,7 @@ func parseECHServerConfig(ctx context.Context, options option.InboundTLSOptions,
 	tlsConfig.EncryptedClientHelloKeys = echKeys
 	//nolint:staticcheck
 	if options.ECH.PQSignatureSchemesEnabled || options.ECH.DynamicRecordSizingDisabled {
-		deprecated.Report(ctx, deprecated.OptionLegacyECHOptions)
+		return E.New("legacy ECH options are deprecated in sing-box 1.12.0 and removed in sing-box 1.13.0")
 	}
 	return nil
 }

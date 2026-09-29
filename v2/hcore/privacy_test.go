@@ -24,13 +24,19 @@ func TestSetupDoesNotLogCallerPathsOrListenAddress(t *testing.T) {
 	}
 	var output bytes.Buffer
 	factory := log.NewDefaultFactory(context.Background(), log.Formatter{}, &output, "", nil, false)
+	if err := factory.Start(); err != nil {
+		t.Fatal(err)
+	}
 	previousLogger := log.StdLogger()
+	previousLogLevel := static.logLevel
+	static.logLevel = LogLevel_TRACE
 	log.SetStdLogger(factory.Logger())
 	observer := static.logObserver.Subscribe(16)
 	t.Cleanup(func() {
 		_, _ = Stop()
 		static.logObserver.Unsubscribe(observer)
 		log.SetStdLogger(previousLogger)
+		static.logLevel = previousLogLevel
 		factory.Close()
 		_ = os.Chdir(previousDir)
 	})
@@ -63,6 +69,9 @@ func TestRuntimeFailureRedactsEveryDiagnosticOutput(t *testing.T) {
 	original := errors.New("invalid config: " + planted)
 	var output bytes.Buffer
 	factory := log.NewDefaultFactory(context.Background(), log.Formatter{}, &output, "", nil, false)
+	if err := factory.Start(); err != nil {
+		t.Fatal(err)
+	}
 	previousLogger := log.StdLogger()
 	previousState := static.CoreState
 	log.SetStdLogger(factory.Logger())

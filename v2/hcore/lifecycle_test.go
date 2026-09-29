@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"testing"
@@ -20,6 +21,17 @@ import (
 )
 
 func TestStartStopReleasesServiceObservers(t *testing.T) {
+	if runtime.GOOS == "windows" && os.Getenv("POKROV_LIFECYCLE_CHILD") != "1" {
+		// Measure this runtime without resources cached by earlier tests in the process.
+		command := exec.Command(os.Args[0], "-test.run=^TestStartStopReleasesServiceObservers$", "-test.v")
+		command.Env = append(os.Environ(), "GOMAXPROCS=2", "POKROV_LIFECYCLE_CHILD=1")
+		output, err := command.CombinedOutput()
+		if err != nil {
+			t.Fatalf("isolated lifecycle check failed: %v\n%s", err, output)
+		}
+		t.Logf("%s", output)
+		return
+	}
 	// Keep Go's process-wide thread pool from growing during the ownership
 	// assertion. Default-scheduler artifact resource samples are a separate gate.
 	previousProcs := runtime.GOMAXPROCS(2)
@@ -88,7 +100,7 @@ func TestStartStopReleasesServiceObservers(t *testing.T) {
 				t.Fatal(err)
 			}
 			_ = anonymous.SetDeadline(time.Now().Add(time.Second))
-			_, _ = io.WriteString(anonymous, "GET http://127.0.0.1:1/ HTTP/1.1\r\nHost: 127.0.0.1:1\r\n\r\n")
+			_, _ = io.WriteString(anonymous, "GET http://127.0.0.1:1/ HTTP/1.1\r\nHost: 127.0.0.1:1\r\nProxy-Connection: keep-alive\r\n\r\n")
 			response, err := http.ReadResponse(bufio.NewReader(anonymous), nil)
 			_ = anonymous.Close()
 			if err != nil || response.StatusCode != http.StatusProxyAuthRequired {
@@ -148,10 +160,27 @@ func TestStartStopReleasesServiceObservers(t *testing.T) {
 		}
 		assertCancelled(newSession)
 	}
-	for range 3 {
-		cycle() // Exclude process-wide initialization from the retained-resource check.
+	// Match the measured burst while process-wide native caches reach steady state.
+	previousWarmResources := -1
+	warmupSettled := false
+	for warmBatch := range 4 {
+		for range 12 {
+			cycle()
+		}
+		// LevelDB.Close leaves an empty memory-pool drain waiting for one second.
+		time.Sleep(time.Second)
+		time.Sleep(100 * time.Millisecond)
+		warmResources := countLifecycleResources(t)
+		t.Logf("warm batch=%d OS resources=%d", warmBatch+1, warmResources)
+		if warmResources == previousWarmResources {
+			warmupSettled = true
+			break
+		}
+		previousWarmResources = warmResources
 	}
-	time.Sleep(100 * time.Millisecond)
+	if !warmupSettled {
+		t.Fatalf("lifecycle warmup did not settle after four batches: OS resources=%d", previousWarmResources)
+	}
 	baseline := runtime.NumGoroutine()
 	resourcesBefore := countLifecycleResources(t)
 	for cycleIndex := range 12 {

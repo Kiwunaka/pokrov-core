@@ -19,7 +19,7 @@ type abstractDefaultRule struct {
 	destinationIPCIDRItems  []RuleItem
 	destinationPortItems    []RuleItem
 	allItems                []RuleItem
-	ruleSetItem             RuleItem
+	ruleSetItem             *RuleSetItem
 	invert                  bool
 	action                  adapter.RuleAction
 }
@@ -31,22 +31,30 @@ func (r *abstractDefaultRule) Type() string {
 // Withdraw only the compiled catalog admission window. Keep the rule and its
 // following fallback in place; manual/safety rules without a window are intact.
 func (r *abstractDefaultRule) RevokeRoutingCatalog() bool {
-	if r.catalogWindow == nil { return false }
+	if r.catalogWindow == nil {
+		return false
+	}
 	r.catalogWindow.expired.Store(true)
 	return true
 }
 
 func (r *abstractDefaultRule) RevokeRoutingCatalogService(serviceID string) bool {
 	window := r.catalogWindow
-	if window == nil || window.serviceID == "" || window.serviceID != serviceID { return false }
+	if window == nil || window.serviceID == "" || window.serviceID != serviceID {
+		return false
+	}
 	window.expired.Store(true)
-	if window.lease != nil { window.lease.Revoke(true) }
+	if window.lease != nil {
+		window.lease.Revoke(true)
+	}
 	return true
 }
 
 func (r *abstractDefaultRule) Start() error {
 	if r.catalogWindow != nil {
-		if err := r.catalogWindow.start(); err != nil { return err }
+		if err := r.catalogWindow.start(); err != nil {
+			return err
+		}
 	}
 	for _, item := range r.allItems {
 		if starter, isStarter := item.(interface {
@@ -79,90 +87,99 @@ func (r *abstractDefaultRule) Match(metadata *adapter.InboundContext) bool {
 	if len(r.allItems) == 0 {
 		return true
 	}
-
-	if len(r.sourceAddressItems) > 0 && !metadata.SourceAddressMatch {
-		metadata.DidMatch = true
-		for _, item := range r.sourceAddressItems {
-			if item.Match(metadata) {
-				metadata.SourceAddressMatch = true
-				break
-			}
-		}
+	matched := r.matchInner(metadata)
+	if matched && r.catalogWindow != nil && !r.catalogWindow.selected() {
+		return false
 	}
-
-	if len(r.sourcePortItems) > 0 && !metadata.SourcePortMatch {
-		metadata.DidMatch = true
-		for _, item := range r.sourcePortItems {
-			if item.Match(metadata) {
-				metadata.SourcePortMatch = true
-				break
-			}
+	if r.invert {
+		if !matched {
+			metadata.DeferredIPCIDRMatchGroups = 0
+			return true
 		}
+		return metadata.DeferredIPCIDRMatchGroups != 0
 	}
+	return matched
+}
 
-	if len(r.destinationAddressItems) > 0 && !metadata.DestinationAddressMatch {
-		metadata.DidMatch = true
-		for _, item := range r.destinationAddressItems {
-			if item.Match(metadata) {
-				metadata.DestinationAddressMatch = true
-				break
-			}
-		}
-	}
-
-	if !metadata.IgnoreDestinationIPCIDRMatch && len(r.destinationIPCIDRItems) > 0 && !metadata.DestinationAddressMatch {
-		metadata.DidMatch = true
-		for _, item := range r.destinationIPCIDRItems {
-			if item.Match(metadata) {
-				metadata.DestinationAddressMatch = true
-				break
-			}
-		}
-	}
-
-	if len(r.destinationPortItems) > 0 && !metadata.DestinationPortMatch {
-		metadata.DidMatch = true
-		for _, item := range r.destinationPortItems {
-			if item.Match(metadata) {
-				metadata.DestinationPortMatch = true
-				break
-			}
-		}
-	}
-
+func (r *abstractDefaultRule) matchInner(metadata *adapter.InboundContext) bool {
+	groups := r.evaluateGroups(metadata)
 	for _, item := range r.items {
-		if _, isRuleSet := item.(*RuleSetItem); !isRuleSet {
-			metadata.DidMatch = true
-		}
 		if !item.Match(metadata) {
-			return r.invert
+			return false
 		}
 	}
-
-	if len(r.sourceAddressItems) > 0 && !metadata.SourceAddressMatch {
-		return r.invert
+	var matched bool
+	if r.ruleSetItem != nil {
+		matched = r.ruleSetItem.matchWithOuterGroups(metadata, groups)
+	} else {
+		matched = groups.done()
 	}
-
-	if len(r.sourcePortItems) > 0 && !metadata.SourcePortMatch {
-		return r.invert
+	if matched {
+		metadata.DeferredIPCIDRMatchGroups &^= uint8(groups.satisfied)
 	}
+	return matched
+}
 
-	if ((!metadata.IgnoreDestinationIPCIDRMatch && len(r.destinationIPCIDRItems) > 0) || len(r.destinationAddressItems) > 0) && !metadata.DestinationAddressMatch {
-		return r.invert
+func (r *abstractDefaultRule) evaluateForMerge(metadata *adapter.InboundContext) (ruleGroupMatch, bool) {
+	groups := r.evaluateGroups(metadata)
+	for _, item := range r.items {
+		if !item.Match(metadata) {
+			return ruleGroupMatch{}, false
+		}
 	}
+	return groups, true
+}
 
-	if len(r.destinationPortItems) > 0 && !metadata.DestinationPortMatch {
-		return r.invert
+func (r *abstractDefaultRule) destinationIPCIDRMatchesSource(metadata *adapter.InboundContext) bool {
+	return metadata.IPCIDRMatchSource && len(r.destinationIPCIDRItems) > 0
+}
+
+func (r *abstractDefaultRule) destinationIPCIDRMatchesDestination(metadata *adapter.InboundContext) bool {
+	return !metadata.IgnoreDestinationIPCIDRMatch && !metadata.IPCIDRMatchSource && len(r.destinationIPCIDRItems) > 0
+}
+
+func (r *abstractDefaultRule) evaluateGroups(metadata *adapter.InboundContext) ruleGroupMatch {
+	var groups ruleGroupMatch
+	if len(r.sourceAddressItems) > 0 {
+		groups.required |= ruleMatchSourceAddress
+		if matchAnyItem(r.sourceAddressItems, metadata) {
+			groups.satisfied |= ruleMatchSourceAddress
+		}
 	}
-
-	// Service selection changes only after this rule's actual scope matched;
-	// unrelated traffic must not select a gateway or manufacture UI evidence.
-	if r.catalogWindow != nil && !r.catalogWindow.selected() { return false }
-	if !metadata.DidMatch {
-		return true
+	if r.destinationIPCIDRMatchesSource(metadata) {
+		groups.required |= ruleMatchSourceAddress
+		if !groups.satisfied.has(ruleMatchSourceAddress) && matchAnyItem(r.destinationIPCIDRItems, metadata) {
+			groups.satisfied |= ruleMatchSourceAddress
+		}
 	}
-
-	return !r.invert
+	if len(r.sourcePortItems) > 0 {
+		groups.required |= ruleMatchSourcePort
+		if matchAnyItem(r.sourcePortItems, metadata) {
+			groups.satisfied |= ruleMatchSourcePort
+		}
+	}
+	if len(r.destinationAddressItems) > 0 {
+		groups.required |= ruleMatchDestinationAddress
+		if matchAnyItem(r.destinationAddressItems, metadata) {
+			groups.satisfied |= ruleMatchDestinationAddress
+		}
+	}
+	if r.destinationIPCIDRMatchesDestination(metadata) {
+		groups.required |= ruleMatchDestinationAddress
+		if !groups.satisfied.has(ruleMatchDestinationAddress) && matchAnyItem(r.destinationIPCIDRItems, metadata) {
+			groups.satisfied |= ruleMatchDestinationAddress
+		}
+	}
+	if len(r.destinationPortItems) > 0 {
+		groups.required |= ruleMatchDestinationPort
+		if matchAnyItem(r.destinationPortItems, metadata) {
+			groups.satisfied |= ruleMatchDestinationPort
+		}
+	}
+	if metadata.IgnoreDestinationIPCIDRMatch && !metadata.IPCIDRMatchSource && len(r.destinationIPCIDRItems) > 0 && len(r.destinationAddressItems) == 0 {
+		metadata.DeferredIPCIDRMatchGroups |= uint8(ruleMatchDestinationAddress)
+	}
+	return groups
 }
 
 func (r *abstractDefaultRule) Action() adapter.RuleAction {
@@ -220,17 +237,46 @@ func (r *abstractLogicalRule) Close() error {
 }
 
 func (r *abstractLogicalRule) Match(metadata *adapter.InboundContext) bool {
+	var (
+		matched        bool
+		deferredGroups uint8
+	)
+	snapshot := snapshotRuleMatch(metadata)
 	if r.mode == C.LogicalTypeAnd {
-		return common.All(r.rules, func(it adapter.HeadlessRule) bool {
+		matched = true
+		for _, rule := range r.rules {
 			metadata.ResetRuleCache()
-			return it.Match(metadata)
-		}) != r.invert
+			if !rule.Match(metadata) {
+				matched = false
+				deferredGroups = 0
+				break
+			}
+			deferredGroups |= metadata.DeferredIPCIDRMatchGroups
+		}
 	} else {
-		return common.Any(r.rules, func(it adapter.HeadlessRule) bool {
+		for _, rule := range r.rules {
 			metadata.ResetRuleCache()
-			return it.Match(metadata)
-		}) != r.invert
+			if rule.Match(metadata) {
+				matched = true
+				if metadata.DeferredIPCIDRMatchGroups == 0 {
+					deferredGroups = 0
+					break
+				}
+				deferredGroups |= metadata.DeferredIPCIDRMatchGroups
+			}
+		}
 	}
+	snapshot.restore(metadata)
+	if matched {
+		metadata.DeferredIPCIDRMatchGroups |= deferredGroups
+	}
+	if r.invert {
+		if !matched {
+			return true
+		}
+		return deferredGroups != 0
+	}
+	return matched
 }
 
 func (r *abstractLogicalRule) Action() adapter.RuleAction {
@@ -250,4 +296,14 @@ func (r *abstractLogicalRule) String() string {
 	} else {
 		return "!(" + strings.Join(F.MapToString(r.rules), " "+op+" ") + ")"
 	}
+}
+
+func matchAnyItem(items []RuleItem, metadata *adapter.InboundContext) bool {
+	return common.Any(items, func(it RuleItem) bool {
+		return it.Match(metadata)
+	})
+}
+
+func (s ruleMatchState) has(target ruleMatchState) bool {
+	return s&target != 0
 }

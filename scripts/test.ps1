@@ -7,10 +7,10 @@ $root = Split-Path -Parent $PSScriptRoot
 $release = Get-Content -Raw -LiteralPath (Join-Path $root "config\release.json") | ConvertFrom-Json
 $version = (Get-Content -Raw -LiteralPath (Join-Path $root "VERSION")).Trim()
 if ($version -ne $release.version -or
-    $release.version -ne "1.1.2" -or
-    $release.state -ne "RELEASED" -or
-    $release.candidate_created -ne $true) {
-  throw "VERSION and config/release.json must identify the Core 1.1.2 release."
+    $release.version -ne "1.2.0" -or
+    !(($release.state -eq "PRE_CANDIDATE_LOCAL" -and $release.candidate_created -eq $false) -or
+      ($release.state -eq "RELEASED" -and $release.candidate_created -eq $true))) {
+  throw "VERSION and config/release.json must identify Core 1.2.0 with a consistent release state."
 }
 $retained = $release.retained_public_release
 if ($retained.version -ne "1.0.3" -or
@@ -40,6 +40,11 @@ if ($LASTEXITCODE -ne 0 -or $goVersion -ne $release.go_toolchain) {
 & (Join-Path $PSScriptRoot "verify-release-ci-contract.ps1")
 
 $previousToolchain = $env:GOTOOLCHAIN
+$clientTags = @(
+  "pokrov_client", "with_gvisor", "with_quic", "with_wireguard", "with_utls",
+  "with_clash_api", "with_grpc", "with_awg", "tfogo_checklinkname0",
+  "with_naive_outbound", "with_conntrack", "with_purego"
+) -join ","
 try {
   $env:GOTOOLCHAIN = "local"
 
@@ -74,11 +79,7 @@ try {
 
   Push-Location $root
   try {
-    & $goCommand.Source test -count=1 -run '^TestUnsafeConnectionStateHelloRetryRequest$' github.com/Psiphon-Labs/psiphon-tls
-    if ($LASTEXITCODE -ne 0) {
-      throw "Psiphon TLS connection-state conversion tests failed."
-    }
-    & $goCommand.Source test -count=1 ./...
+    & $goCommand.Source test -count=1 -ldflags=-checklinkname=0 -tags $clientTags ./...
     if ($LASTEXITCODE -ne 0) {
       throw "POKROV Core full module tests failed."
     }

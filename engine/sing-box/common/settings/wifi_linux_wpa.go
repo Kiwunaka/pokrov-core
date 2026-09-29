@@ -1,3 +1,4 @@
+//nolint:unused
 package settings
 
 import (
@@ -51,7 +52,7 @@ func newWpaSupplicantMonitor(callback func(adapter.WIFIState)) (WIFIMonitor, err
 	return nil, os.ErrNotExist
 }
 
-func (m *wpaSupplicantMonitor) ReadWIFIState() adapter.WIFIState {
+func (m *wpaSupplicantMonitor) ReadWIFIState(ctx context.Context) adapter.WIFIState {
 	id := wpaSocketCounter.Add(1)
 	localAddr := &net.UnixAddr{Name: fmt.Sprintf("@sing-box-wpa-%d-%d", os.Getpid(), id), Net: "unixgram"}
 	remoteAddr := &net.UnixAddr{Name: m.socketPath, Net: "unixgram"}
@@ -62,6 +63,15 @@ func (m *wpaSupplicantMonitor) ReadWIFIState() adapter.WIFIState {
 	defer conn.Close()
 
 	conn.SetDeadline(time.Now().Add(3 * time.Second))
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		select {
+		case <-ctx.Done():
+			conn.SetDeadline(time.Now())
+		case <-done:
+		}
+	}()
 
 	status, err := m.sendCommand(conn, "STATUS")
 	if err != nil {
@@ -73,13 +83,13 @@ func (m *wpaSupplicantMonitor) ReadWIFIState() adapter.WIFIState {
 	scanner := bufio.NewScanner(strings.NewReader(status))
 	for scanner.Scan() {
 		line := scanner.Text()
-		if strings.HasPrefix(line, "wpa_state=") {
-			state := strings.TrimPrefix(line, "wpa_state=")
+		if after, ok := strings.CutPrefix(line, "wpa_state="); ok {
+			state := after
 			connected = state == "COMPLETED"
-		} else if strings.HasPrefix(line, "ssid=") {
-			ssid = strings.TrimPrefix(line, "ssid=")
-		} else if strings.HasPrefix(line, "bssid=") {
-			bssid = strings.TrimPrefix(line, "bssid=")
+		} else if after, ok := strings.CutPrefix(line, "ssid="); ok {
+			ssid = after
+		} else if after, ok := strings.CutPrefix(line, "bssid="); ok {
+			bssid = after
 		}
 	}
 
@@ -123,7 +133,7 @@ func (m *wpaSupplicantMonitor) Start() error {
 	ctx, cancel := context.WithCancel(context.Background())
 	m.cancel = cancel
 
-	state := m.ReadWIFIState()
+	state := m.ReadWIFIState(ctx)
 	go m.monitorEvents(ctx, state)
 	m.callback(state)
 
@@ -201,7 +211,7 @@ func (m *wpaSupplicantMonitor) monitorEvents(ctx context.Context, lastState adap
 				debounceTimer.Stop()
 			}
 			debounceTimer = time.AfterFunc(500*time.Millisecond, func() {
-				state := m.ReadWIFIState()
+				state := m.ReadWIFIState(ctx)
 				if state != lastState {
 					lastState = state
 					m.callback(state)

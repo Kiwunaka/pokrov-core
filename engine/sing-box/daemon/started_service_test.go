@@ -8,15 +8,45 @@ import (
 	"net"
 	"os"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/gofrs/uuid/v5"
 	"github.com/sagernet/sing-box/adapter"
+	"github.com/sagernet/sing-box/common/trafficcontrol"
 	"github.com/sagernet/sing-box/common/urltest"
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
 	M "github.com/sagernet/sing/common/metadata"
 )
+
+func TestConnectionEventsPreserveHostContract(t *testing.T) {
+	id, err := uuid.NewV4()
+	if err != nil {
+		t.Fatal(err)
+	}
+	upload, download := new(atomic.Int64), new(atomic.Int64)
+	upload.Store(7)
+	download.Store(11)
+	metadata := &trafficcontrol.TrackerMetadata{
+		ID: id, Upload: upload, Download: download, Outbound: "candidate", CreatedAt: time.Now(),
+		Metadata: adapter.InboundContext{
+			Network: "tcp", ProcessInfo: &adapter.ConnectionOwner{UserId: 10001, AndroidPackageNames: []string{"space.pokrov.fixture", "space.pokrov.shared"}},
+		},
+	}
+	s := &StartedService{}
+	snapshots := make(map[uuid.UUID]connectionSnapshot)
+	event := s.applyConnectionEvent(trafficcontrol.ConnectionEvent{Type: trafficcontrol.ConnectionEventNew, ID: id, Metadata: metadata}, snapshots)
+	if event.Type != ConnectionEventType_CONNECTION_EVENT_NEW || event.Id != id.String() || event.Connection.Outbound != "candidate" || event.Connection.ProcessInfo.PackageName != "space.pokrov.fixture" {
+		t.Fatal("new connection changed the existing host event fields")
+	}
+	closedAt := time.Now()
+	event = s.applyConnectionEvent(trafficcontrol.ConnectionEvent{Type: trafficcontrol.ConnectionEventClosed, ID: id, Metadata: metadata, ClosedAt: closedAt}, snapshots)
+	if event.Type != ConnectionEventType_CONNECTION_EVENT_CLOSED || event.ClosedAt != closedAt.UnixMilli() || event.Connection.UplinkTotal != 7 || event.Connection.DownlinkTotal != 11 || len(snapshots) != 0 {
+		t.Fatal("closed connection lost its final counters or closure event")
+	}
+}
 
 func TestStartedServiceCloseEndsObserversAndRejectsReuse(t *testing.T) {
 	s := NewStartedService(ServiceOptions{Context: context.Background(), LogMaxLines: 4})
@@ -24,11 +54,10 @@ func TestStartedServiceCloseEndsObserversAndRejectsReuse(t *testing.T) {
 	_, logDone, _ := s.logObserver.Subscribe()
 	_, urlDone, _ := s.urlTestObserver.Subscribe()
 	_, clashDone, _ := s.clashModeObserver.Subscribe()
-	_, connectionDone, _ := s.connectionEventObserver.Subscribe()
 	if err := s.Close(); err != nil {
 		t.Fatal(err)
 	}
-	for _, done := range []<-chan struct{}{statusDone, logDone, urlDone, clashDone, connectionDone} {
+	for _, done := range []<-chan struct{}{statusDone, logDone, urlDone, clashDone} {
 		select {
 		case <-done:
 		case <-time.After(time.Second):
@@ -209,6 +238,9 @@ func TestManagedLoggerDoesNotRetainPlantedMaterialInAnyLogSink(t *testing.T) {
 				DisableColors: true, DisableTimestamp: true,
 			}, &output, "", service, true)
 			defer factory.Close()
+			if err := factory.Start(); err != nil {
+				t.Fatal(err)
+			}
 			factoryEntries, _, err := factory.Subscribe()
 			if err != nil {
 				t.Fatal(err)
@@ -277,6 +309,9 @@ func TestManagedLoggerKeepsPanicSemanticsWithSafePayload(t *testing.T) {
 	var output bytes.Buffer
 	factory := log.NewDefaultFactory(context.Background(), log.Formatter{}, &output, "", service, false)
 	defer factory.Close()
+	if err := factory.Start(); err != nil {
+		t.Fatal(err)
+	}
 	defer func() {
 		recovered := recover()
 		message, ok := recovered.(string)

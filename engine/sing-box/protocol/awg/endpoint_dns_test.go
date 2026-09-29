@@ -24,6 +24,10 @@ func (r *failingDNSRouter) Close() error                   { return nil }
 func (r *failingDNSRouter) Exchange(context.Context, *dns.Msg, adapter.DNSQueryOptions) (*dns.Msg, error) {
 	return nil, r.err
 }
+func (r *failingDNSRouter) ExchangeAsync(ctx context.Context, message *dns.Msg, options adapter.DNSQueryOptions, callback func(*dns.Msg, error)) {
+	response, err := r.Exchange(ctx, message, options)
+	callback(response, err)
+}
 func (r *failingDNSRouter) Lookup(_ context.Context, _ string, options adapter.DNSQueryOptions) ([]netip.Addr, error) {
 	r.lastOptions = options
 	return nil, r.err

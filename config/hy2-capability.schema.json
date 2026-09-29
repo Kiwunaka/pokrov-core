@@ -52,7 +52,7 @@
       "required": ["module", "version", "license", "notice"],
       "properties": {
         "module": { "const": "github.com/sagernet/sing-box" },
-        "version": { "const": "v1.13.0" },
+        "version": { "const": "v1.14.2" },
         "license": { "const": "GPL-3.0-or-later" },
         "notice": { "const": "engine/sing-box/LICENSE" }
       }

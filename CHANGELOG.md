@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.2.0 — unreleased
+
+- Move the embedded runtime to sing-box `1.14.2` and keep POKROV transports,
+  DNS fallback, TLS fragmentation and platform callbacks.
+- Exclude Psiphon, Tor, Mieru, DNSTT, SSH and remote server inbounds from client
+  builds; require credentials for local SOCKS, HTTP and mixed proxies.
+- Expose selector switching and network reset without replacing the runtime;
+  close retired XHTTP clients and keep xmux connection limits stable.
+- Keep the app `1.4.0` on Core `1.1.2`; app adoption belongs to `1.5`.
+
 ## 1.1.2 — 2026-09-29
 
 - Candidate verification now requires a marked HTTPS 204 and a full 64 KiB

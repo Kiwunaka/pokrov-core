@@ -1,6 +1,7 @@
 package adapter
 
 import (
+	"context"
 	"reflect"
 	"strings"
 	"time"
@@ -74,29 +75,49 @@ func getServiceName(service any) string {
 	return strings.ToLower(t.Name())
 }
 
-func Start(logger log.ContextLogger, stage StartStage, services ...Lifecycle) error {
+func Start(ctx context.Context, logger log.ContextLogger, stage StartStage, services ...Lifecycle) error {
 	for _, service := range services {
+		err := ctx.Err()
+		if err != nil {
+			return err
+		}
 		name := getServiceName(service)
-		logger.Trace(stage, " ", name)
-		startTime := time.Now()
-		err := service.Start(stage)
+		done := LogElapsed(logger, stage, " ", name)
+		err = service.Start(stage)
+		done()
 		if err != nil {
 			return E.New(name, " ", err)
 		}
-		logger.Trace(stage, " ", name, " completed (", F.Seconds(time.Since(startTime).Seconds()), "s)")
 	}
 	return nil
 }
 
-func StartNamed(logger log.ContextLogger, stage StartStage, services []LifecycleService) error {
+func StartNamed(ctx context.Context, logger log.ContextLogger, stage StartStage, services []LifecycleService) error {
 	for _, service := range services {
-		logger.Trace(stage, " ", service.Name())
-		startTime := time.Now()
-		err := service.Start(stage)
+		err := ctx.Err()
+		if err != nil {
+			return err
+		}
+		done := LogElapsed(logger, stage, " ", service.Name())
+		err = service.Start(stage)
+		done()
 		if err != nil {
 			return E.Cause(err, stage.String(), " ", service.Name())
 		}
-		logger.Trace(stage, " ", service.Name(), " completed (", F.Seconds(time.Since(startTime).Seconds()), "s)")
 	}
 	return nil
+}
+
+func LogElapsed(logger log.ContextLogger, description ...any) func() {
+	prefix := F.ToString(description...)
+	startTime := time.Now()
+	timer := time.AfterFunc(time.Second, func() {
+		logger.Trace(prefix, "...")
+	})
+	return func() {
+		if timer.Stop() {
+			return
+		}
+		logger.Trace(prefix, " completed (", F.Seconds(time.Since(startTime).Seconds()), "s)")
+	}
 }

@@ -269,7 +269,7 @@ func (h *Outbound) allows(name string) bool {
 	return false
 }
 
-func (h *Outbound) NewConnectionEx(ctx context.Context, conn net.Conn, metadata adapter.InboundContext, onClose N.CloseHandlerFunc) {
+func (h *Outbound) NewConnection(ctx context.Context, conn net.Conn, metadata adapter.InboundContext, onClose N.CloseHandlerFunc) {
 	if metadata.Destination.Port != 443 {
 		N.CloseOnHandshakeFailure(conn, onClose, errScope)
 		return

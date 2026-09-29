@@ -3,6 +3,7 @@ package libbox
 import (
 	"bytes"
 	"context"
+	"net/netip"
 	"os"
 
 	box "github.com/sagernet/sing-box"
@@ -30,13 +31,13 @@ func FromContext(ctx context.Context, platformInterface PlatformInterface) conte
 	if platformInterface != nil {
 		if localTransport := platformInterface.LocalDNSTransport(); localTransport != nil {
 			dns.RegisterTransport[option.LocalDNSServerOptions](dnsRegistry, C.DNSTypeLocal, func(ctx context.Context, logger log.ContextLogger, tag string, options option.LocalDNSServerOptions) (adapter.DNSTransport, error) {
-				return newPlatformTransport(localTransport, tag, options), nil
+				return newPlatformTransport(ctx, logger, localTransport, tag, options)
 			})
 		}
 	}
 
 	ctx = filemanager.WithDefault(ctx, sWorkingPath, sTempPath, sUserID, sGroupID)
-	return box.Context(ctx, include.InboundRegistry(), include.OutboundRegistry(), include.EndpointRegistry(), dnsRegistry, include.ServiceRegistry())
+	return box.Context(ctx, include.InboundRegistry(), include.OutboundRegistry(), include.EndpointRegistry(), dnsRegistry, include.ServiceRegistry(), include.CertificateProviderRegistry())
 }
 
 func parseConfig(ctx context.Context, configContent string) (option.Options, error) {
@@ -75,6 +76,8 @@ func CheckConfigOptions(options *option.Options) error {
 
 type platformInterfaceStub struct{}
 
+var _ adapter.PlatformInterface = (*platformInterfaceStub)(nil)
+
 func (s *platformInterfaceStub) Initialize(networkManager adapter.NetworkManager) error {
 	return nil
 }
@@ -93,6 +96,10 @@ func (s *platformInterfaceStub) UsePlatformInterface() bool {
 
 func (s *platformInterfaceStub) OpenInterface(options *tun.Options, platformOptions option.TunPlatformOptions) (tun.Tun, error) {
 	return nil, os.ErrInvalid
+}
+
+func (s *platformInterfaceStub) ProcessPlatformOptions(options option.TunPlatformOptions) error {
+	return nil
 }
 
 func (s *platformInterfaceStub) UsePlatformDefaultInterfaceMonitor() bool {
@@ -130,7 +137,7 @@ func (s *platformInterfaceStub) UsePlatformWIFIMonitor() bool {
 	return false
 }
 
-func (s *platformInterfaceStub) ReadWIFIState() adapter.WIFIState {
+func (s *platformInterfaceStub) ReadWIFIState(ctx context.Context) adapter.WIFIState {
 	return adapter.WIFIState{}
 }
 
@@ -152,6 +159,62 @@ func (s *platformInterfaceStub) UsePlatformNotification() bool {
 
 func (s *platformInterfaceStub) SendNotification(notification *adapter.Notification) error {
 	return nil
+}
+
+func (s *platformInterfaceStub) CancelNotification(identifier string, typeID int32) error {
+	return os.ErrInvalid
+}
+
+func (s *platformInterfaceStub) MyInterfaceAddress() []netip.Addr {
+	return nil
+}
+
+func (s *platformInterfaceStub) UsePlatformNeighborResolver() bool {
+	return false
+}
+
+func (s *platformInterfaceStub) StartNeighborMonitor(listener adapter.NeighborUpdateListener) error {
+	return os.ErrInvalid
+}
+
+func (s *platformInterfaceStub) CloseNeighborMonitor(listener adapter.NeighborUpdateListener) error {
+	return nil
+}
+
+func (s *platformInterfaceStub) UsePlatformShell() bool {
+	return false
+}
+
+func (s *platformInterfaceStub) CheckPlatformShell() error {
+	return os.ErrInvalid
+}
+
+func (s *platformInterfaceStub) OpenShellSession(user *adapter.PlatformUser, command string, env []string, term string, rows int32, cols int32) (adapter.ShellSession, error) {
+	return nil, os.ErrInvalid
+}
+
+func (s *platformInterfaceStub) LookupUser(username string) (*adapter.PlatformUser, error) {
+	return nil, os.ErrInvalid
+}
+
+func (s *platformInterfaceStub) LookupSFTPServer() (string, error) {
+	return "", os.ErrInvalid
+}
+
+func (s *platformInterfaceStub) ReadSystemSSHHostKey() ([]byte, error) {
+	return nil, os.ErrInvalid
+}
+
+func (s *platformInterfaceStub) TailscaleHostname() string {
+	return ""
+}
+
+func (s *platformInterfaceStub) UsePlatformBridge() bool {
+	return false
+}
+
+func (s *platformInterfaceStub) CreateBridge(options adapter.BridgeOptions) (adapter.BridgeSession, error) {
+	return nil, os.ErrInvalid
 }
 
 func (s *platformInterfaceStub) UsePlatformLocalDNSTransport() bool {
@@ -194,8 +257,8 @@ func (s *interfaceMonitorStub) UnregisterCallback(element *list.Element[tun.Defa
 func (s *interfaceMonitorStub) RegisterMyInterface(interfaceName string) {
 }
 
-func (s *interfaceMonitorStub) MyInterface() string {
-	return ""
+func (s *interfaceMonitorStub) MyInterfaces() []string {
+	return nil
 }
 
 func FormatConfig(configContent string) (*StringBox, error) {

@@ -1,15 +1,18 @@
 # POKROV Windows adapter cleanup
 
-Base: `github.com/sagernet/sing-tun v0.8.0-beta.17`, upstream commit
-`635920688d0a7aa2171afa56be2a0760a69fecb9`. The module contents and license
-notices are retained. Only two upstream source files change:
+Base: `github.com/sagernet/sing-tun v0.9.6-0.20260924001923-ddaa4ca25e3b`,
+the dependency required by sing-box 1.14.2. The source API and module dependencies
+are updated; existing license notices and bundled Wintun binaries are retained.
+The local changes preserve Windows adapter ownership and correct a DNS error:
 
-- `internal/wintun/wintun_windows.go`: pass the adapter handle directly to
-  `SyscallN`; the old argument count was being passed as the handle. The same
-  correction appears in upstream commit
-  `46aa536b378d6ce2d64f1d2ab6e0a1b25ebd2300`. Its unrelated changes are omitted.
-- `tun_windows.go`: close the newly created adapter immediately when
-  `StartSession` fails, matching the existing configuration-failure cleanup.
+- `internal/wintun/wintun_windows.go`: upstream now passes the owned adapter
+  handle directly to `SyscallN`; the POKROV finalizer regression test is retained.
+- `tun_windows.go`: retain create-only ownership and close the newly created
+  adapter immediately when `StartSession` fails. An adapter with the same name
+  is never reopened after creation fails. Strict-route WFP filters are retained;
+  DNS blocking follows the upstream `DNSMode` contract.
+- `tun.go`: IPv4 `/32` without a DNS server returns a configuration error instead
+  of indexing a missing IPv6 prefix when formatting that error.
 
 The four supplied `internal/wintun/*/wintun.dll` files remain byte-identical
 to the official Wintun 0.14.1 archive (SHA-256

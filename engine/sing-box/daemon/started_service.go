@@ -11,10 +11,9 @@ import (
 
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/common/conntrack"
+	"github.com/sagernet/sing-box/common/trafficcontrol"
 	"github.com/sagernet/sing-box/common/urltest"
 	C "github.com/sagernet/sing-box/constant"
-	"github.com/sagernet/sing-box/experimental/clashapi"
-	"github.com/sagernet/sing-box/experimental/clashapi/trafficontrol"
 	"github.com/sagernet/sing-box/experimental/deprecated"
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
@@ -62,9 +61,6 @@ type StartedService struct {
 	clashModeSubscriber     *observable.Subscriber[struct{}]
 	clashModeObserver       *observable.Observer[struct{}]
 
-	connectionEventSubscriber *observable.Subscriber[trafficontrol.ConnectionEvent]
-	connectionEventObserver   *observable.Observer[trafficontrol.ConnectionEvent]
-
 	extraServices []adapter.LifecycleService //H
 }
 
@@ -94,20 +90,18 @@ func NewStartedService(options ServiceOptions) *StartedService {
 		// userID:           options.UserID,
 		// groupID:          options.GroupID,
 		// systemProxyEnabled:      options.SystemProxyEnabled,
-		serviceStatus:             &ServiceStatus{Status: ServiceStatus_IDLE},
-		serviceStatusSubscriber:   observable.NewSubscriber[*ServiceStatus](4),
-		logSubscriber:             observable.NewSubscriber[*log.Entry](128),
-		urlTestSubscriber:         observable.NewSubscriber[struct{}](1),
-		urlTestHistoryStorage:     urltest.NewHistoryStorage(),
-		clashModeSubscriber:       observable.NewSubscriber[struct{}](1),
-		connectionEventSubscriber: observable.NewSubscriber[trafficontrol.ConnectionEvent](256),
-		extraServices:             options.ExtraServices,
+		serviceStatus:           &ServiceStatus{Status: ServiceStatus_IDLE},
+		serviceStatusSubscriber: observable.NewSubscriber[*ServiceStatus](4),
+		logSubscriber:           observable.NewSubscriber[*log.Entry](128),
+		urlTestSubscriber:       observable.NewSubscriber[struct{}](1),
+		urlTestHistoryStorage:   urltest.NewHistoryStorage(),
+		clashModeSubscriber:     observable.NewSubscriber[struct{}](1),
+		extraServices:           options.ExtraServices,
 	}
 	s.serviceStatusObserver = observable.NewObserver(s.serviceStatusSubscriber, 2)
 	s.logObserver = observable.NewObserver(s.logSubscriber, 64)
 	s.urlTestObserver = observable.NewObserver(s.urlTestSubscriber, 1)
 	s.clashModeObserver = observable.NewObserver(s.clashModeSubscriber, 1)
-	s.connectionEventObserver = observable.NewObserver(s.connectionEventSubscriber, 64)
 	return s
 }
 
@@ -218,9 +212,8 @@ func (s *StartedService) startOrReloadServiceImp(profileOptions *option.Options,
 		s.instance.Box().AddService(extraService)
 	}
 	instance.urlTestHistoryStorage.SetHook(s.urlTestSubscriber)
-	if instance.clashServer != nil {
-		instance.clashServer.SetModeUpdateHook(s.clashModeSubscriber)
-		instance.clashServer.(*clashapi.Server).TrafficManager().SetEventHook(s.connectionEventSubscriber)
+	if instance.clashMode != nil {
+		instance.clashMode.AddUpdateHook(s.clashModeSubscriber)
 	}
 	s.serviceAccess.Unlock()
 	err = instance.Start()
@@ -287,7 +280,6 @@ func (s *StartedService) Close() error {
 		s.logObserver,
 		s.urlTestObserver,
 		s.clashModeObserver,
-		s.connectionEventObserver,
 		s.urlTestHistoryStorage,
 	))
 }
@@ -470,13 +462,10 @@ func (s *StartedService) readStatus() *Status {
 	s.serviceAccess.RLock()
 	nowService := s.instance
 	s.serviceAccess.RUnlock()
-	if nowService != nil {
-		if clashServer := nowService.clashServer; clashServer != nil {
-			status.TrafficAvailable = true
-			trafficManager := clashServer.(*clashapi.Server).TrafficManager()
-			status.UplinkTotal, status.DownlinkTotal = trafficManager.Total()
-			status.ConnectionsIn = int32(trafficManager.ConnectionsLen())
-		}
+	if nowService != nil && nowService.trafficManager != nil {
+		status.TrafficAvailable = true
+		status.UplinkTotal, status.DownlinkTotal = nowService.trafficManager.Total()
+		status.ConnectionsIn = int32(nowService.trafficManager.ConnectionsLen())
 	}
 	return &status
 }
@@ -547,7 +536,7 @@ func (s *StartedService) readGroups() *Groups {
 			var item GroupItem
 			item.Tag = itemTag
 			item.Type = itemOutbound.Type()
-			if history := historyStorage.LoadURLTestHistory(adapter.OutboundTag(itemOutbound)); history != nil {
+			if history := historyStorage.LoadURLTestHistory(group.RealTag(boxService.instance.Outbound(), itemOutbound)); history != nil {
 				item.UrlTestTime = history.Time.Unix()
 				item.UrlTestDelay = int32(history.Delay)
 			}
@@ -567,14 +556,14 @@ func (s *StartedService) GetClashModeStatus(ctx context.Context, empty *emptypb.
 		s.serviceAccess.RUnlock()
 		return nil, os.ErrInvalid
 	}
-	clashServer := s.instance.clashServer
+	clashMode := s.instance.clashMode
 	s.serviceAccess.RUnlock()
-	if clashServer == nil {
+	if clashMode == nil {
 		return nil, os.ErrInvalid
 	}
 	return &ClashModeStatus{
-		ModeList:    clashServer.ModeList(),
-		CurrentMode: clashServer.Mode(),
+		ModeList:    clashMode.ModeList(),
+		CurrentMode: clashMode.Mode(),
 	}, nil
 }
 
@@ -594,7 +583,7 @@ func (s *StartedService) SubscribeClashMode(empty *emptypb.Empty, server grpc.Se
 			s.serviceAccess.RUnlock()
 			return os.ErrInvalid
 		}
-		message := &ClashMode{Mode: s.instance.clashServer.Mode()}
+		message := &ClashMode{Mode: s.instance.clashMode.Mode()}
 		s.serviceAccess.RUnlock()
 		err = server.Send(message)
 		if err != nil {
@@ -618,9 +607,12 @@ func (s *StartedService) SetClashMode(ctx context.Context, request *ClashMode) (
 		s.serviceAccess.RUnlock()
 		return nil, os.ErrInvalid
 	}
-	clashServer := s.instance.clashServer
+	clashMode := s.instance.clashMode
 	s.serviceAccess.RUnlock()
-	clashServer.(*clashapi.Server).SetMode(request.Mode)
+	if clashMode == nil {
+		return nil, os.ErrInvalid
+	}
+	clashMode.SetMode(request.Mode)
 	return &emptypb.Empty{}, nil
 }
 
@@ -928,17 +920,16 @@ func (s *StartedService) SubscribeConnections(request *SubscribeConnectionsReque
 	boxService := s.instance
 	s.serviceAccess.RUnlock()
 
-	if boxService.clashServer == nil {
-		return E.New("clash server not available")
+	trafficManager := boxService.trafficManager
+	if trafficManager == nil {
+		return E.New("traffic manager not available")
 	}
 
-	trafficManager := boxService.clashServer.(*clashapi.Server).TrafficManager()
-
-	subscription, done, err := s.connectionEventObserver.Subscribe()
+	subscription, done, err := trafficManager.SubscribeEvents()
 	if err != nil {
 		return err
 	}
-	defer s.connectionEventObserver.UnSubscribe(subscription)
+	defer trafficManager.UnSubscribeEvents(subscription)
 
 	connectionSnapshots := make(map[uuid.UUID]connectionSnapshot)
 	initialEvents := s.buildInitialConnectionState(trafficManager, connectionSnapshots)
@@ -1008,7 +999,7 @@ type connectionSnapshot struct {
 	hadTraffic bool
 }
 
-func (s *StartedService) buildInitialConnectionState(manager *trafficontrol.Manager, snapshots map[uuid.UUID]connectionSnapshot) []*ConnectionEvent {
+func (s *StartedService) buildInitialConnectionState(manager *trafficcontrol.Manager, snapshots map[uuid.UUID]connectionSnapshot) []*ConnectionEvent {
 	var events []*ConnectionEvent
 
 	for _, metadata := range manager.Connections() {
@@ -1036,9 +1027,9 @@ func (s *StartedService) buildInitialConnectionState(manager *trafficontrol.Mana
 	return events
 }
 
-func (s *StartedService) applyConnectionEvent(event trafficontrol.ConnectionEvent, snapshots map[uuid.UUID]connectionSnapshot) *ConnectionEvent {
+func (s *StartedService) applyConnectionEvent(event trafficcontrol.ConnectionEvent, snapshots map[uuid.UUID]connectionSnapshot) *ConnectionEvent {
 	switch event.Type {
-	case trafficontrol.ConnectionEventNew:
+	case trafficcontrol.ConnectionEventNew:
 		if _, exists := snapshots[event.ID]; exists {
 			return nil
 		}
@@ -1051,7 +1042,7 @@ func (s *StartedService) applyConnectionEvent(event trafficontrol.ConnectionEven
 			Id:         event.ID.String(),
 			Connection: buildConnectionProto(event.Metadata),
 		}
-	case trafficontrol.ConnectionEventClosed:
+	case trafficcontrol.ConnectionEventClosed:
 		delete(snapshots, event.ID)
 		protoEvent := &ConnectionEvent{
 			Type: ConnectionEventType_CONNECTION_EVENT_CLOSED,
@@ -1076,9 +1067,9 @@ func (s *StartedService) applyConnectionEvent(event trafficontrol.ConnectionEven
 	}
 }
 
-func (s *StartedService) buildTrafficUpdates(manager *trafficontrol.Manager, snapshots map[uuid.UUID]connectionSnapshot) []*ConnectionEvent {
+func (s *StartedService) buildTrafficUpdates(manager *trafficcontrol.Manager, snapshots map[uuid.UUID]connectionSnapshot) []*ConnectionEvent {
 	activeConnections := manager.Connections()
-	activeIndex := make(map[uuid.UUID]*trafficontrol.TrackerMetadata, len(activeConnections))
+	activeIndex := make(map[uuid.UUID]*trafficcontrol.TrackerMetadata, len(activeConnections))
 	var events []*ConnectionEvent
 
 	for _, metadata := range activeConnections {
@@ -1142,13 +1133,13 @@ func (s *StartedService) buildTrafficUpdates(manager *trafficontrol.Manager, sna
 		}
 	}
 
-	var closedIndex map[uuid.UUID]*trafficontrol.TrackerMetadata
+	var closedIndex map[uuid.UUID]*trafficcontrol.TrackerMetadata
 	for id := range snapshots {
 		if _, exists := activeIndex[id]; exists {
 			continue
 		}
 		if closedIndex == nil {
-			closedIndex = make(map[uuid.UUID]*trafficontrol.TrackerMetadata)
+			closedIndex = make(map[uuid.UUID]*trafficcontrol.TrackerMetadata)
 			for _, metadata := range manager.ClosedConnections() {
 				closedIndex[metadata.ID] = metadata
 			}
@@ -1174,7 +1165,7 @@ func (s *StartedService) buildTrafficUpdates(manager *trafficontrol.Manager, sna
 	return events
 }
 
-func buildConnectionProto(metadata *trafficontrol.TrackerMetadata) *Connection {
+func buildConnectionProto(metadata *trafficcontrol.TrackerMetadata) *Connection {
 	var rule string
 	if metadata.Rule != nil {
 		rule = metadata.Rule.String()
@@ -1188,7 +1179,9 @@ func buildConnectionProto(metadata *trafficontrol.TrackerMetadata) *Connection {
 			UserId:      metadata.Metadata.ProcessInfo.UserId,
 			UserName:    metadata.Metadata.ProcessInfo.UserName,
 			ProcessPath: metadata.Metadata.ProcessInfo.ProcessPath,
-			PackageName: metadata.Metadata.ProcessInfo.AndroidPackageName,
+		}
+		if len(metadata.Metadata.ProcessInfo.AndroidPackageNames) > 0 {
+			processInfo.PackageName = metadata.Metadata.ProcessInfo.AndroidPackageNames[0]
 		}
 	}
 	return &Connection{
@@ -1224,7 +1217,7 @@ func (s *StartedService) CloseConnection(ctx context.Context, request *CloseConn
 	}
 	boxService := s.instance
 	s.serviceAccess.RUnlock()
-	targetConn := boxService.clashServer.(*clashapi.Server).TrafficManager().Connection(uuid.FromStringOrNil(request.Id))
+	targetConn := boxService.trafficManager.Connection(uuid.FromStringOrNil(request.Id))
 	if targetConn != nil {
 		targetConn.Close()
 	}

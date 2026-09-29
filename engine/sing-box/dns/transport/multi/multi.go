@@ -249,3 +249,7 @@ func (m *Transport) isBlocked(ip net.IP) bool {
 	}
 	return false
 }
+
+func (t *Transport) ExchangeAsync(ctx context.Context, message *mDNS.Msg, callback func(response *mDNS.Msg, err error)) {
+	go func() { callback(t.Exchange(ctx, message)) }()
+}

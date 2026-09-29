@@ -6,8 +6,10 @@ import (
 	"context"
 	"net/netip"
 	"runtime"
+	"sync"
 	"time"
 
+	"github.com/sagernet/gvisor/pkg/buffer"
 	"github.com/sagernet/gvisor/pkg/tcpip"
 	"github.com/sagernet/gvisor/pkg/tcpip/adapters/gonet"
 	"github.com/sagernet/gvisor/pkg/tcpip/header"
@@ -33,12 +35,16 @@ type GVisor struct {
 	inet6Address         netip.Addr
 	inet4LoopbackAddress []netip.Addr
 	inet6LoopbackAddress []netip.Addr
-	udpTimeout           time.Duration
+	icmpTimeout          time.Duration
+	udpNATOptions        UDPNatOptions
 	broadcastAddr        netip.Addr
 	handler              Handler
 	logger               logger.Logger
 	stack                *stack.Stack
 	endpoint             stack.LinkEndpoint
+	dispatcher           *ForwardDispatcher
+	icmpForwarder        *ICMPForwarder
+	udpForwarder         *UDPForwarder
 }
 
 type GVisorTun interface {
@@ -73,10 +79,18 @@ func NewGVisor(
 		inet6Address:         inet6Address,
 		inet4LoopbackAddress: options.TunOptions.Inet4LoopbackAddress,
 		inet6LoopbackAddress: options.TunOptions.Inet6LoopbackAddress,
-		udpTimeout:           options.UDPTimeout,
-		broadcastAddr:        BroadcastAddr(options.TunOptions.Inet4Address),
-		handler:              options.Handler,
-		logger:               options.Logger,
+		icmpTimeout:          options.ICMPTimeout,
+		udpNATOptions: UDPNatOptions{
+			Timeout:          options.UDPTimeout,
+			Mapping:          options.UDPMapping,
+			Filtering:        options.UDPFiltering,
+			MaxSize:          options.UDPNATMax,
+			InterfaceFinder:  options.InterfaceFinder,
+			ExcludeInterface: []string{options.TunOptions.Name},
+		},
+		broadcastAddr: BroadcastAddr(options.TunOptions.Inet4Address),
+		handler:       options.Handler,
+		logger:        options.Logger,
 	}
 	return gStack, nil
 }
@@ -86,23 +100,58 @@ func (t *GVisor) Start() error {
 	if err != nil {
 		return err
 	}
-	linkEndpoint = &LinkEndpointFilter{linkEndpoint, t.broadcastAddr, t.tun}
-	ipStack, err := NewGVisorStackWithOptions(linkEndpoint, nicOptions, false)
+	if t.handler != nil {
+		t.dispatcher = NewForwardDispatcher(t.handler, &gvisorWriteback{tun: t.tun}, t.logger, t.udpNATOptions.Timeout, t.icmpTimeout)
+	}
+	linkEndpoint = &LinkEndpointFilter{
+		LinkEndpoint:         linkEndpoint,
+		BroadcastAddress:     t.broadcastAddr,
+		Writer:               t.tun,
+		Dispatcher:           t.dispatcher,
+		Inet4Address:         t.inet4Address,
+		Inet6Address:         t.inet6Address,
+		Inet4LoopbackAddress: t.inet4LoopbackAddress,
+		Inet6LoopbackAddress: t.inet6LoopbackAddress,
+	}
+	ipStack, err := newGVisorStack(linkEndpoint, nicOptions, false, true)
 	if err != nil {
 		return err
 	}
 	ipStack.SetTransportProtocolHandler(tcp.ProtocolNumber, NewTCPForwarderWithLoopback(t.ctx, ipStack, t.handler, t.inet4LoopbackAddress, t.inet6LoopbackAddress, t.tun).HandlePacket)
-	ipStack.SetTransportProtocolHandler(udp.ProtocolNumber, NewUDPForwarder(t.ctx, ipStack, t.handler, t.udpTimeout).HandlePacket)
-	icmpForwarder := NewICMPForwarder(t.ctx, ipStack, t.handler, t.udpTimeout)
-	icmpForwarder.SetLocalAddresses(t.inet4Address, t.inet6Address)
+	udpForwarder := NewUDPForwarder(t.ctx, ipStack, t.handler, t.udpNATOptions)
+	err = udpForwarder.Start()
+	if err != nil {
+		return err
+	}
+	ipStack.SetTransportProtocolHandler(udp.ProtocolNumber, udpForwarder.HandlePacket)
+	t.udpForwarder = udpForwarder
+	icmpForwarder := NewICMPForwarder(ipStack, t.handler, t.logger)
 	ipStack.SetTransportProtocolHandler(icmp.ProtocolNumber4, icmpForwarder.HandlePacket)
 	ipStack.SetTransportProtocolHandler(icmp.ProtocolNumber6, icmpForwarder.HandlePacket)
+	t.icmpForwarder = icmpForwarder
 	t.stack = ipStack
 	t.endpoint = linkEndpoint
 	return nil
 }
 
+func (t *GVisor) ResetNetwork() {
+	if t.udpForwarder != nil {
+		t.udpForwarder.udpNat.Purge()
+	}
+	if t.icmpForwarder != nil {
+		t.icmpForwarder.Purge()
+	}
+	t.dispatcher.ResetNetwork()
+}
+
 func (t *GVisor) Close() error {
+	t.dispatcher.Close()
+	if t.icmpForwarder != nil {
+		t.icmpForwarder.Close()
+	}
+	if t.udpForwarder != nil {
+		t.udpForwarder.Close()
+	}
 	if t.stack == nil {
 		return nil
 	}
@@ -112,6 +161,37 @@ func (t *GVisor) Close() error {
 		endpoint.Abort()
 	}
 	return nil
+}
+
+type gvisorWriteback struct {
+	tun    GVisorTun
+	access sync.Mutex
+}
+
+func (w *gvisorWriteback) ReturnHeadroom() int {
+	return 0
+}
+
+func (w *gvisorWriteback) WriteReturnPackets(packets [][]byte) error {
+	w.access.Lock()
+	defer w.access.Unlock()
+	var writeErrors []error
+	for _, packet := range packets {
+		pkt := stack.NewPacketBuffer(stack.PacketBufferOptions{
+			Payload: buffer.MakeWithData(packet),
+		})
+		if header.IPVersion(packet) == header.IPv6Version {
+			pkt.NetworkProtocolNumber = header.IPv6ProtocolNumber
+		} else {
+			pkt.NetworkProtocolNumber = header.IPv4ProtocolNumber
+		}
+		_, err := w.tun.WritePacket(pkt)
+		pkt.DecRef()
+		if err != nil {
+			writeErrors = append(writeErrors, err)
+		}
+	}
+	return E.Errors(writeErrors...)
 }
 
 func AddressFromAddr(destination netip.Addr) tcpip.Address {
@@ -135,6 +215,10 @@ func NewGVisorStack(ep stack.LinkEndpoint) (*stack.Stack, error) {
 }
 
 func NewGVisorStackWithOptions(ep stack.LinkEndpoint, opts stack.NICOptions, allowRawEndpoint bool) (*stack.Stack, error) {
+	return newGVisorStack(ep, opts, allowRawEndpoint, false)
+}
+
+func newGVisorStack(ep stack.LinkEndpoint, opts stack.NICOptions, allowRawEndpoint bool, isLocalStack bool) (*stack.Stack, error) {
 	stackOptions := stack.Options{
 		NetworkProtocols: []stack.NetworkProtocolFactory{
 			ipv4.NewProtocol,
@@ -175,23 +259,46 @@ func NewGVisorStackWithOptions(ep stack.LinkEndpoint, opts stack.NICOptions, all
 		tcpRecoveryOpt := tcpip.TCPRecovery(0)
 		err = ipStack.SetTransportProtocolOption(tcp.ProtocolNumber, &tcpRecoveryOpt)
 	}
-	tcpRXBufOpt := tcpip.TCPReceiveBufferSizeRangeOption{
-		Min:     tcpRXBufMinSize,
-		Default: tcpRXBufDefSize,
-		Max:     tcpRXBufMaxSize,
-	}
-	err = ipStack.SetTransportProtocolOption(tcp.ProtocolNumber, &tcpRXBufOpt)
-	if err != nil {
-		return nil, gonet.TranslateNetstackError(err)
-	}
-	tcpTXBufOpt := tcpip.TCPSendBufferSizeRangeOption{
-		Min:     tcpTXBufMinSize,
-		Default: tcpTXBufDefSize,
-		Max:     tcpTXBufMaxSize,
-	}
-	err = ipStack.SetTransportProtocolOption(tcp.ProtocolNumber, &tcpTXBufOpt)
-	if err != nil {
-		return nil, gonet.TranslateNetstackError(err)
+	if isLocalStack || runtime.GOOS == "ios" {
+		const iOSBufferDefault = 1 << 15
+		const iOSBufferMax = 1 << 17
+		tcpRXBufOpt := tcpip.TCPReceiveBufferSizeRangeOption{
+			Min:     tcpRXBufMinSize,
+			Default: iOSBufferDefault,
+			Max:     iOSBufferMax,
+		}
+		err = ipStack.SetTransportProtocolOption(tcp.ProtocolNumber, &tcpRXBufOpt)
+		if err != nil {
+			return nil, gonet.TranslateNetstackError(err)
+		}
+		tcpTXBufOpt := tcpip.TCPSendBufferSizeRangeOption{
+			Min:     tcpTXBufMinSize,
+			Default: iOSBufferDefault,
+			Max:     iOSBufferMax,
+		}
+		err = ipStack.SetTransportProtocolOption(tcp.ProtocolNumber, &tcpTXBufOpt)
+		if err != nil {
+			return nil, gonet.TranslateNetstackError(err)
+		}
+	} else {
+		tcpRXBufOpt := tcpip.TCPReceiveBufferSizeRangeOption{
+			Min:     tcpRXBufMinSize,
+			Default: tcpRXBufDefSize,
+			Max:     tcpRXBufMaxSize,
+		}
+		err = ipStack.SetTransportProtocolOption(tcp.ProtocolNumber, &tcpRXBufOpt)
+		if err != nil {
+			return nil, gonet.TranslateNetstackError(err)
+		}
+		tcpTXBufOpt := tcpip.TCPSendBufferSizeRangeOption{
+			Min:     tcpTXBufMinSize,
+			Default: tcpTXBufDefSize,
+			Max:     tcpTXBufMaxSize,
+		}
+		err = ipStack.SetTransportProtocolOption(tcp.ProtocolNumber, &tcpTXBufOpt)
+		if err != nil {
+			return nil, gonet.TranslateNetstackError(err)
+		}
 	}
 	return ipStack, nil
 }

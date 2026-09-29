@@ -1,5 +1,16 @@
 # Release process
 
+The embedded fork targets stable sing-box `1.14.2` while retaining POKROV
+XHTTP, Smart Access, WARP, AWG and opt-in Telegram WSS transports. Runtime client
+builds use `pokrov_client`: Psiphon, Tor, Mieru, DNSTT, SSH and remote server
+inbounds are omitted; TUN and authenticated local SOCKS/HTTP/mixed remain.
+Android host certificate roots and the public host callbacks remain supported.
+POKROV catalog DNS and `bypass_if_failed` retain their failure/reselection path;
+combining that path with the new DNS response/evaluate/race actions is rejected.
+The WireGuard fork preserves Noise payloads and send errors; fake Noise packets
+keep their full header and bypass reserved-byte rewriting. Size and idle library
+RSS comparisons do not measure traffic memory or physical-device behavior.
+
 Outbound monitoring is disabled unless the sing-box profile sets
 `experimental.monitoring` or a legacy Core profile explicitly sets
 `enable-outbound-monitoring`. When enabled, its periodic and requested probes
@@ -19,9 +30,14 @@ the client seed.
 6. Record remaining physical-device and Apple checks without converting them into passes.
 7. Commit the exact source, create an annotated `vX.Y.Z` tag, then publish artifacts from that commit.
 
-Core `1.1.2` is the release target for these Android and Windows libraries.
+Core `1.2.0` is the release target for these Android and Windows libraries.
 `config/release.json` retains the immutable prior `1.0.3` evidence in a
 separate `retained_public_release` block.
+
+Core `1.2.0` is published independently of the app: the released POKROV app
+`1.4.0` keeps its Core `1.1.2` pin until the app `1.5` integration. Local SDK
+checks and builds cover the new source; phone, VM app integration and Apple
+acceptance are separate checks and are not implied by a Core release.
 
 For the REALITY version gate, build the current `engine/sing-box` CLI with
 `with_utls` and run `scripts/test-reality-xray-matrix.py` with each official

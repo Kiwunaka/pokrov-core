@@ -28,3 +28,10 @@ func TestSniffHTTP1WithPort(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, metadata.Domain, "www.gov.cn")
 }
+
+func TestSniffHTTP1WithIP(t *testing.T) {
+	pkt := "GET / HTTP/1.1\r\nHost: 192.0.2.1:8080\r\n\r\n"
+	var metadata adapter.InboundContext
+	require.NoError(t, sniff.HTTPHost(context.Background(), &metadata, strings.NewReader(pkt)))
+	require.Empty(t, metadata.Domain)
+}

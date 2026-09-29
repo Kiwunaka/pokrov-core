@@ -2,7 +2,7 @@ package transport
 
 import (
 	"context"
-	"sync"
+	"net"
 	"sync/atomic"
 
 	"github.com/sagernet/sing-box/adapter"
@@ -11,7 +11,9 @@ import (
 	"github.com/sagernet/sing-box/dns"
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
+	"github.com/sagernet/sing/common"
 	"github.com/sagernet/sing/common/buf"
+	"github.com/sagernet/sing/common/bufio/deadline"
 	E "github.com/sagernet/sing/common/exceptions"
 	"github.com/sagernet/sing/common/logger"
 	M "github.com/sagernet/sing/common/metadata"
@@ -27,23 +29,14 @@ func RegisterUDP(registry *dns.TransportRegistry) {
 }
 
 type UDPTransport struct {
-	*BaseTransport
+	dns.TransportAdapter
+	logger logger.ContextLogger
 
 	dialer     N.Dialer
 	serverAddr M.Socksaddr
 	udpSize    atomic.Int32
 
-	connector *Connector[*Connection]
-
-	callbackAccess sync.RWMutex
-	queryId        uint16
-	callbacks      map[uint16]*udpCallback
-}
-
-type udpCallback struct {
-	access   sync.Mutex
-	response *mDNS.Msg
-	done     chan struct{}
+	multiplexer *queryMultiplexer
 }
 
 func NewUDP(ctx context.Context, logger log.ContextLogger, tag string, options option.RemoteDNSServerOptions) (adapter.DNSTransport, error) {
@@ -63,76 +56,113 @@ func NewUDP(ctx context.Context, logger log.ContextLogger, tag string, options o
 
 func NewUDPRaw(logger logger.ContextLogger, adapter dns.TransportAdapter, dialerInstance N.Dialer, serverAddr M.Socksaddr) *UDPTransport {
 	t := &UDPTransport{
-		BaseTransport: NewBaseTransport(adapter, logger),
-		dialer:        dialerInstance,
-		serverAddr:    serverAddr,
-		callbacks:     make(map[uint16]*udpCallback),
+		TransportAdapter: adapter,
+		logger:           logger,
+		dialer:           dialerInstance,
+		serverAddr:       serverAddr,
 	}
 	t.udpSize.Store(2048)
-	t.connector = NewSingleflightConnector(t.CloseContext(), t.dial)
+	t.multiplexer = newQueryMultiplexer(queryMultiplexerOptions{
+		dial: func(ctx context.Context) (net.Conn, error) {
+			conn, err := t.dialer.DialContext(ctx, N.NetworkUDP, t.serverAddr)
+			if err != nil {
+				return nil, E.Cause(err, "dial UDP connection")
+			}
+			return conn, nil
+		},
+		write:    t.writeQuery,
+		readNext: t.readResponse,
+	})
 	return t
-}
-
-func (t *UDPTransport) dial(ctx context.Context) (*Connection, error) {
-	rawConn, err := t.dialer.DialContext(ctx, N.NetworkUDP, t.serverAddr)
-	if err != nil {
-		return nil, E.Cause(err, "dial UDP connection")
-	}
-	conn := WrapConnection(rawConn)
-	go t.recvLoop(conn)
-	return conn, nil
 }
 
 func (t *UDPTransport) Start(stage adapter.StartStage) error {
 	if stage != adapter.StartStateStart {
 		return nil
 	}
-	err := t.SetStarted()
-	if err != nil {
-		return err
-	}
 	return dialer.InitializeDetour(t.dialer)
 }
 
 func (t *UDPTransport) Close() error {
-	return E.Errors(t.BaseTransport.Close(), t.connector.Close())
+	return t.multiplexer.Close()
 }
 
 func (t *UDPTransport) Reset() {
-	t.connector.Reset()
-}
-
-func (t *UDPTransport) nextAvailableQueryId() (uint16, error) {
-	start := t.queryId
-	for {
-		t.queryId++
-		if _, exists := t.callbacks[t.queryId]; !exists {
-			return t.queryId, nil
-		}
-		if t.queryId == start {
-			return 0, E.New("no available query ID")
-		}
-	}
+	t.multiplexer.Reset()
 }
 
 func (t *UDPTransport) Exchange(ctx context.Context, message *mDNS.Msg) (*mDNS.Msg, error) {
-	if !t.BeginQuery() {
-		return nil, ErrTransportClosed
-	}
-	defer t.EndQuery()
-
-	response, err := t.exchange(ctx, message)
-	if t.queryId%100 == 0 {
-		t.Logger.Debug("sent dns queries: ", t.queryId)
-	}
+	t.updateUDPSize(message)
+	response, err := t.multiplexer.Exchange(ctx, message)
 	if err != nil {
 		return nil, err
 	}
 	if response.Truncated {
-		t.Logger.InfoContext(ctx, "response truncated, retrying with TCP")
+		t.logger.InfoContext(ctx, "response truncated, retrying with TCP")
 		return t.exchangeTCP(ctx, message)
 	}
 	return response, nil
+}
+
+func (t *UDPTransport) ExchangeAsync(ctx context.Context, message *mDNS.Msg, callback func(response *mDNS.Msg, err error)) {
+	t.updateUDPSize(message)
+	t.multiplexer.ExchangeAsync(ctx, message, func(response *mDNS.Msg, err error) {
+		if err == nil && response.Truncated {
+			t.logger.InfoContext(ctx, "response truncated, retrying with TCP")
+			go func() {
+				callback(t.exchangeTCP(ctx, message))
+			}()
+			return
+		}
+		callback(response, err)
+	})
+}
+
+func (t *UDPTransport) updateUDPSize(message *mDNS.Msg) {
+	edns0Opt := message.IsEdns0()
+	if edns0Opt == nil {
+		return
+	}
+	udpSize := int32(edns0Opt.UDPSize())
+	for {
+		current := t.udpSize.Load()
+		if udpSize <= current {
+			return
+		}
+		if t.udpSize.CompareAndSwap(current, udpSize) {
+			t.Reset()
+			return
+		}
+	}
+}
+
+func (t *UDPTransport) writeQuery(conn net.Conn, message *mDNS.Msg, queryId uint16) error {
+	buffer := buf.NewSize(1 + message.Len())
+	defer buffer.Release()
+	exMessage := *message
+	exMessage.Compress = true
+	exMessage.Id = queryId
+	rawMessage, err := exMessage.PackBuffer(buffer.FreeBytes())
+	if err != nil {
+		return err
+	}
+	return common.Error(conn.Write(rawMessage))
+}
+
+func (t *UDPTransport) readResponse(conn net.Conn) (*mDNS.Msg, error) {
+	buffer := buf.NewSize(int(t.udpSize.Load()))
+	defer buffer.Release()
+	_, err := buffer.ReadOnceFrom(conn)
+	if err != nil {
+		return nil, err
+	}
+	var message mDNS.Msg
+	err = message.Unpack(buffer.Bytes())
+	if err != nil {
+		t.logger.Debug("discarded malformed UDP response: ", err)
+		return nil, nil
+	}
+	return &message, nil
 }
 
 func (t *UDPTransport) exchangeTCP(ctx context.Context, message *mDNS.Msg) (*mDNS.Msg, error) {
@@ -141,121 +171,14 @@ func (t *UDPTransport) exchangeTCP(ctx context.Context, message *mDNS.Msg) (*mDN
 		return nil, E.Cause(err, "dial TCP connection")
 	}
 	defer conn.Close()
+	defer setConnDeadline(ctx, conn, deadline.NeedAdditionalReadDeadline(conn))()
 	err = WriteMessage(conn, message.Id, message)
 	if err != nil {
-		return nil, E.Cause(err, "tcp write request")
+		return nil, E.Cause(err, "write request")
 	}
 	response, err := ReadMessage(conn)
 	if err != nil {
-		return nil, E.Cause(err, "tcp read response")
+		return nil, E.Cause(err, "read response")
 	}
 	return response, nil
-}
-
-func (t *UDPTransport) exchange(ctx context.Context, message *mDNS.Msg) (*mDNS.Msg, error) {
-	if edns0Opt := message.IsEdns0(); edns0Opt != nil {
-		udpSize := int32(edns0Opt.UDPSize())
-		for {
-			current := t.udpSize.Load()
-			if udpSize <= current {
-				break
-			}
-			if t.udpSize.CompareAndSwap(current, udpSize) {
-				t.connector.Reset()
-				break
-			}
-		}
-	}
-
-	conn, err := t.connector.Get(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	callback := &udpCallback{
-		done: make(chan struct{}),
-	}
-
-	t.callbackAccess.Lock()
-	queryId, err := t.nextAvailableQueryId()
-	if err != nil {
-		t.callbackAccess.Unlock()
-		return nil, err
-	}
-	t.callbacks[queryId] = callback
-	t.callbackAccess.Unlock()
-
-	defer func() {
-		t.callbackAccess.Lock()
-		delete(t.callbacks, queryId)
-		t.callbackAccess.Unlock()
-	}()
-
-	buffer := buf.NewSize(1 + message.Len())
-	defer buffer.Release()
-
-	exMessage := *message
-	exMessage.Compress = true
-	originalId := message.Id
-	exMessage.Id = queryId
-
-	rawMessage, err := exMessage.PackBuffer(buffer.FreeBytes())
-	if err != nil {
-		return nil, err
-	}
-
-	_, err = conn.Write(rawMessage)
-	if err != nil {
-		conn.CloseWithError(err)
-		return nil, E.Cause(err, "write request")
-	}
-
-	select {
-	case <-callback.done:
-		callback.response.Id = originalId
-		return callback.response, nil
-	case <-conn.Done():
-		return nil, conn.CloseError()
-	case <-t.CloseContext().Done():
-		return nil, ErrTransportClosed
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	}
-}
-
-func (t *UDPTransport) recvLoop(conn *Connection) {
-	for {
-		buffer := buf.NewSize(int(t.udpSize.Load()))
-		_, err := buffer.ReadOnceFrom(conn)
-		if err != nil {
-			buffer.Release()
-			conn.CloseWithError(err)
-			return
-		}
-
-		var message mDNS.Msg
-		err = message.Unpack(buffer.Bytes())
-		buffer.Release()
-		if err != nil {
-			t.Logger.Debug("discarded malformed UDP response: ", err)
-			continue
-		}
-
-		t.callbackAccess.RLock()
-		callback, loaded := t.callbacks[message.Id]
-		t.callbackAccess.RUnlock()
-
-		if !loaded {
-			continue
-		}
-
-		callback.access.Lock()
-		select {
-		case <-callback.done:
-		default:
-			callback.response = &message
-			close(callback.done)
-		}
-		callback.access.Unlock()
-	}
 }

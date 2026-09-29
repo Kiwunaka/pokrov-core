@@ -4,13 +4,13 @@ import (
 	"crypto/rand"
 	"testing"
 
-	"github.com/sagernet/sing-tun/internal/gtcpip/checksum"
+	"github.com/sagernet/sing-tun/gtcpip/checksum"
 	"github.com/sagernet/sing-tun/internal/tschecksum"
 )
 
 func BenchmarkTsChecksum(b *testing.B) {
 	packet := make([][]byte, 1000)
-	for i := 0; i < 1000; i++ {
+	for i := range 1000 {
 		packet[i] = make([]byte, 1500)
 		rand.Read(packet[i])
 	}
@@ -22,7 +22,7 @@ func BenchmarkTsChecksum(b *testing.B) {
 
 func BenchmarkGChecksum(b *testing.B) {
 	packet := make([][]byte, 1000)
-	for i := 0; i < 1000; i++ {
+	for i := range 1000 {
 		packet[i] = make([]byte, 1500)
 		rand.Read(packet[i])
 	}

@@ -11,8 +11,10 @@ if [[ "$(go env GOVERSION)" != "$GO_TOOLCHAIN" ]]; then
   exit 1
 fi
 
-go install github.com/sagernet/gomobile/cmd/gomobile@v0.1.11
-go install github.com/sagernet/gomobile/cmd/gobind@v0.1.11
+GOMOBILE_VERSION="$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["engine"]["gomobile"])' "$ROOT/config/release.json")"
+
+go install "github.com/sagernet/gomobile/cmd/gomobile@v$GOMOBILE_VERSION"
+go install "github.com/sagernet/gomobile/cmd/gobind@v$GOMOBILE_VERSION"
 
 mkdir -p "$OUTPUT_DIRECTORY"
 cd "$ROOT"
@@ -21,7 +23,7 @@ export ZERO_AR_DATE=1
 export SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH:-0}"
 export TZ=UTC
 
-TAGS="with_gvisor,with_quic,with_wireguard,with_utls,with_clash_api,with_grpc,with_awg,tfogo_checklinkname0,with_naive_outbound,with_conntrack,with_dhcp,with_low_memory,with_purego"
+TAGS="pokrov_client,with_gvisor,with_quic,with_wireguard,with_utls,with_clash_api,with_grpc,with_awg,tfogo_checklinkname0,with_naive_outbound,with_conntrack,with_dhcp,with_low_memory,with_purego"
 
 gomobile bind \
   -target ios,iossimulator,macos \

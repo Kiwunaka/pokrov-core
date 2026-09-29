@@ -349,7 +349,7 @@ func setOutbounds(options *option.Options, input *option.Options, opt *PokrovOpt
 				Type: C.TypeDirect,
 				Options: &option.DirectOutboundOptions{
 					DialerOptions: option.DialerOptions{
-						TCPFastOpen: false,
+						AbstractDialerOptions: option.AbstractDialerOptions{TCPFastOpen: false},
 
 						TLSFragment: option.TLSFragmentOptions{
 							Enabled: true,
@@ -763,10 +763,12 @@ func setRoutingOptions(options *option.Options, hopt *PokrovOptions) error {
 				Action: C.RuleActionTypeRoute,
 				RouteOptions: option.DNSRouteActionOptions{
 					Server:         DNSMultiDirectTag,
-					Strategy:       hopt.DirectDnsDomainStrategy,
-					RewriteTTL:     &DEFAULT_DNS_TTL,
-					DisableCache:   false,
 					BypassIfFailed: false,
+					AbstractDNSRouteActionOptions: option.AbstractDNSRouteActionOptions{
+						Strategy:     hopt.DirectDnsDomainStrategy,
+						RewriteTTL:   &DEFAULT_DNS_TTL,
+						DisableCache: false,
+					},
 				},
 			},
 		})
@@ -795,7 +797,7 @@ func setRoutingOptions(options *option.Options, hopt *PokrovOptions) error {
 	if hopt.BlockAds {
 		rulesets = append(rulesets, option.RuleSet{
 			Type:   C.RuleSetTypeRemote,
-			Tag:    "geosite-ads",
+			Tag:    []string{"geosite-ads"},
 			Format: C.RuleSetFormatBinary,
 			RemoteOptions: option.RemoteRuleSet{
 				URL:            "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-category-ads-all.srs",
@@ -805,7 +807,7 @@ func setRoutingOptions(options *option.Options, hopt *PokrovOptions) error {
 		})
 		rulesets = append(rulesets, option.RuleSet{
 			Type:   C.RuleSetTypeRemote,
-			Tag:    "geosite-malware",
+			Tag:    []string{"geosite-malware"},
 			Format: C.RuleSetFormatBinary,
 			RemoteOptions: option.RemoteRuleSet{
 				URL:            "https://raw.githubusercontent.com/Chocolate4U/Iran-sing-box-rules/rule-set/geosite-malware.srs",
@@ -815,7 +817,7 @@ func setRoutingOptions(options *option.Options, hopt *PokrovOptions) error {
 		})
 		rulesets = append(rulesets, option.RuleSet{
 			Type:   C.RuleSetTypeRemote,
-			Tag:    "geosite-phishing",
+			Tag:    []string{"geosite-phishing"},
 			Format: C.RuleSetFormatBinary,
 			RemoteOptions: option.RemoteRuleSet{
 				URL:            "https://raw.githubusercontent.com/Chocolate4U/Iran-sing-box-rules/rule-set/geosite-phishing.srs",
@@ -825,7 +827,7 @@ func setRoutingOptions(options *option.Options, hopt *PokrovOptions) error {
 		})
 		rulesets = append(rulesets, option.RuleSet{
 			Type:   C.RuleSetTypeRemote,
-			Tag:    "geosite-cryptominers",
+			Tag:    []string{"geosite-cryptominers"},
 			Format: C.RuleSetFormatBinary,
 			RemoteOptions: option.RemoteRuleSet{
 				URL:            "https://raw.githubusercontent.com/Chocolate4U/Iran-sing-box-rules/rule-set/geosite-cryptominers.srs",
@@ -835,7 +837,7 @@ func setRoutingOptions(options *option.Options, hopt *PokrovOptions) error {
 		})
 		rulesets = append(rulesets, option.RuleSet{
 			Type:   C.RuleSetTypeRemote,
-			Tag:    "geoip-phishing",
+			Tag:    []string{"geoip-phishing"},
 			Format: C.RuleSetFormatBinary,
 			RemoteOptions: option.RemoteRuleSet{
 				URL:            "https://raw.githubusercontent.com/Chocolate4U/Iran-sing-box-rules/rule-set/geoip-phishing.srs",
@@ -845,7 +847,7 @@ func setRoutingOptions(options *option.Options, hopt *PokrovOptions) error {
 		})
 		rulesets = append(rulesets, option.RuleSet{
 			Type:   C.RuleSetTypeRemote,
-			Tag:    "geoip-malware",
+			Tag:    []string{"geoip-malware"},
 			Format: C.RuleSetFormatBinary,
 			RemoteOptions: option.RemoteRuleSet{
 				URL:            "https://raw.githubusercontent.com/Chocolate4U/Iran-sing-box-rules/rule-set/geoip-malware.srs",
@@ -897,9 +899,11 @@ func setRoutingOptions(options *option.Options, hopt *PokrovOptions) error {
 				Action: C.RuleActionTypeRoute,
 				RouteOptions: option.DNSRouteActionOptions{
 					Server:         DNSMultiDirectTag,
-					Strategy:       hopt.DirectDnsDomainStrategy,
-					RewriteTTL:     &DEFAULT_DNS_TTL,
 					BypassIfFailed: false,
+					AbstractDNSRouteActionOptions: option.AbstractDNSRouteActionOptions{
+						Strategy:   hopt.DirectDnsDomainStrategy,
+						RewriteTTL: &DEFAULT_DNS_TTL,
+					},
 				},
 			},
 		})
@@ -929,16 +933,18 @@ func setRoutingOptions(options *option.Options, hopt *PokrovOptions) error {
 				Action: C.RuleActionTypeRoute,
 				RouteOptions: option.DNSRouteActionOptions{
 					Server:         DNSMultiDirectTag,
-					Strategy:       hopt.DirectDnsDomainStrategy,
-					RewriteTTL:     &DEFAULT_DNS_TTL,
 					BypassIfFailed: false,
+					AbstractDNSRouteActionOptions: option.AbstractDNSRouteActionOptions{
+						Strategy:   hopt.DirectDnsDomainStrategy,
+						RewriteTTL: &DEFAULT_DNS_TTL,
+					},
 				},
 			},
 		})
 
 		rulesets = append(rulesets, option.RuleSet{
 			Type:   C.RuleSetTypeRemote,
-			Tag:    "geoip-" + hopt.Region,
+			Tag:    []string{"geoip-" + hopt.Region},
 			Format: C.RuleSetFormatBinary,
 			RemoteOptions: option.RemoteRuleSet{
 				URL:            "https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-" + hopt.Region + ".srs",
@@ -948,7 +954,7 @@ func setRoutingOptions(options *option.Options, hopt *PokrovOptions) error {
 		})
 		rulesets = append(rulesets, option.RuleSet{
 			Type:   C.RuleSetTypeRemote,
-			Tag:    "geosite-" + hopt.Region,
+			Tag:    []string{"geosite-" + hopt.Region},
 			Format: C.RuleSetFormatBinary,
 			RemoteOptions: option.RemoteRuleSet{
 				URL:            "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-" + hopt.Region + ".srs",
@@ -1031,10 +1037,12 @@ func setRoutingOptions(options *option.Options, hopt *PokrovOptions) error {
 					Action: C.RuleActionTypeRoute,
 					RouteOptions: option.DNSRouteActionOptions{
 						Server:         DNSFakeTag,
-						Strategy:       hopt.RemoteDnsDomainStrategy,
-						RewriteTTL:     &DEFAULT_DNS_TTL,
-						DisableCache:   true,
 						BypassIfFailed: false,
+						AbstractDNSRouteActionOptions: option.AbstractDNSRouteActionOptions{
+							Strategy:     hopt.RemoteDnsDomainStrategy,
+							RewriteTTL:   &DEFAULT_DNS_TTL,
+							DisableCache: true,
+						},
 					},
 				},
 			})
@@ -1047,9 +1055,11 @@ func setRoutingOptions(options *option.Options, hopt *PokrovOptions) error {
 			Action: C.RuleActionTypeRoute,
 			RouteOptions: option.DNSRouteActionOptions{
 				Server:         DNSMultiRemoteTag,
-				Strategy:       hopt.RemoteDnsDomainStrategy,
-				RewriteTTL:     &DEFAULT_DNS_TTL,
 				BypassIfFailed: false,
+				AbstractDNSRouteActionOptions: option.AbstractDNSRouteActionOptions{
+					Strategy:   hopt.RemoteDnsDomainStrategy,
+					RewriteTTL: &DEFAULT_DNS_TTL,
+				},
 			},
 		},
 	},

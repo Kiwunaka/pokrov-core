@@ -2,6 +2,7 @@ package wireguard
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"math/rand"
 	"net"
@@ -24,6 +25,8 @@ import (
 	"github.com/sagernet/sing/service"
 )
 
+var _ adapter.InterfaceUpdateListener = (*WARPEndpoint)(nil)
+
 func RegisterWARPEndpoint(registry *endpoint.Registry) {
 	endpoint.Register[option.WireGuardWARPEndpointOptions](registry, C.TypeWARP, NewWARPEndpoint)
 }
@@ -36,6 +39,8 @@ type WARPEndpoint struct {
 
 	startHandler func()
 	startOnce    sync.Once
+	initDone     chan struct{}
+	initDoneOnce sync.Once
 
 	mtx sync.RWMutex
 }
@@ -49,7 +54,8 @@ func NewWARPEndpoint(ctx context.Context, router adapter.Router, logger log.Cont
 		dependencies = append(dependencies, options.Profile.Detour)
 	}
 	warpEndpoint := &WARPEndpoint{
-		Adapter: endpoint.NewAdapter(C.TypeWARP, tag, []string{N.NetworkTCP, N.NetworkUDP}, dependencies),
+		Adapter:  endpoint.NewAdapter(C.TypeWARP, tag, []string{N.NetworkTCP, N.NetworkUDP}, dependencies),
+		initDone: make(chan struct{}),
 	}
 	uniqueId := options.UniqueIdentifier
 	if uniqueId == "" {
@@ -97,56 +103,18 @@ func NewWARPEndpoint(ctx context.Context, router adapter.Router, logger log.Cont
 				})
 			}
 		}
-		if len(config.Peers) == 0 || len(config.Peers[0].Endpoint.Ports) == 0 {
-			err = E.New("WARP profile contains no usable peer")
+		endpointOptions, err := warpWireGuardOptions(options, config)
+		if err != nil {
 			logger.ErrorContext(ctx, err)
 			warpEndpoint.finishInitialization(nil, err)
 			return
-		}
-		peer := config.Peers[0]
-		hostParts := strings.Split(peer.Endpoint.Host, ":")
-		peerAddr := hostParts[0]
-		perrPort := uint16(peer.Endpoint.Ports[rand.Intn(len(peer.Endpoint.Ports))])
-		if options.ServerOptions.Server != "" {
-			peerAddr = options.ServerOptions.Server
-		}
-		if options.ServerOptions.ServerPort != 0 {
-			perrPort = options.ServerOptions.ServerPort
 		}
 		materializedEndpoint, err := NewEndpoint(
 			ctx,
 			router,
 			logger,
 			tag,
-			option.WireGuardEndpointOptions{
-				System:                     options.System,
-				Name:                       options.Name,
-				ListenPort:                 options.ListenPort,
-				UDPTimeout:                 options.UDPTimeout,
-				Workers:                    options.Workers,
-				PreallocatedBuffersPerPool: options.PreallocatedBuffersPerPool,
-				DisablePauses:              options.DisablePauses,
-				Noise:                      options.Noise,
-				DialerOptions:              options.DialerOptions,
-
-				Address: badoption.Listable[netip.Prefix]{
-					netip.MustParsePrefix(config.Interface.Addresses.V4 + "/32"),
-					netip.MustParsePrefix(config.Interface.Addresses.V6 + "/128"),
-				},
-				PrivateKey: config.PrivateKey,
-				Peers: []option.WireGuardPeer{
-					{
-						Address:   peerAddr,
-						Port:      perrPort,
-						PublicKey: peer.PublicKey,
-						AllowedIPs: badoption.Listable[netip.Prefix]{
-							netip.MustParsePrefix("0.0.0.0/0"),
-							netip.MustParsePrefix("::/0"),
-						},
-					},
-				},
-				MTU: options.MTU,
-			},
+			endpointOptions,
 		)
 		if err != nil {
 			logger.ErrorContext(ctx, err)
@@ -168,6 +136,80 @@ func NewWARPEndpoint(ctx context.Context, router adapter.Router, logger log.Cont
 		warpEndpoint.finishInitialization(materializedEndpoint, nil)
 	}
 	return warpEndpoint, nil
+}
+
+func warpWireGuardOptions(options option.WireGuardWARPEndpointOptions, config *C.WARPConfig) (option.WireGuardEndpointOptions, error) {
+	var out option.WireGuardEndpointOptions
+	if len(config.Peers) == 0 || len(config.Peers[0].Endpoint.Ports) == 0 {
+		return out, E.New("WARP profile contains no usable peer")
+	}
+	var addresses badoption.Listable[netip.Prefix]
+	for _, raw := range []string{config.Interface.Addresses.V4, config.Interface.Addresses.V6} {
+		if raw == "" {
+			continue
+		}
+		address, err := netip.ParseAddr(raw)
+		if err != nil {
+			return out, E.New("WARP profile contains an invalid interface address")
+		}
+		addresses = append(addresses, netip.PrefixFrom(address, address.BitLen()))
+	}
+	if len(addresses) == 0 {
+		return out, E.New("WARP profile contains no interface address")
+	}
+	var reserved []uint8
+	if config.ClientID != "" {
+		var err error
+		reserved, err = base64.StdEncoding.DecodeString(config.ClientID)
+		if err != nil || len(reserved) != 3 {
+			return out, E.New("WARP profile contains an invalid client identifier")
+		}
+	}
+	peer := config.Peers[0]
+	peerAddress := peer.Endpoint.Host
+	if host, _, err := net.SplitHostPort(peerAddress); err == nil {
+		peerAddress = host
+	} else if strings.Contains(peerAddress, ":") {
+		if _, err := netip.ParseAddr(peerAddress); err != nil {
+			return out, E.New("WARP profile contains an invalid peer address")
+		}
+	}
+	port := peer.Endpoint.Ports[rand.Intn(len(peer.Endpoint.Ports))]
+	if port < 1 || port > 65535 {
+		return out, E.New("WARP profile contains an invalid peer port")
+	}
+	if options.Server != "" {
+		peerAddress = options.Server
+	}
+	if options.ServerPort != 0 {
+		port = int(options.ServerPort)
+	}
+	if peerAddress == "" {
+		return out, E.New("WARP profile contains no peer address")
+	}
+	return option.WireGuardEndpointOptions{
+		System:                     options.System,
+		Name:                       options.Name,
+		ListenPort:                 options.ListenPort,
+		UDPTimeout:                 options.UDPTimeout,
+		Workers:                    options.Workers,
+		PreallocatedBuffersPerPool: options.PreallocatedBuffersPerPool,
+		DisablePauses:              options.DisablePauses,
+		Noise:                      options.Noise,
+		DialerOptions:              options.DialerOptions,
+		Address:                    addresses,
+		PrivateKey:                 config.PrivateKey,
+		Peers: []option.WireGuardPeer{{
+			Address:   peerAddress,
+			Port:      uint16(port),
+			PublicKey: peer.PublicKey,
+			Reserved:  reserved,
+			AllowedIPs: badoption.Listable[netip.Prefix]{
+				netip.MustParsePrefix("0.0.0.0/0"), netip.MustParsePrefix("::/0"),
+			},
+		}},
+		MTU: options.MTU,
+	}, nil
 }
 
 const warpProfileInitializationTimeout = 28 * time.Second
@@ -217,23 +259,44 @@ func (w *WARPEndpoint) Close() error {
 	initializedEndpoint := w.endpoint
 	w.endpoint = nil
 	w.mtx.Unlock()
+	w.initDoneOnce.Do(func() { close(w.initDone) })
 	return common.Close(initializedEndpoint)
 }
 
 func (w *WARPEndpoint) DialContext(ctx context.Context, network string, destination M.Socksaddr) (net.Conn, error) {
-	initializedEndpoint := w.endpointSnapshot()
-	if initializedEndpoint == nil {
-		return nil, E.New("endpoint not initialized")
+	initializedEndpoint, err := w.waitInitialized(ctx)
+	if err != nil {
+		return nil, err
 	}
 	return initializedEndpoint.DialContext(ctx, network, destination)
 }
 
 func (w *WARPEndpoint) ListenPacket(ctx context.Context, destination M.Socksaddr) (net.PacketConn, error) {
-	initializedEndpoint := w.endpointSnapshot()
-	if initializedEndpoint == nil {
-		return nil, E.New("endpoint not initialized")
+	initializedEndpoint, err := w.waitInitialized(ctx)
+	if err != nil {
+		return nil, err
 	}
 	return initializedEndpoint.ListenPacket(ctx, destination)
+}
+
+func (w *WARPEndpoint) InterfaceUpdated(ctx context.Context) {
+	if listener, ok := w.endpointSnapshot().(adapter.InterfaceUpdateListener); ok {
+		listener.InterfaceUpdated(ctx)
+	}
+}
+
+func (w *WARPEndpoint) waitInitialized(ctx context.Context) (adapter.Endpoint, error) {
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-w.initDone:
+	}
+	w.mtx.RLock()
+	defer w.mtx.RUnlock()
+	if w.closed {
+		return nil, E.New("WARP endpoint is closed")
+	}
+	return w.endpoint, w.initErr
 }
 
 func (w *WARPEndpoint) endpointSnapshot() adapter.Endpoint {
@@ -258,6 +321,7 @@ func (w *WARPEndpoint) finishInitialization(initializedEndpoint adapter.Endpoint
 	w.endpoint = initializedEndpoint
 	w.initErr = err
 	w.mtx.Unlock()
+	w.initDoneOnce.Do(func() { close(w.initDone) })
 }
 
 func (w *WARPEndpoint) DisplayType() string {

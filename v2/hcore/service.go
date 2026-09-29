@@ -7,10 +7,9 @@ import (
 	box "github.com/sagernet/sing-box"
 
 	"github.com/sagernet/sing-box/adapter"
+	"github.com/sagernet/sing-box/common/trafficcontrol"
 	"github.com/sagernet/sing-box/common/urltest"
 	"github.com/sagernet/sing-box/daemon"
-	"github.com/sagernet/sing-box/experimental/clashapi"
-	"github.com/sagernet/sing-box/experimental/clashapi/trafficontrol"
 	"github.com/sagernet/sing-box/experimental/libbox"
 	"github.com/sagernet/sing-box/option"
 )
@@ -92,11 +91,9 @@ func (h *PokrovInstance) Context() context.Context {
 	return ins.Context()
 }
 
-func (h *PokrovInstance) TrafficManager() *trafficontrol.Manager {
+func (h *PokrovInstance) TrafficManager() *trafficcontrol.Manager {
 	if ins := h.Instance(); ins != nil {
-		if s := ins.ClashServer(); s != nil {
-			return s.(*clashapi.Server).TrafficManager()
-		}
+		return ins.TrafficManager()
 	}
 	return nil
 }

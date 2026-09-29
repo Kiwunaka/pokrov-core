@@ -1,6 +1,7 @@
 package libbox
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
@@ -25,11 +26,13 @@ import (
 var _ adapter.PlatformInterface = (*platformInterfaceWrapper)(nil)
 
 type platformInterfaceWrapper struct {
+	platformInterfaceStub
 	iif                    PlatformInterface
 	debugMessage           func(string)
 	useProcFS              bool
 	networkManager         adapter.NetworkManager
 	myTunName              string
+	myTunAddress           []netip.Addr
 	defaultInterfaceAccess sync.Mutex
 	defaultInterface       *control.Interface
 	isExpensive            bool
@@ -82,7 +85,18 @@ func (w *platformInterfaceWrapper) OpenInterface(options *tun.Options, platformO
 	}
 	options.FileDescriptor = dupFd
 	w.myTunName = options.Name
+	w.myTunAddress = make([]netip.Addr, 0, len(options.Inet4Address)+len(options.Inet6Address))
+	for _, prefix := range options.Inet4Address {
+		w.myTunAddress = append(w.myTunAddress, prefix.Addr())
+	}
+	for _, prefix := range options.Inet6Address {
+		w.myTunAddress = append(w.myTunAddress, prefix.Addr())
+	}
 	return tun.New(*options)
+}
+
+func (w *platformInterfaceWrapper) MyInterfaceAddress() []netip.Addr {
+	return w.myTunAddress
 }
 
 func (w *platformInterfaceWrapper) UsePlatformDefaultInterfaceMonitor() bool {
@@ -107,14 +121,11 @@ func (w *platformInterfaceWrapper) NetworkInterfaces() ([]adapter.NetworkInterfa
 	}
 	var interfaces []adapter.NetworkInterface
 	for _, netInterface := range iteratorToArray[*NetworkInterface](interfaceIterator) {
-		if netInterface.Name == w.myTunName {
-			continue
-		}
 		w.defaultInterfaceAccess.Lock()
 		// (GOOS=windows) SA4006: this value of `isDefault` is never used
 		// Why not used?
 		//nolint:staticcheck
-		isDefault := w.defaultInterface != nil && int(netInterface.Index) == w.defaultInterface.Index
+		isDefault := netInterface.Name != w.myTunName && w.defaultInterface != nil && int(netInterface.Index) == w.defaultInterface.Index
 		w.defaultInterfaceAccess.Unlock()
 		interfaces = append(interfaces, adapter.NetworkInterface{
 			Interface: control.Interface{
@@ -124,8 +135,12 @@ func (w *platformInterfaceWrapper) NetworkInterfaces() ([]adapter.NetworkInterfa
 				Addresses: common.Map(iteratorToArray[string](netInterface.Addresses), netip.MustParsePrefix),
 				Flags:     linkFlags(uint32(netInterface.Flags)),
 			},
-			Type:        C.InterfaceType(netInterface.Type),
-			DNSServers:  iteratorToArray[string](netInterface.DNSServer),
+			Type:       C.InterfaceType(netInterface.Type),
+			DNSServers: iteratorToArray[string](netInterface.DNSServer),
+			Gateways: common.Filter(common.Map(iteratorToArray[string](netInterface.Gateway), func(it string) netip.Addr {
+				gateway, _ := netip.ParseAddr(it)
+				return gateway.Unmap().WithZone("")
+			}), netip.Addr.IsValid),
 			Expensive:   netInterface.Metered || isDefault && w.isExpensive,
 			Constrained: isDefault && w.isConstrained,
 		})
@@ -156,7 +171,7 @@ func (w *platformInterfaceWrapper) UsePlatformWIFIMonitor() bool {
 	return true
 }
 
-func (w *platformInterfaceWrapper) ReadWIFIState() adapter.WIFIState {
+func (w *platformInterfaceWrapper) ReadWIFIState(ctx context.Context) adapter.WIFIState {
 	wifiState := w.iif.ReadWIFIState()
 	if wifiState == nil {
 		return adapter.WIFIState{}
@@ -204,12 +219,15 @@ func (w *platformInterfaceWrapper) FindConnectionOwner(request *adapter.FindConn
 	if err != nil {
 		return nil, err
 	}
-	return &adapter.ConnectionOwner{
-		UserId:             result.UserId,
-		UserName:           result.UserName,
-		ProcessPath:        result.ProcessPath,
-		AndroidPackageName: result.AndroidPackageName,
-	}, nil
+	owner := &adapter.ConnectionOwner{
+		UserId:      result.UserId,
+		UserName:    result.UserName,
+		ProcessPath: result.ProcessPath,
+	}
+	if result.AndroidPackageName != "" {
+		owner.AndroidPackageNames = []string{result.AndroidPackageName}
+	}
+	return owner, nil
 }
 
 func (w *platformInterfaceWrapper) DisableColors() bool {

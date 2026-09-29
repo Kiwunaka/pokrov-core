@@ -169,7 +169,7 @@ func (s *StartedService) ConfigureSmartAccessRuntimeControl(profileDigest, raw, 
 		}
 	}
 	protected, err := dialer.NewWithOptions(dialer.Options{Context: instance.ctx,
-		Options: option.DialerOptions{DomainResolver: &option.DomainResolveOptions{Server: worker.config.DNSResolver}},
+		Options: option.DialerOptions{AbstractDialerOptions: option.AbstractDialerOptions{DomainResolver: &option.DomainResolveOptions{Server: worker.config.DNSResolver}}},
 		RemoteIsDomain: true, NewDialer: true, ProtectPlatformSocket: true})
 	if err != nil { return false, errors.New("smart_access_runtime_control_transport_unavailable") }
 	worker.transport = &http.Transport{
