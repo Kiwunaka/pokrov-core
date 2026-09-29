@@ -99,7 +99,7 @@ is a client L03 responsibility; exact host evidence remains separate from this
 adapter's build. Android/Windows artifact bindings and
 public release scope are unchanged by this private adapter.
 
-## Fixed candidate probe on Linux ARM64
+## Fixed candidate probe on Linux
 
 `platform/probecli` is a separate, source-only command for scheduled fixed probes.
 It calls the same isolated `hcore.ProbeCandidate` used by clients, with a twelve-second
@@ -109,6 +109,10 @@ no host routes. The command accepts a materialized sing-box JSON profile whose
 link is not a profile. Install that profile in a root-owned private directory as
 mode 0600. The command rejects profiles readable by group or others and profiles
 over 512 KiB. Supply the real uplink interface, not the tunnel interface.
+For a VLESS server hostname, the command resolves that hostname through a direct
+IPv4 DNS lane using the profile's existing literal IPv4 final DNS address. The
+profile must contain a tagged direct outbound. Content DNS and the protected
+outbound remain unchanged; the profile is modified only in memory for this probe.
 
 Build on a Linux ARM64 host, or cross-compile with `GOOS=linux GOARCH=arm64`:
 
@@ -121,9 +125,9 @@ sudo ./pokrov-candidate-probe /etc/pokrov/probes/technical.json <physical-uplink
 
 One invocation makes one probe. Stdout is one JSON object with the client fields
 `success`, `failure_kind`, and `duration_ms`; failures also include a fixed `stage`
-name (`profile_file`, `parse_profile`, `create_instance`, `start_instance`,
-`select_outbound`, `proxy_dial`, or `egress_check`). The stage names contain no endpoint
+name (`profile_file`, `bootstrap_dns`, `parse_profile`, `create_instance`,
+`start_instance`, `select_outbound`, `proxy_dial`, or `egress_check`). The stage names contain no endpoint
 or profile data. Exit status is zero on success and one on failure. It never prints
 the profile, destination, key, or raw error.
-Schedule separate invocations every 15–30 minutes outside Core. This command has
-not been run on Pi4 and is not a Core release asset.
+Schedule separate invocations every 15–30 minutes outside Core. This command is
+not a Core release asset.
