@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.1.2 — 2026-09-29
+
+- Candidate verification now requires a marked HTTPS 204 and a full 64 KiB
+  transfer through the selected outbound, with a static reserve target within
+  the existing probe deadline.
+- Reports a response body that stalls after TLS as `data_stalled`; malformed or
+  short responses do not count as network failures.
+
 ## 1.1.1 — 2026-09-29
 
 - Matched Windows process names without case sensitivity and made selected-app

@@ -1,7 +1,7 @@
 # POKROV Core
 
 POKROV Core is the network runtime used by POKROV clients. The current Core
-release is `1.1.1`. `config/release.json` retains the original `1.0.3` build
+release is `1.1.2`. `config/release.json` retains the original `1.0.3` build
 evidence separately.
 
 The repository contains:
@@ -31,7 +31,7 @@ change the public release targets above.
 
 ## Requirements
 
-- Go `1.25.13`
+- Go `1.26.8`
 - Git
 - Android SDK and `gomobile v0.1.11` for Android
 - MinGW-w64 for the Windows DLL
@@ -100,7 +100,7 @@ license/notice review before release approval.
 POKROV Core follows semantic versioning. Public ABI breaks require a major
 release. Additive runtime capabilities produce a minor release; targeted fixes
 produce a patch release after the Android and Windows backtests pass. Core
-`1.1.1` is a separate component version from the POKROV app release.
+`1.1.2` is a separate component version from the POKROV app release.
 
 ## License
 

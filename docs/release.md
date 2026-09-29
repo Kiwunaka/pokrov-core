@@ -19,7 +19,7 @@ the client seed.
 6. Record remaining physical-device and Apple checks without converting them into passes.
 7. Commit the exact source, create an annotated `vX.Y.Z` tag, then publish artifacts from that commit.
 
-Core `1.1.1` is the release target for these Android and Windows libraries.
+Core `1.1.2` is the release target for these Android and Windows libraries.
 `config/release.json` retains the immutable prior `1.0.3` evidence in a
 separate `retained_public_release` block.
 
