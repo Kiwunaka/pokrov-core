@@ -824,9 +824,13 @@ Server inbounds, panel state, provisioning, and traffic accounting remain outsid
 
 Ordinary candidate selection uses an isolated raw-profile Core instance with no
 inbounds, host routes, command server or persistent cache. The selected protected
-outbound performs one TLS-verified GET to the owned public egress endpoint; only
-204 succeeds and redirects fail. Android supplies a captured-network socket and
-DNS adapter; Windows supplies the physical interface. DNS servers and upstream
+outbound requires an owned HTTPS 204 with the egress marker, then reads a full
+64 KiB response through the same outbound. If the API target fails, it tries the
+static `pokrov.space` target within the remaining deadline. A body that stalls
+after TLS returns `data_stalled`; an invalid status, marker or body length does
+not prove a network failure. Node-local targets require the later 443 front.
+Android supplies a captured-network socket and DNS adapter; Windows supplies
+the physical interface. DNS servers and upstream
 resolvers are retained; client DNS rules referencing stripped route rule sets
 are omitted. Each probe has its own deadline and interruption callback.
 When a selected-app profile routes ordinary traffic directly, the probe uses

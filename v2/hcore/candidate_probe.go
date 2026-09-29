@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"errors"
+	"io"
 	"net"
 	"net/http"
 	"regexp"
@@ -22,7 +23,18 @@ import (
 	"github.com/sagernet/sing/service"
 )
 
-const candidateProbeURL = "https://api.pokrov.space/api/public/authenticated-egress-probe"
+const (
+	candidateProbeURL        = "https://api.pokrov.space/api/public/authenticated-egress-probe"
+	candidatePayloadURL      = "https://api.pokrov.space/api/public/egress-probe-64k"
+	candidateReserveProbeURL = "https://pokrov.space/.well-known/pokrov/egress-probe"
+	candidateReserveDataURL  = "https://pokrov.space/.well-known/pokrov/egress-probe-64k.bin"
+	candidateProbeMarker     = "pokrov-authenticated-egress-v1"
+	candidatePayloadBytes    = 64 * 1024
+)
+
+type candidateProbeTarget struct {
+	host, probeURL, payloadURL string
+}
 
 type CandidateProbeResult struct {
 	Success     bool   `json:"success"`
@@ -115,8 +127,10 @@ func ProbeCandidate(config, id string, timeout time.Duration, bindInterface stri
 		close(watchStop)
 		<-watchDone
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			result.Success = false
-			result.FailureKind = "timeout"
+			if result.FailureKind != "data_stalled" {
+				result.Success = false
+				result.FailureKind = "timeout"
+			}
 		} else if ctx.Err() != nil {
 			result.Success = false
 			result.FailureKind = "cancelled"
@@ -307,8 +321,32 @@ func candidateProtectedLeaf(tag string, lookup func(string) (adapter.Outbound, b
 }
 
 func candidateHTTPProbe(ctx context.Context, dial func(context.Context, string, M.Socksaddr) (net.Conn, error)) string {
+	primary := candidateProbeTarget{"api.pokrov.space", candidateProbeURL, candidatePayloadURL}
+	reserve := candidateProbeTarget{"pokrov.space", candidateReserveProbeURL, candidateReserveDataURL}
+	// Leave a quarter of the caller's deadline for the static responder.
+	primaryCtx := ctx
+	cancel := func() {}
+	if deadline, ok := ctx.Deadline(); ok {
+		primaryCtx, cancel = context.WithTimeout(ctx, time.Until(deadline)*3/4)
+	}
+	first := candidateProbeAt(primaryCtx, dial, primary)
+	cancel()
+	if first == "" || ctx.Err() != nil {
+		return first
+	}
+	return candidateProbeAt(ctx, dial, reserve)
+}
+
+func candidateProbeAt(ctx context.Context, dial func(context.Context, string, M.Socksaddr) (net.Conn, error), target candidateProbeTarget) string {
+	if kind := candidateHTTPSGet(ctx, dial, target.host, target.probeURL, false); kind != "" {
+		return kind
+	}
+	return candidateHTTPSGet(ctx, dial, target.host, target.payloadURL, true)
+}
+
+func candidateHTTPSGet(ctx context.Context, dial func(context.Context, string, M.Socksaddr) (net.Conn, error), host, endpoint string, payload bool) string {
 	// Keep dial, TLS and HTTP synchronous so no transport worker outlives cancel.
-	conn, err := dial(ctx, "tcp", M.ParseSocksaddr("api.pokrov.space:443"))
+	conn, err := dial(ctx, "tcp", M.ParseSocksaddr(host+":443"))
 	if err != nil {
 		return "connect_failed"
 	}
@@ -324,15 +362,18 @@ func candidateHTTPProbe(ctx context.Context, dial func(context.Context, string, 
 		}
 	}()
 	defer func() { close(closeStop); <-closeDone }()
-	secured := tls.Client(conn, &tls.Config{ServerName: "api.pokrov.space", MinVersion: tls.VersionTLS12})
+	secured := tls.Client(conn, &tls.Config{ServerName: host, MinVersion: tls.VersionTLS12})
 	if err := secured.HandshakeContext(ctx); err != nil {
 		return "tls_failed"
 	}
-	return candidateGET204(ctx, secured)
+	if payload {
+		return candidateGET64K(ctx, secured, endpoint)
+	}
+	return candidateGET204(ctx, secured, endpoint)
 }
 
-func candidateGET204(ctx context.Context, conn net.Conn) string {
-	request, _ := http.NewRequestWithContext(ctx, http.MethodGet, candidateProbeURL, nil)
+func candidateGET204(ctx context.Context, conn net.Conn, endpoint string) string {
+	request, _ := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	request.Close = true
 	if err := request.Write(conn); err != nil {
 		return "probe_failed"
@@ -341,8 +382,33 @@ func candidateGET204(ctx context.Context, conn net.Conn) string {
 	if err != nil {
 		return "probe_failed"
 	}
-	if response.StatusCode != http.StatusNoContent {
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusNoContent || response.Header.Get("X-Pokrov-Egress-Probe") != candidateProbeMarker {
 		return "unexpected_status"
+	}
+	return ""
+}
+
+func candidateGET64K(ctx context.Context, conn net.Conn, endpoint string) string {
+	request, _ := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	request.Close = true
+	if err := request.Write(conn); err != nil {
+		return "probe_failed"
+	}
+	response, err := http.ReadResponse(bufio.NewReader(conn), request)
+	if err != nil {
+		return "probe_failed"
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK || response.Header.Get("X-Pokrov-Egress-Probe") != candidateProbeMarker ||
+		response.ContentLength != candidatePayloadBytes || response.Header.Get("Content-Encoding") != "" {
+		return "unexpected_status"
+	}
+	if _, err := io.CopyN(io.Discard, response.Body, candidatePayloadBytes); err != nil {
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return "data_stalled"
+		}
+		return "probe_failed"
 	}
 	return ""
 }

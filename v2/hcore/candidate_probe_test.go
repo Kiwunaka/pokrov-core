@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"sync/atomic"
@@ -16,9 +17,12 @@ import (
 	M "github.com/sagernet/sing/common/metadata"
 )
 
-func TestCandidateProbeGETRequires204(t *testing.T) {
-	for _, status := range []int{204, 200, 302} {
-		t.Run(fmt.Sprint(status), func(t *testing.T) {
+func TestCandidateProbeGETRequires204AndMarker(t *testing.T) {
+	for _, sample := range []struct {
+		status int
+		marker bool
+	}{{204, true}, {204, false}, {200, true}, {302, true}} {
+		t.Run(fmt.Sprintf("%d-marker-%t", sample.status, sample.marker), func(t *testing.T) {
 			client, server := net.Pipe()
 			defer client.Close()
 			done := make(chan error, 1)
@@ -33,17 +37,104 @@ func TestCandidateProbeGETRequires204(t *testing.T) {
 					done <- fmt.Errorf("unexpected probe request")
 					return
 				}
-				_, err = fmt.Fprintf(server, "HTTP/1.1 %d test\r\nLocation: https://example.invalid/\r\nContent-Length: 0\r\n\r\n", status)
+				marker := ""
+				if sample.marker {
+					marker = "X-Pokrov-Egress-Probe: " + candidateProbeMarker + "\r\n"
+				}
+				_, err = fmt.Fprintf(server, "HTTP/1.1 %d test\r\n%sContent-Length: 0\r\n\r\n", sample.status, marker)
 				done <- err
 			}()
-			kind := candidateGET204(context.Background(), client)
-			if (kind == "") != (status == 204) {
-				t.Fatalf("status %d: %s", status, kind)
+			kind := candidateGET204(context.Background(), client, candidateProbeURL)
+			if (kind == "") != (sample.status == 204 && sample.marker) {
+				t.Fatalf("status %d, marker %t: %s", sample.status, sample.marker, kind)
 			}
 			if err := <-done; err != nil {
 				t.Fatal(err)
 			}
 		})
+	}
+}
+
+func TestCandidateProbeGET64KReadsFullBody(t *testing.T) {
+	client, server := net.Pipe()
+	defer client.Close()
+	done := make(chan error, 1)
+	go func() {
+		defer server.Close()
+		request, err := http.ReadRequest(bufio.NewReader(server))
+		if err != nil {
+			done <- err
+			return
+		}
+		if request.Method != "GET" || request.URL.Path != "/api/public/egress-probe-64k" {
+			done <- fmt.Errorf("unexpected payload request")
+			return
+		}
+		if _, err = fmt.Fprintf(server, "HTTP/1.1 200 OK\r\nX-Pokrov-Egress-Probe: %s\r\nContent-Length: %d\r\n\r\n", candidateProbeMarker, candidatePayloadBytes); err == nil {
+			_, err = server.Write(make([]byte, candidatePayloadBytes))
+		}
+		done <- err
+	}()
+	if kind := candidateGET64K(context.Background(), client, candidatePayloadURL); kind != "" {
+		t.Fatal(kind)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCandidateProbeGET64KShortBodyIsNotStall(t *testing.T) {
+	client, server := net.Pipe()
+	defer client.Close()
+	done := make(chan error, 1)
+	go func() {
+		defer server.Close()
+		if _, err := http.ReadRequest(bufio.NewReader(server)); err != nil {
+			done <- err
+			return
+		}
+		_, err := fmt.Fprintf(server, "HTTP/1.1 200 OK\r\nX-Pokrov-Egress-Probe: %s\r\nContent-Length: %d\r\n\r\n", candidateProbeMarker, candidatePayloadBytes)
+		if err == nil {
+			_, err = server.Write(make([]byte, 16*1024))
+		}
+		done <- err
+	}()
+	if kind := candidateGET64K(context.Background(), client, candidatePayloadURL); kind != "probe_failed" {
+		t.Fatalf("short body: %s", kind)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCandidateProbeGET64KDetectsStallAfter16K(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	client, server := net.Pipe()
+	defer client.Close()
+	done := make(chan error, 1)
+	go func() {
+		defer server.Close()
+		if _, err := http.ReadRequest(bufio.NewReader(server)); err != nil {
+			done <- err
+			return
+		}
+		if _, err := fmt.Fprintf(server, "HTTP/1.1 200 OK\r\nX-Pokrov-Egress-Probe: %s\r\nContent-Length: %d\r\n\r\n", candidateProbeMarker, candidatePayloadBytes); err != nil {
+			done <- err
+			return
+		}
+		_, err := server.Write(make([]byte, 16*1024))
+		if err == nil {
+			<-ctx.Done()
+		}
+		done <- err
+	}()
+	go func() { <-ctx.Done(); _ = client.Close() }()
+	if kind := candidateGET64K(ctx, client, candidatePayloadURL); kind != "data_stalled" {
+		t.Fatalf("body stall: %s", kind)
+	}
+	if err := <-done; err != nil && err != io.ErrClosedPipe {
+		t.Fatal(err)
 	}
 }
 
