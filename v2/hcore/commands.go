@@ -2,6 +2,7 @@ package hcore
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"runtime"
 	"time"
@@ -203,51 +204,48 @@ func (s *CoreService) SelectOutbound(ctx context.Context, in *SelectOutboundRequ
 	return static.SelectOutbound(in)
 }
 
+// SelectOutbound changes the active candidate in the running selector without
+// rebuilding the configuration or replacing the runtime and its inbounds.
+// The selector must enable interrupt_exist_connections to close old sessions.
+func SelectOutbound(groupTag, outboundTag string) error {
+	return static.selectOutbound(groupTag, outboundTag)
+}
+
 func (h *PokrovInstance) SelectOutbound(in *SelectOutboundRequest) (*hcommon.Response, error) {
-	// err := libbox.NewStandaloneCommandClient().SelectOutbound(in.GroupTag, in.OutboundTag)
-	// if err != nil {
-	// 	return &hcommon.Response{
-	// 		Code:    hcommon.ResponseCode_FAILED,
-	// 		Message: err.Error(),
-	// 	}, err
-	// }
-
-	// return &hcommon.Response{
-	// 	Code:    hcommon.ResponseCode_OK,
-	// 	Message: "",
-	// }, nil
-	Log(LogLevel_DEBUG, LogType_CORE, "select outbound: ", in.GroupTag, " -> ", in.OutboundTag)
-	if box := h.Box(); box != nil {
-		outboundGroup, isLoaded := box.Outbound().Outbound(in.GroupTag)
-		if !isLoaded {
-			return &hcommon.Response{
-				Code:    hcommon.ResponseCode_FAILED,
-				Message: E.New("selector not found: ", in.GroupTag).Error(),
-			}, E.New("selector not found: ", in.GroupTag)
-		}
-		selector, isSelector := outboundGroup.(*group.Selector)
-		if !isSelector {
-			return &hcommon.Response{
-				Code:    hcommon.ResponseCode_FAILED,
-				Message: E.New("outbound is not a selector: ", in.GroupTag).Error(),
-			}, E.New("outbound is not a selector: ", in.GroupTag)
-		}
-		if !selector.SelectOutbound(in.OutboundTag) {
-			return &hcommon.Response{
-				Code:    hcommon.ResponseCode_FAILED,
-				Message: E.New("outbound not found in selector:: ", in.GroupTag).Error(),
-			}, E.New("outbound not found in selector: ", in.GroupTag)
-		}
-		Log(LogLevel_DEBUG, LogType_CORE, "Trying to ping outbound: ", in.OutboundTag)
-
-		// if urltesHistory := h.UrlTestHistory(); urltesHistory != nil {
-		// 	urltesHistory.Observer().Emit(2)
-		// }
+	var err error
+	if in == nil {
+		err = errors.New("invalid selector request")
+	} else {
+		err = h.selectOutbound(in.GroupTag, in.OutboundTag)
 	}
-	return &hcommon.Response{
-		Code:    hcommon.ResponseCode_OK,
-		Message: "",
-	}, nil
+	if err != nil {
+		return &hcommon.Response{Code: hcommon.ResponseCode_FAILED, Message: err.Error()}, err
+	}
+	return &hcommon.Response{Code: hcommon.ResponseCode_OK}, nil
+}
+
+func (h *PokrovInstance) selectOutbound(groupTag, outboundTag string) error {
+	h.lock.Lock()
+	defer h.lock.Unlock()
+	if groupTag == "" || outboundTag == "" {
+		return errors.New("invalid selector request")
+	}
+	box := h.Box()
+	if box == nil {
+		return errors.New("selector runtime unavailable")
+	}
+	outboundGroup, loaded := box.Outbound().Outbound(groupTag)
+	if !loaded {
+		return errors.New("selector not found")
+	}
+	selector, isSelector := outboundGroup.(*group.Selector)
+	if !isSelector {
+		return errors.New("outbound is not a selector")
+	}
+	if !selector.SelectOutbound(outboundTag) {
+		return errors.New("outbound not found in selector")
+	}
+	return nil
 }
 
 func (s *CoreService) UrlTest(ctx context.Context, in *UrlTestRequest) (*hcommon.Response, error) {

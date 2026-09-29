@@ -30,6 +30,8 @@
       "pokrovCoreConfirmATSLease",
       "pokrovCoreRevokeATSLease",
       "pokrovCoreStartInterruptibleV1",
+      "pokrovCoreSelectOutboundV1",
+      "pokrovCoreResetNetworkV1",
       "pokrovCoreProbeCandidateV1",
       "pokrovCoreCancelCandidateProbeV1",
       "pokrovCoreAcknowledgeSmartAccessRestrictions",
@@ -57,6 +59,15 @@
     "lifetime": "Core checks once before Start and observes the callback on a Go worker every 25 ms while Start is in flight. The worker only cancels the startup context; it never calls Stop. The observer is joined before return, so the callback and owner are not retained. Successful context is not cancelled merely on return. Caller retains the absolute deadline and serial Stop/restoration after response.",
     "returns": "Caller-owned empty string on success, fixed core_start_failed on failure; release with freeString. Null is failure at the host. Additive optional symbol under desktop ABI 2; bound Windows start requires it before arming recovery and cannot fall back to start. Existing exact capability descriptor is unchanged.",
     "scope": "Cooperative cancellation of context-aware work and stage/TUN admission checks. Does not interrupt an arbitrary blocked OS/driver call, guarantee hard real-time settlement, promote a lease, or prove restoration. Source NOT_VERIFIED; matching Core/host binaries not built."
+  },
+  "selector_control": {
+    "desktop_select_symbol": "pokrovCoreSelectOutboundV1",
+    "desktop_reset_symbol": "pokrovCoreResetNetworkV1",
+    "mobile_select_symbol": "mobile.SelectOutbound",
+    "mobile_reset_symbol": "mobile.ResetNetwork",
+    "arguments": "Select: UTF-8 selector tag and candidate tag already present in the running materialized profile. Reset: none. The host serializes its network epoch and policy decisions; Core serializes both calls with Start/Stop.",
+    "returns": "Desktop returns a caller-owned empty UTF-8 string on success or a fixed error message on failure; release with freeString. Mobile returns an error. Missing runtime, selector or candidate is a failure and never triggers a reload or restart. Additive optional symbols under desktop ABI 2; the existing descriptor is unchanged.",
+    "scope": "Selection changes subsequent connections within the existing Box and inbounds. The profile must set interrupt_exist_connections=true to close old TCP/UDP sessions; selecting the current tag preserves them. Reset uses the existing router network/DNS reset and preserves the selected tag. Production builds enable with_conntrack. Neither API prepares profiles, chooses candidates or performs client recovery policy."
   },
   "android_module_identity": {
     "symbol": "mobile.CoreModuleSHA256",

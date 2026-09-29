@@ -16,6 +16,13 @@ The repository contains:
 
 The server remains a separate Xray-based system. This repository builds client outbounds only.
 
+`SelectOutbound` selects a candidate already present in the running selector;
+`ResetNetwork` resets network sessions and DNS while preserving the runtime and
+selected candidate. Set `interrupt_exist_connections=true` to close old TCP/UDP
+sessions when switching. Android exposes both calls through `mobile`; desktop
+ABI 2 adds optional `pokrovCoreSelectOutboundV1` and `pokrovCoreResetNetworkV1`
+exports whose returned strings must be released with `freeString`.
+
 ## Supported release targets
 
 | Target | Artifact | State |

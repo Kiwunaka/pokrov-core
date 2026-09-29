@@ -58,6 +58,14 @@ func Stop() error {
 	return err
 }
 
+func SelectOutbound(groupTag, outboundTag string) error {
+	return hcore.SelectOutbound(groupTag, outboundTag)
+}
+
+func ResetNetwork() error {
+	return hcore.ResetNetwork()
+}
+
 func GetServerPublicKey() []byte {
 	return hcore.GetGrpcServerPublicKey()
 }

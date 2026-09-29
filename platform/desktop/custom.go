@@ -448,6 +448,19 @@ func stop() *C.char {
 	return emptyOrErrorC(err)
 }
 
+//export pokrovCoreSelectOutboundV1
+func pokrovCoreSelectOutboundV1(groupTag, outboundTag *C.char) *C.char {
+	if groupTag == nil || outboundTag == nil {
+		return C.CString("invalid selector request")
+	}
+	return emptyOrErrorC(hcore.SelectOutbound(C.GoString(groupTag), C.GoString(outboundTag)))
+}
+
+//export pokrovCoreResetNetworkV1
+func pokrovCoreResetNetworkV1() *C.char {
+	return emptyOrErrorC(hcore.ResetNetwork())
+}
+
 //export pokrovCoreProbeCandidateV1
 func pokrovCoreProbeCandidateV1(config *C.char, probeID *C.char, timeoutMs C.int, bindInterface *C.char, callback C.pokrov_core_interrupted_v1, owner unsafe.Pointer) *C.char {
 	if config == nil || probeID == nil || bindInterface == nil || C.GoString(bindInterface) == "" {
