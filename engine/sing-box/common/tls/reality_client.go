@@ -30,6 +30,7 @@ import (
 	"github.com/sagernet/sing-box/adapter"
 	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/option"
+	"github.com/sagernet/sing/common"
 	"github.com/sagernet/sing/common/debug"
 	E "github.com/sagernet/sing/common/exceptions"
 	"github.com/sagernet/sing/common/logger"
@@ -60,6 +61,10 @@ func newRealityClient(ctx context.Context, logger logger.ContextLogger, serverAd
 	}
 	if options.Spoof != "" || options.SpoofMethod != "" {
 		return nil, E.New("spoof is unsupported in reality")
+	}
+	if options.RecordFragment == nil {
+		// Preserve the hybrid Chrome workaround unless the profile chooses otherwise.
+		options.RecordFragment = common.Ptr(true)
 	}
 
 	uClient, err := newUTLSClient(ctx, logger, serverAddress, options, allowEmptyServerName)
@@ -138,8 +143,7 @@ func (e *RealityClientConfig) ClientHandshake(ctx context.Context, conn net.Conn
 		ctx,
 		conn,
 		e.uClient.fragment,
-		// Hybrid Chrome ClientHello needs record fragmentation on the owned DE path.
-		true,
+		e.uClient.recordFragment,
 		e.uClient.fragmentFallbackDelay,
 	)
 	uConfig := e.uClient.config.Clone()

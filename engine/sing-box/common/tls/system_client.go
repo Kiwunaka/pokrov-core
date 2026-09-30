@@ -8,6 +8,7 @@ import (
 
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/option"
+	"github.com/sagernet/sing/common"
 	E "github.com/sagernet/sing/common/exceptions"
 	"github.com/sagernet/sing/service"
 	"github.com/sagernet/sing/service/filemanager"
@@ -43,7 +44,7 @@ func ValidateSystemTLSOptions(ctx context.Context, options option.OutboundTLSOpt
 	if len(options.ClientCertificate) > 0 || options.ClientCertificatePath != "" || len(options.ClientKey) > 0 || options.ClientKeyPath != "" {
 		return SystemTLSValidated{}, E.New("client certificate is unsupported in ", engineName)
 	}
-	if options.Fragment || options.RecordFragment {
+	if options.Fragment || common.PtrValueOrDefault(options.RecordFragment) {
 		return SystemTLSValidated{}, E.New("tls fragment is unsupported in ", engineName)
 	}
 	if options.KernelTx || options.KernelRx {

@@ -15,6 +15,7 @@ import (
 	"github.com/sagernet/sing-box/common/tlsspoof"
 	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/option"
+	"github.com/sagernet/sing/common"
 	E "github.com/sagernet/sing/common/exceptions"
 	"github.com/sagernet/sing/common/logger"
 	"github.com/sagernet/sing/common/ntp"
@@ -237,7 +238,7 @@ func newSTDClient(ctx context.Context, logger logger.ContextLogger, serverAddres
 		handshakeTimeout:      handshakeTimeout,
 		fragment:              options.Fragment,
 		fragmentFallbackDelay: time.Duration(options.FragmentFallbackDelay),
-		recordFragment:        options.RecordFragment,
+		recordFragment:        common.PtrValueOrDefault(options.RecordFragment),
 		spoof:                 spoof,
 		spoofMethod:           spoofMethod,
 	}

@@ -9,6 +9,7 @@ import (
 
 	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/option"
+	"github.com/sagernet/sing/common"
 	E "github.com/sagernet/sing/common/exceptions"
 	"github.com/sagernet/sing/common/json/badjson"
 	"github.com/sagernet/sing/common/json/badoption"
@@ -427,7 +428,7 @@ func getDNSServerOptions(tag string, dnsurl string, domain_resolver string, deto
 		if strings.Contains(dnsurl, "#fragment=") {
 
 			httpsOptions.TLS.Fragment = true
-			httpsOptions.TLS.RecordFragment = true
+			httpsOptions.TLS.RecordFragment = common.Ptr(true)
 
 			splt := strings.Split(dnsurl, "#fragment=")
 			data := splt[len(splt)-1]

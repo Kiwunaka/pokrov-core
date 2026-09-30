@@ -652,10 +652,12 @@ as required by VLESS interface changes. REALITY-XHTTP profiles use an explicit
 
 With `with_utls`, the REALITY client advertises version 26.3.27 and retains
 both the `X25519MLKEM768` and X25519 key shares supplied by the fingerprint.
-It splits the ClientHello into TLS records: the unfragmented hybrid Chrome
-hello timed out on the owned DE Xray 26.6.27 path, while record fragmentation
-connected with the same Windows client and service. Server verification remains
-mandatory. Other TLS outbounds keep their configured fragmentation behavior.
+When `tls.record_fragment` is omitted, REALITY splits the ClientHello into TLS
+records to retain the hybrid Chrome workaround verified on the owned DE path.
+An explicit `false` keeps one record for SNI frontends such as the RU bridge
+HAProxy, whose raw ClientHello parser does not reassemble TLS records; an explicit
+`true` enables splitting. Server verification remains mandatory. Other TLS
+outbounds keep their configured fragmentation behavior and default to disabled.
 
 This bounded ingredient inventory does not establish that an arbitrary profile
 or combination is supported. Profile option/contract checks still apply. It is
