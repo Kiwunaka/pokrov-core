@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	box "github.com/sagernet/sing-box"
 	"github.com/sagernet/sing-box/experimental/libbox"
 	"github.com/sagernet/sing-box/option"
 )
@@ -57,29 +58,42 @@ func TestRunRejectsInvalidProfileWithoutEcho(t *testing.T) {
 func TestMaterializeFixedBootstrapForHostname(t *testing.T) {
 	const typedServers = `[{"type":"local","tag":"bootstrap","detour":"selector"},{"type":"udp","tag":"tunnel","server":"8.8.8.8","detour":"selector"}]`
 	const profileTemplate = `{
+		"log":{"disabled":true},
 		"dns":{"servers":%s,"rules":[{"domain_suffix":["content.example.test"],"server":"tunnel"}],"strategy":"prefer_ipv4","independent_cache":true,"final":"tunnel"},
-		"outbounds":[{"type":"vless","tag":"proxy","server":"node.example.test","server_port":443,"uuid":"00000000-0000-0000-0000-000000000001","tls":{"enabled":true,"server_name":"sni.example.test","reality":{"enabled":true,"public_key":"fake-key"}}},{"type":"direct","tag":"direct-runtime"},{"type":"selector","tag":"selector","outbounds":["proxy"]}],
+		"outbounds":[{"type":"vless","tag":"proxy","server":"node.example.test","server_port":443,"uuid":"00000000-0000-0000-0000-000000000001","tls":{"enabled":true,"server_name":"sni.example.test","utls":{"enabled":true,"fingerprint":"chrome"},"reality":{"enabled":true,"public_key":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}}},{"type":"direct","tag":"direct-runtime"%s},{"type":"selector","tag":"selector","outbounds":["proxy"]}],
 		"route":{"final":"selector","rules":[{"domain_suffix":["content.example.test"],"outbound":"selector"}],"default_domain_resolver":{"server":"bootstrap","strategy":"prefer_ipv4"}}
 	}`
 	for _, test := range []struct {
-		name    string
-		servers string
+		name          string
+		servers       string
+		directOptions string
 	}{
-		{"managed_legacy", `[{"tag":"bootstrap","address":"local"},{"tag":"tunnel","address":"8.8.8.8","detour":"selector"}]`},
-		{"typed", typedServers},
+		{"managed_legacy", `[{"tag":"bootstrap","address":"local"},{"tag":"tunnel","address":"8.8.8.8","detour":"selector"}]`, ""},
+		{"typed", typedServers, ""},
+		{"configured_direct", typedServers, `,"connect_timeout":"2s"`},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			profile := []byte(fmt.Sprintf(profileTemplate, test.servers))
+			profile := []byte(fmt.Sprintf(profileTemplate, test.servers, test.directOptions))
 			materialized, err := materializeFixedBootstrap(profile)
 			if err != nil {
 				t.Fatal(err)
 			}
 			var parsed option.Options
-			if err := parsed.UnmarshalJSONContext(libbox.BaseContext(nil), materialized); err != nil {
+			ctx := libbox.BaseContext(nil)
+			if err := parsed.UnmarshalJSONContext(ctx, materialized); err != nil {
 				t.Fatalf("bootstrap profile must decode under sing-box 1.14: %v", err)
 			}
+			// Startup initializes DNS detours without dialing the reserved hostname.
+			instance, err := box.New(box.Options{Context: ctx, Options: parsed})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer instance.Close()
+			if err := instance.Start(); err != nil {
+				t.Fatalf("fixed bootstrap must start under sing-box 1.14: %v", err)
+			}
 			var before, after map[string]any
-			if err := json.Unmarshal([]byte(fmt.Sprintf(profileTemplate, typedServers)), &before); err != nil {
+			if err := json.Unmarshal([]byte(fmt.Sprintf(profileTemplate, typedServers, test.directOptions)), &before); err != nil {
 				t.Fatal(err)
 			}
 			if err := json.Unmarshal(materialized, &after); err != nil {
@@ -95,9 +109,11 @@ func TestMaterializeFixedBootstrapForHostname(t *testing.T) {
 			if len(afterServers) != len(beforeServers)+1 || !reflect.DeepEqual(afterServers[:len(beforeServers)], beforeServers) {
 				t.Fatal("normalized content DNS servers changed")
 			}
-			if !reflect.DeepEqual(afterServers[len(beforeServers)], map[string]any{
-				"type": "udp", "tag": fixedBootstrapTag, "server": "8.8.8.8", "detour": "direct-runtime",
-			}) {
+			bootstrap := map[string]any{"type": "udp", "tag": fixedBootstrapTag, "server": "8.8.8.8"}
+			if test.directOptions != "" {
+				bootstrap["detour"] = "direct-runtime"
+			}
+			if !reflect.DeepEqual(afterServers[len(beforeServers)], bootstrap) {
 				t.Fatal("fixed bootstrap DNS must use the existing IPv4 address over direct")
 			}
 			afterDNS["servers"] = afterServers[:len(beforeServers)]

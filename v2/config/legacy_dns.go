@@ -70,18 +70,23 @@ func NormalizeLegacyDNS(content []byte) ([]byte, error) {
 		return nil, fmt.Errorf("invalid route configuration")
 	}
 	defaultOutbound = route.Final
-	if defaultOutbound == "" {
-		var outbounds []struct {
-			Tag string `json:"tag"`
+	var outbounds []map[string]json.RawMessage
+	if err := json.Unmarshal(root["outbounds"], &outbounds); len(root["outbounds"]) != 0 && err != nil {
+		return nil, fmt.Errorf("invalid outbounds")
+	}
+	emptyDirect := make(map[string]bool)
+	for i, outbound := range outbounds {
+		var kind, tag string
+		_ = json.Unmarshal(outbound["type"], &kind)
+		_ = json.Unmarshal(outbound["tag"], &tag)
+		if tag == "" {
+			tag = strconv.Itoa(i) // Box assigns the index to an untagged outbound.
 		}
-		if err := json.Unmarshal(root["outbounds"], &outbounds); len(root["outbounds"]) != 0 && err != nil {
-			return nil, fmt.Errorf("invalid outbounds")
+		if defaultOutbound == "" && i == 0 {
+			defaultOutbound = tag
 		}
-		if len(outbounds) > 0 {
-			defaultOutbound = outbounds[0].Tag
-			if defaultOutbound == "" {
-				defaultOutbound = "0" // Box assigns the index to an untagged outbound.
-			}
+		if kind == C.TypeDirect && (len(outbound) == 1 || len(outbound) == 2 && outbound["tag"] != nil) {
+			emptyDirect[tag] = true
 		}
 	}
 	for i, encoded := range servers {
@@ -105,7 +110,7 @@ func NormalizeLegacyDNS(content []byte) ([]byte, error) {
 		if legacy.Strategy != 0 || legacy.ClientSubnet != nil {
 			return nil, fmt.Errorf("unsupported legacy DNS query overrides at index %d", i)
 		}
-		server, err := migrateLegacyDNSServer(legacy, defaultOutbound)
+		server, err := migrateLegacyDNSServer(legacy, defaultOutbound, emptyDirect)
 		if err != nil {
 			return nil, fmt.Errorf("unsupported legacy DNS server at index %d", i)
 		}
@@ -123,7 +128,7 @@ func NormalizeLegacyDNS(content []byte) ([]byte, error) {
 	return json.Marshal(root)
 }
 
-func migrateLegacyDNSServer(legacy legacyDNSServer, defaultOutbound string) (*option.DNSServerOptions, error) {
+func migrateLegacyDNSServer(legacy legacyDNSServer, defaultOutbound string, emptyDirect map[string]bool) (*option.DNSServerOptions, error) {
 	if strings.ContainsAny(legacy.Address, " \t\r\n") {
 		return nil, fmt.Errorf("invalid DNS address")
 	}
@@ -157,6 +162,10 @@ func migrateLegacyDNSServer(legacy legacyDNSServer, defaultOutbound string) (*op
 	dialer := option.DialerOptions{Detour: legacy.Detour}
 	if dialer.Detour == "" {
 		dialer.Detour = defaultOutbound
+	}
+	// Typed DNS uses its direct dialer for a plain direct outbound; 1.14 rejects that detour.
+	if emptyDirect[dialer.Detour] {
+		dialer.Detour = ""
 	}
 	dialer.FallbackDelay = legacy.AddressFallbackDelay
 	if legacy.AddressResolver != "" {

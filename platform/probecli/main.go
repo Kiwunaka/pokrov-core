@@ -85,6 +85,7 @@ func materializeFixedBootstrap(profile []byte) ([]byte, error) {
 		return nil, errFixedBootstrap
 	}
 	var directTag string
+	var directDetour string
 	var hostnameServer bool
 	for _, raw := range outbounds {
 		outbound, ok := raw.(map[string]any)
@@ -97,6 +98,9 @@ func materializeFixedBootstrap(profile []byte) ([]byte, error) {
 				return nil, errFixedBootstrap
 			}
 			directTag = tag
+			if len(outbound) > 2 {
+				directDetour = tag
+			}
 		}
 		if outbound["type"] == "vless" {
 			server, _ := outbound["server"].(string)
@@ -142,9 +146,14 @@ func materializeFixedBootstrap(profile []byte) ([]byte, error) {
 	if err != nil || !resolved.Is4() {
 		return nil, errFixedBootstrap
 	}
-	dns["servers"] = append(servers, map[string]any{
-		"type": "udp", "tag": fixedBootstrapTag, "server": address, "detour": directTag,
-	})
+	bootstrap := map[string]any{
+		"type": "udp", "tag": fixedBootstrapTag, "server": address,
+	}
+	// A plain direct uses the default dialer; 1.14 rejects a detour to it.
+	if directDetour != "" {
+		bootstrap["detour"] = directDetour
+	}
+	dns["servers"] = append(servers, bootstrap)
 	route["default_domain_resolver"] = map[string]any{
 		"server": fixedBootstrapTag, "strategy": "ipv4_only",
 	}

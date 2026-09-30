@@ -6,7 +6,9 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
+	box "github.com/sagernet/sing-box"
 	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/experimental/libbox"
 	"github.com/sagernet/sing-box/option"
@@ -100,7 +102,7 @@ func TestNormalizeLegacyDNSPreservesHTTPSAndQueryOptions(t *testing.T) {
 		t.Fatal(err)
 	}
 	remote := options.DNS.Servers[1].Options.(*option.RemoteHTTPSDNSServerOptions)
-	if remote.Server != "resolver.invalid" || remote.ServerPort != 8443 || remote.Path != "/custom-dns" || remote.Detour != "direct" ||
+	if remote.Server != "resolver.invalid" || remote.ServerPort != 8443 || remote.Path != "/custom-dns" || remote.Detour != "" ||
 		remote.TLS == nil || !remote.TLS.Enabled || remote.DomainResolver.Server != "bootstrap" ||
 		remote.DomainResolver.Strategy != option.DomainStrategy(C.DomainStrategyPreferIPv6) || remote.FallbackDelay == 0 {
 		t.Fatal("HTTPS migration changed resolver, detour, path, port or TLS")
@@ -110,6 +112,39 @@ func TestNormalizeLegacyDNSPreservesHTTPSAndQueryOptions(t *testing.T) {
 		options.DNS.Rules[0].DefaultOptions.RouteOptions.ClientSubnet == nil ||
 		options.DNS.Rules[1].DefaultOptions.RouteOptions.Strategy != option.DomainStrategy(C.DomainStrategyPreferIPv4) {
 		t.Fatal("global query options or explicit rule override were lost")
+	}
+}
+
+func TestNormalizeLegacyDNSDirectStartsWithoutDial(t *testing.T) {
+	const profile = `{"log":{"disabled":true},"dns":{"servers":[
+	 {"tag":"explicit","address":"192.0.2.53","detour":"0"},
+	 {"tag":"default","address":"192.0.2.53"},
+	 {"tag":"configured","address":"192.0.2.53","detour":"configured-direct"}],"final":"explicit"},
+	 "outbounds":[{"type":"direct"},{"type":"direct","tag":"configured-direct","connect_timeout":"5s"}],
+	 "route":{"default_interface":"synthetic-uplink"}}`
+	ctx := libbox.BaseContext(nil)
+	options, err := ReadSingOptions(ctx, &ReadOptions{Content: profile})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, server := range options.DNS.Servers[:2] {
+		if server.Options.(*option.RemoteDNSServerOptions).Detour != "" {
+			t.Fatal("legacy plain direct must use the typed DNS direct dialer")
+		}
+	}
+	if options.DNS.Servers[2].Options.(*option.RemoteDNSServerOptions).Detour != "configured-direct" ||
+		time.Duration(options.Outbounds[1].Options.(*option.DirectOutboundOptions).ConnectTimeout) != 5*time.Second ||
+		options.Route.DefaultInterface != "synthetic-uplink" {
+		t.Fatal("configured direct or default interface changed")
+	}
+	instance, err := box.New(box.Options{Context: ctx, Options: *options})
+	if err != nil {
+		t.Fatal("synthetic DNS instance creation failed")
+	}
+	defer instance.Close()
+	// Starting DNS initializes the detours; this test never queries or dials.
+	if err := instance.Start(); err != nil {
+		t.Fatal("migrated direct DNS instance failed to start")
 	}
 }
 
