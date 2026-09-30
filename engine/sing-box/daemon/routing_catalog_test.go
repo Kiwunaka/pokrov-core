@@ -1,3 +1,5 @@
+//go:build with_clash_api
+
 package daemon
 
 import (

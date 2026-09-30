@@ -29,8 +29,12 @@ before application bytes permits one encrypted VPN dial; subsequent transport
 failure withdraws only this admission and never replays the stream. The exact-ID
 `WithdrawLocalDpiAdmission` leaves catalog windows and VPN outbounds intact;
 withdrawal is terminal for this runtime. Remote bytes are not TLS/HTTP success.
-Signed Selective authority and native proof integration remain separate, with
-the feature disabled; existing Full and expiry behavior is unchanged.
+Libbox `VerifyLocalDpiCatalog` uses Core's Ed25519 implementation and native
+compiled key pins to verify the original canonical payload bytes, current signed
+lifetime and exact Android Selective VPN intent with a nonshared exact control
+host. It does not admit a holder or perform the TLS proof. Signed Selective
+authority and native proof integration remain separate, with the feature
+disabled; existing Full and expiry behavior is unchanged.
 
 The device-local WARP path registers on the device and caches its material by
 `install_unique_id`; a caller must use its own authenticated installation ID
