@@ -70,6 +70,13 @@ the fenced TLS proof before admission. Five Android methods and four additive
 desktop symbols expose this API; desktop ABI 2 now has 38 required exports.
 The feature stays off, app `1.4.0` retains Core `1.1.2`, and published `1.2.0`
 assets are retained. App adoption and physical-device acceptance remain separate.
+The final `1.2.1` libraries passed the full Core test script, focused race
+checks, four-ABI/Java binding inspection and 38 desktop export checks. The
+Windows VM SDK passed 100 proxy-only start/stop cycles and actual version,
+nil/stopped admission controls and cleanup checks. The Portal Unicode fixture
+passed the stateless verifier, and Android consumer compilation passed against
+the final AAR. Foreign-UID, TLS-proof and cancellation checks on the phone
+remain queued; these results do not assert localDPI device readiness.
 
 For the REALITY version gate, build the current `engine/sing-box` CLI with
 `with_utls` and run `scripts/test-reality-xray-matrix.py` with each official
