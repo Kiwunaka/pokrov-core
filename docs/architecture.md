@@ -17,7 +17,7 @@ VPN until the runtime restarts, without replaying ciphertext. Host policy must
 keep explicit VPN application choices ahead of this service rule. This source
 addition is not advertised as a compiled capability or enabled by the app.
 
-The source-only `pokrov-local-dpi` outbound starts unavailable and creates a fresh
+The dormant `pokrov-local-dpi` outbound starts unavailable and creates a fresh
 admission ID for each runtime. A trusted native owner must capture it with
 `ReadLocalDpiAdmissionID`, bind a fresh signed exact-domain HEAD proof to the
 current profile/session/network, then call `AdmitLocalDpiAdmission`; there is no

@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.2.1 — 2026-09-30 (prerelease)
+
+- Add a dormant localDPI outbound with fresh runtime admission IDs and scoped
+  publication/withdrawal; never replay a stream after application bytes.
+- Verify signed Android Selective catalog scope with native pinned keys and
+  Core Ed25519; ordinary VPN intents grant no localDPI authority.
+- Expose admission API version 1 to Android and desktop hosts. Native proof,
+  device acceptance and app adoption remain separate; the feature stays off.
+
 ## 1.2.0 — 2026-09-30 (prerelease)
 
 - Move the embedded runtime to sing-box `1.14.2` and keep POKROV transports,

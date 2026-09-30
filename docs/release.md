@@ -63,6 +63,14 @@ Core `1.2.0` is published independently of the app: the released POKROV app
 checks and builds cover the new source; phone, VM app integration and Apple
 acceptance are separate checks and are not implied by a Core release.
 
+Core `1.2.1` adds dormant localDPI with fresh runtime admission IDs, scoped
+withdrawal and a stateless signed Android Selective catalog verifier. Native
+hosts supply compiled key pins, retain the original signed bytes and perform
+the fenced TLS proof before admission. Five Android methods and four additive
+desktop symbols expose this API; desktop ABI 2 now has 38 required exports.
+The feature stays off, app `1.4.0` retains Core `1.1.2`, and published `1.2.0`
+assets are retained. App adoption and physical-device acceptance remain separate.
+
 For the REALITY version gate, build the current `engine/sing-box` CLI with
 `with_utls` and run `scripts/test-reality-xray-matrix.py` with each official
 Xray binary via repeated `--xray` arguments. It creates loopback VLESS/REALITY
