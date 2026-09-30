@@ -12,6 +12,22 @@ func RoutingCatalogWindowVersion() int32 {
 // current lease and cannot exceed the original catalog window.
 func RoutingCatalogControlVersion() int32 { return 4 }
 
+// LocalDpiAdmissionVersion reports API support only, not signed proof or
+// caller/device readiness.
+func LocalDpiAdmissionVersion() int32 { return 1 }
+
+func (s *CommandServer) ReadLocalDpiAdmissionID(outboundTag string) (string, error) {
+	return s.StartedService.ReadLocalDpiAdmissionID(outboundTag)
+}
+
+func (s *CommandServer) AdmitLocalDpiAdmission(admissionID string) (bool, error) {
+	return s.StartedService.AdmitLocalDpiAdmission(admissionID)
+}
+
+func (s *CommandServer) WithdrawLocalDpiAdmission(admissionID string) (bool, error) {
+	return s.StartedService.WithdrawLocalDpiAdmission(admissionID)
+}
+
 func (s *CommandServer) RevokeRoutingCatalogService(serviceID string) (bool, error) {
 	return s.StartedService.RevokeRoutingCatalogService(serviceID)
 }

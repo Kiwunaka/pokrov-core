@@ -27,6 +27,10 @@
       "pokrovCoreVersion",
       "pokrovCoreCapabilities",
       "pokrovCoreTransportCapabilities",
+      "pokrovCoreLocalDpiAdmissionVersion",
+      "pokrovCoreReadLocalDpiAdmissionID",
+      "pokrovCoreAdmitLocalDpiAdmission",
+      "pokrovCoreWithdrawLocalDpiAdmission",
       "pokrovCoreConfirmATSLease",
       "pokrovCoreRevokeATSLease",
       "pokrovCoreStartInterruptibleV1",
@@ -152,6 +156,16 @@
     "arguments": "ASCII service ID matching [a-z0-9][a-z0-9._-]{0,63}; authenticated host fences the exact running profile",
     "returns": {"1": "matching service windows withdrawn and linked leases terminated", "0": "service absent; no mutation", "-1": "invalid input or runtime unavailable"}
   },
+  "local_dpi_admission": {
+    "version_symbol": "pokrovCoreLocalDpiAdmissionVersion",
+    "mobile_version_symbol": "libbox.LocalDpiAdmissionVersion",
+    "read_symbol": "pokrovCoreReadLocalDpiAdmissionID",
+    "admit_symbol": "pokrovCoreAdmitLocalDpiAdmission",
+    "withdraw_symbol": "pokrovCoreWithdrawLocalDpiAdmission",
+    "arguments": "Read: UTF-8 localDPI outbound tag. Admit/withdraw: captured Core-generated admission ID. Trusted native owner captures the ID before signed exact-domain HEAD proof, then rechecks profile/session/operation/network/signature lifetime before Admit.",
+    "returns": "Version reports API support 1, not proof/readiness. Read returns a caller-owned 32-hex ID or empty when unavailable; release with freeString. Admit/withdraw return 1 for a changed exact holder, 0 for absent/terminal holder, -1 for invalid input or unavailable runtime.",
+    "scope": "Default unavailable; failed or withdrawn admission cannot reopen. Each new runtime generates a fresh ID. Scoped withdrawal leaves VPN and catalog windows intact. Additive optional desktop ABI 2 symbols; production caller and signed Selective intent remain disabled. Source support is not installed-artifact or device proof."
+  },
   "descriptor": {
     "schema_version": 1,
     "desktop_abi": 2,
@@ -160,6 +174,7 @@
     "smart_access_lease_version": 1,
     "smart_access_runtime_control_version": 1,
     "routing_catalog_control_version": 4,
+    "local_dpi_admission_version": 1,
     "capabilities": [
       "bounded_stop_reason",
       "core_start_stop",

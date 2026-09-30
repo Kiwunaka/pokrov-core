@@ -22,7 +22,7 @@ func TestClientRegistryExcludesUnusedProtocolsAndServers(t *testing.T) {
 			t.Errorf("client lost local inbound %q", protocol)
 		}
 	}
-	for _, protocol := range []string{"direct", "vless", "selector", "pokrov-telegram-ws"} {
+	for _, protocol := range []string{"direct", "vless", "selector", "pokrov-telegram-ws", "pokrov-local-dpi"} {
 		if _, exists := outbounds.CreateOptions(protocol); !exists {
 			t.Errorf("client lost outbound %q", protocol)
 		}

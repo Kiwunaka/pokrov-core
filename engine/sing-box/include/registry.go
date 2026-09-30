@@ -26,17 +26,18 @@ import (
 	protocolDNS "github.com/sagernet/sing-box/protocol/dns"
 	"github.com/sagernet/sing-box/protocol/group"
 	"github.com/sagernet/sing-box/protocol/group/balancer"
-	"github.com/sagernet/sing-box/protocol/pokrov/dnstt"
 	"github.com/sagernet/sing-box/protocol/pokrov/atslease"
+	"github.com/sagernet/sing-box/protocol/pokrov/dnstt"
 	"github.com/sagernet/sing-box/protocol/pokrov/hinvalid"
+	"github.com/sagernet/sing-box/protocol/pokrov/localdpi"
 	"github.com/sagernet/sing-box/protocol/pokrov/smartaccess"
 	"github.com/sagernet/sing-box/protocol/pokrov/telegramws"
 
-	"github.com/sagernet/sing-box/protocol/pokrov/xray"
 	"github.com/sagernet/sing-box/protocol/http"
 	"github.com/sagernet/sing-box/protocol/mieru"
 	"github.com/sagernet/sing-box/protocol/mixed"
 	"github.com/sagernet/sing-box/protocol/naive"
+	"github.com/sagernet/sing-box/protocol/pokrov/xray"
 	"github.com/sagernet/sing-box/protocol/psiphon"
 	"github.com/sagernet/sing-box/protocol/redirect"
 	"github.com/sagernet/sing-box/protocol/shadowsocks"
@@ -93,6 +94,7 @@ func OutboundRegistry() *outbound.Registry {
 	atslease.RegisterOutbound(registry)
 	smartaccess.RegisterOutbound(registry)
 	telegramws.RegisterOutbound(registry)
+	localdpi.RegisterOutbound(registry)
 
 	block.RegisterOutbound(registry)
 	protocolDNS.RegisterOutbound(registry)

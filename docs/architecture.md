@@ -17,6 +17,21 @@ VPN until the runtime restarts, without replaying ciphertext. Host policy must
 keep explicit VPN application choices ahead of this service rule. This source
 addition is not advertised as a compiled capability or enabled by the app.
 
+The source-only `pokrov-local-dpi` outbound starts unavailable and creates a fresh
+admission ID for each runtime. A trusted native owner must capture it with
+`ReadLocalDpiAdmissionID`, bind a fresh signed exact-domain HEAD proof to the
+current profile/session/network, then call `AdmitLocalDpiAdmission`; there is no
+production caller yet. `LocalDpiAdmissionVersion` and the additive desktop ABI 2
+descriptor/symbols report API support version 1, not proof or device readiness.
+It connects only to a literal loopback SOCKS5 endpoint
+whose owner controls client access and protects remote egress. A failed CONNECT
+before application bytes permits one encrypted VPN dial; subsequent transport
+failure withdraws only this admission and never replays the stream. The exact-ID
+`WithdrawLocalDpiAdmission` leaves catalog windows and VPN outbounds intact;
+withdrawal is terminal for this runtime. Remote bytes are not TLS/HTTP success.
+Signed Selective authority and native proof integration remain separate, with
+the feature disabled; existing Full and expiry behavior is unchanged.
+
 The device-local WARP path registers on the device and caches its material by
 `install_unique_id`; a caller must use its own authenticated installation ID
 and cannot reuse another installation's material. First TCP and UDP operations
