@@ -11,6 +11,15 @@ The WireGuard fork preserves Noise payloads and send errors; fake Noise packets
 keep their full header and bypass reserved-byte rewriting. Size and idle library
 RSS comparisons do not measure traffic memory or physical-device behavior.
 
+Imported managed sing-box profiles are normalized in memory before strict
+1.14 decoding. Legacy DNS servers retain resolver settings; plain direct
+references use the native typed DNS direct dialer and preserve route interface
+binding. Selectors and configured direct outbounds retain their detours.
+Legacy DNS route targets become `hijack-dns`, and top-level Portal `_meta` is
+excluded. Unsupported legacy references and per-server query overrides fail
+closed. Native Xray JSON is explicitly unsupported; URI conversion errors do
+not print the imported profile.
+
 Outbound monitoring is disabled unless the sing-box profile sets
 `experimental.monitoring` or a legacy Core profile explicitly sets
 `enable-outbound-monitoring`. When enabled, its periodic and requested probes
@@ -24,15 +33,30 @@ the client seed.
 
 1. Update `VERSION`, `config/release.json`, and `CHANGELOG.md`.
 2. Run `scripts/test.ps1`.
-3. Build Android and Windows twice and compare SHA-256 hashes.
+3. Build the changed Android and Windows libraries with the release scripts.
+   Do not rebuild unchanged source solely to refresh hashes or evidence.
 4. Verify Android contains `armeabi-v7a`, `arm64-v8a`, `x86`, and `x86_64`.
 5. Verify the Windows exports and run the 100-cycle app backtest.
 6. Record remaining physical-device and Apple checks without converting them into passes.
 7. Commit the exact source, create an annotated `vX.Y.Z` tag, then publish artifacts from that commit.
 
-Core `1.2.0` is the release target for these Android and Windows libraries.
+Core `1.2.0` is a prerelease for these Android and Windows libraries; `1.1.2`
+remains the latest stable release.
 `config/release.json` retains the immutable prior `1.0.3` evidence in a
 separate `retained_public_release` block.
+
+Compared with published `1.1.2`, the `1.2.0` Windows DLL is 46,348,800 bytes
+(16.16% smaller) and the Android AAR is 91,397,063 bytes (11.42% smaller), with
+all four Android ABIs and 34 required desktop exports present. The new DLL
+passed 100 proxy-only start/stop cycles in the Windows VM, leaving no test
+processes or listening ports. An original fixed PL profile passed HTTPS 204
+and the full 64 KiB payload from RU. A REALITY bridge profile starts but still
+fails during connection; bridge acceptance remains open.
+One isolated Windows library-load sample measured idle process RSS of
+37,339,136 bytes for `1.1.2` and 30,912,512 bytes for `1.2.0`; the incremental
+RSS after loading was 20,566,016 and 14,393,344 bytes respectively. This sample opened no VPN or
+network connection and does not measure traffic memory. Each final artifact
+was built once; byte-for-byte reproduction was not rechecked for this release.
 
 Core `1.2.0` is published independently of the app: the released POKROV app
 `1.4.0` keeps its Core `1.1.2` pin until the app `1.5` integration. Local SDK
@@ -156,7 +180,7 @@ and retained.
 
 Post-`1.0.3` working source requires Go `1.26.8` and the remediated dependency
 floor recorded in both Go modules: gRPC `1.83.2`, CIRCL `1.6.3`,
-`golang.org/x/crypto` `0.56.0`, `x/net` `0.58.0`, and `x/text` `0.39.0`.
+`golang.org/x/crypto` `0.56.0`, `x/net` `0.58.0`, and `x/text` `0.41.0`.
 Android source builds also pin NDK `29.0.14206865` in `config/release.json`.
 The build validates that exact `source.properties` revision and selects it
 through `ANDROID_NDK_HOME` before `gomobile` links the pinned Cronet archive.

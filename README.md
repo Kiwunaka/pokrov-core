@@ -1,7 +1,8 @@
 # POKROV Core
 
 POKROV Core is the network runtime used by POKROV clients. The current Core
-release target is `1.2.0`. `config/release.json` retains the original `1.0.3` build
+prerelease is `1.2.0`; the app `1.4.0` keeps Core `1.1.2` until app `1.5`.
+`config/release.json` retains the original `1.0.3` build
 evidence separately.
 
 The repository contains:
@@ -46,7 +47,7 @@ change the public release targets above.
 
 - Go `1.26.8`
 - Git
-- Android SDK and `gomobile v0.1.11` for Android
+- Android SDK and `gomobile v0.1.12` for Android
 - MinGW-w64 for the Windows DLL
 - Xcode and gomobile for Apple frameworks
 

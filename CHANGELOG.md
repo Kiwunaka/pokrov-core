@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.2.0 — unreleased
+## 1.2.0 — 2026-09-30 (prerelease)
 
 - Move the embedded runtime to sing-box `1.14.2` and keep POKROV transports,
   DNS fallback, TLS fragmentation and platform callbacks.
@@ -8,6 +8,8 @@
   builds; require credentials for local SOCKS, HTTP and mixed proxies.
 - Expose selector switching and network reset without replacing the runtime;
   close retired XHTTP clients and keep xmux connection limits stable.
+- Preserve issued managed profiles through strict legacy DNS migration, retain
+  full-config options, and omit profiles from URI conversion errors.
 - Keep the app `1.4.0` on Core `1.1.2`; app adoption belongs to `1.5`.
 
 ## 1.1.2 — 2026-09-29
