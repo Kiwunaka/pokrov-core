@@ -293,3 +293,5 @@ replace github.com/Psiphon-Labs/quic-go => ./replace/psiphon-quic-go
 replace github.com/Psiphon-Labs/psiphon-tls => ./replace/psiphon-tls
 
 replace github.com/sagernet/sing-tun => ./replace/sing-tun
+
+replace github.com/sagernet/sing-quic => ./replace/sing-quic

@@ -69,6 +69,16 @@ func (r *Router) RouteConnectionEx(ctx context.Context, conn net.Conn, metadata 
 }
 
 func (r *Router) routeConnection(ctx context.Context, conn net.Conn, metadata adapter.InboundContext, onClose N.CloseHandlerFunc) error {
+	rules := r.acquireHysteriaRules()
+	if rules == nil {
+		return net.ErrClosed
+	}
+	rulesAcquired := true
+	defer func() {
+		if rulesAcquired {
+			r.releaseHysteriaRules(rules)
+		}
+	}()
 	//nolint:staticcheck
 	if metadata.InboundDetour != "" {
 		if metadata.LastInbound == metadata.InboundDetour {
@@ -107,7 +117,7 @@ func (r *Router) routeConnection(ctx context.Context, conn net.Conn, metadata ad
 	if deadline.NeedAdditionalReadDeadline(conn) {
 		conn = deadline.NewConn(conn)
 	}
-	selectedRule, _, buffers, _, err := r.matchRule(ctx, &metadata, conn, nil)
+	selectedRule, _, buffers, _, err := r.matchRule(ctx, &metadata, conn, nil, rules.rules)
 	if err != nil {
 		return err
 	}
@@ -172,6 +182,8 @@ func (r *Router) routeConnection(ctx context.Context, conn net.Conn, metadata ad
 	for _, tracker := range r.trackers {
 		conn = tracker.RoutedConnection(ctx, conn, metadata, selectedRule, selectedOutbound)
 	}
+	r.releaseHysteriaRules(rules)
+	rulesAcquired = false
 	if outboundHandler, isHandler := selectedOutbound.(adapter.ConnectionHandler); isHandler {
 		outboundHandler.NewConnection(ctx, conn, metadata, onClose)
 	} else {
@@ -213,6 +225,16 @@ func (r *Router) RoutePacketConnectionEx(ctx context.Context, conn N.PacketConn,
 }
 
 func (r *Router) routePacketConnection(ctx context.Context, conn N.PacketConn, metadata adapter.InboundContext, onClose N.CloseHandlerFunc) error {
+	rules := r.acquireHysteriaRules()
+	if rules == nil {
+		return net.ErrClosed
+	}
+	rulesAcquired := true
+	defer func() {
+		if rulesAcquired {
+			r.releaseHysteriaRules(rules)
+		}
+	}()
 	//nolint:staticcheck
 	if metadata.InboundDetour != "" {
 		if metadata.LastInbound == metadata.InboundDetour {
@@ -244,7 +266,7 @@ func (r *Router) routePacketConnection(ctx context.Context, conn N.PacketConn, m
 	if metadata.InboundType == C.TypeTun && metadata.Protocol == C.ProtocolDNS {
 		return r.hijackDNSPacket(ctx, conn, nil, metadata, onClose)
 	}
-	selectedRule, _, _, packetBuffers, err := r.matchRule(ctx, &metadata, nil, conn)
+	selectedRule, _, _, packetBuffers, err := r.matchRule(ctx, &metadata, nil, conn, rules.rules)
 	if err != nil {
 		return err
 	}
@@ -309,6 +331,8 @@ func (r *Router) routePacketConnection(ctx context.Context, conn N.PacketConn, m
 	if metadata.FakeIP {
 		conn = newFakeIPNATPacketConn(bufio.NewNetPacketConn(conn), metadata.OriginDestination, metadata.Destination)
 	}
+	r.releaseHysteriaRules(rules)
+	rulesAcquired = false
 	if outboundHandler, isHandler := selectedOutbound.(adapter.PacketConnectionHandler); isHandler {
 		outboundHandler.NewPacketConnection(ctx, conn, metadata, onClose)
 	} else {
@@ -318,6 +342,11 @@ func (r *Router) routePacketConnection(ctx context.Context, conn N.PacketConn, m
 }
 
 func (r *Router) PreMatch(metadata adapter.InboundContext, firstPacket []byte) adapter.PreMatchResult {
+	rules := r.acquireHysteriaRules()
+	if rules == nil {
+		return adapter.PreMatchResult{Action: adapter.PreMatchReject}
+	}
+	defer r.releaseHysteriaRules(rules)
 	ctx := log.ContextWithNewID(r.ctx)
 	metadata.PreMatch = true
 	continueResult := adapter.PreMatchResult{Action: adapter.PreMatchContinue}
@@ -326,7 +355,7 @@ func (r *Router) PreMatch(metadata adapter.InboundContext, firstPacket []byte) a
 	if err != nil {
 		return continueResult
 	}
-	for currentRuleIndex, currentRule := range r.rules {
+	for currentRuleIndex, currentRule := range rules.rules {
 		metadata.ResetRuleCache()
 		if !currentRule.Match(&metadata) {
 			continue
@@ -597,6 +626,7 @@ func (r *Router) prepareMatchMetadata(ctx context.Context, metadata *adapter.Inb
 func (r *Router) matchRule(
 	ctx context.Context, metadata *adapter.InboundContext,
 	inputConn net.Conn, inputPacketConn N.PacketConn,
+	rules []adapter.Rule,
 ) (
 	selectedRule adapter.Rule, selectedRuleIndex int,
 	buffers []*buf.Buffer, packetBuffers []*N.PacketBuffer, fatalErr error,
@@ -607,7 +637,7 @@ func (r *Router) matchRule(
 	}
 
 match:
-	for currentRuleIndex, currentRule := range r.rules {
+	for currentRuleIndex, currentRule := range rules {
 		metadata.ResetRuleCache()
 		if !currentRule.Match(metadata) {
 			continue

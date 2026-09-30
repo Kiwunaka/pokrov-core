@@ -65,6 +65,7 @@ type Box struct {
 	httpClientService   adapter.LifecycleService
 	internalService     []adapter.LifecycleService
 	done                chan struct{}
+	hysteriaOptions     *option.Options
 }
 
 type Options struct {
@@ -114,6 +115,11 @@ func Context(
 }
 
 func New(options Options) (*Box, error) {
+	if options.Experimental != nil && options.Experimental.HysteriaReload {
+		if err := validateHysteriaReloadOptions(options.Options); err != nil {
+			return nil, err
+		}
+	}
 	createdAt := time.Now()
 	ctx := options.Context
 	if ctx == nil {
@@ -494,6 +500,11 @@ func New(options Options) (*Box, error) {
 		timeService.TimeService = ntpService
 		internalServices = append(internalServices, adapter.NewLifecycleService(ntpService, "ntp service"))
 	}
+	var hysteriaOptions *option.Options
+	if experimentalOptions.HysteriaReload {
+		loaded := options.Options
+		hysteriaOptions = &loaded
+	}
 	return &Box{
 		ctx:                 ctx,
 		network:             networkManager,
@@ -513,6 +524,7 @@ func New(options Options) (*Box, error) {
 		logger:              logFactory.Logger(),
 		internalService:     internalServices,
 		done:                make(chan struct{}),
+		hysteriaOptions:     hysteriaOptions,
 	}, nil
 }
 

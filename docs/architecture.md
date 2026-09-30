@@ -6,6 +6,8 @@ POKROV Core is one client runtime with three layers:
 2. `v2/` owns setup, configuration, lifecycle, WARP, DNS, and safe shutdown behavior.
 3. `engine/sing-box/` owns transports, routing, TLS, TUN, and protocol implementations.
 
+The embedded engine also contains the dedicated Linux HY2 server's opt-in `experimental.hysteria_reload` path. Its local pinned `replace/sing-quic` patch closes removed/rotated users' actual QUIC sessions and cancels only their routing contexts. Private SIGUSR2 changes only that inbound's auth and direct account routes; listener, TLS, DNS and other options stay immutable. Rule snapshots let unchanged users finish pending DNS/sniff matching while account routes swap. The existing command writes a private loaded-config/PID/systemd-InvocationID proof only after the new state is applied. This path is off for client runtimes and has no public control port.
+
 The opt-in `pokrov-telegram-ws` outbound accepts an explicit Telegram DC address
 table and an existing encrypted `vpn_outbound`. Only native obfuscated TCP:443
 flows in that table can use TLS-verified `kwsN.web.telegram.org/apiws` with the

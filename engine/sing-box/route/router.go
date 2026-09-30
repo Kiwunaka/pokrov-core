@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"runtime"
+	"sync"
 	"time"
 
 	"github.com/sagernet/sing-box/adapter"
@@ -35,6 +36,10 @@ type Router struct {
 	network           adapter.NetworkManager
 	httpClientManager adapter.HTTPClientManager
 	rules             []adapter.Rule
+	rulesAccess       sync.Mutex
+	hysteriaRules     *hysteriaRuleSnapshot
+	rulesReaders      sync.WaitGroup
+	rulesClosed       bool
 	needFindProcess   bool
 	needFindNeighbor  bool
 	leaseFiles        []string
@@ -229,7 +234,7 @@ func (r *Router) Close() error {
 		})
 		monitor.Finish()
 	}
-	for i, rule := range r.rules {
+	for i, rule := range r.stopHysteriaMatching() {
 		monitor.Start("close rule[", i, "]")
 		err = E.Append(err, rule.Close(), func(err error) error {
 			return E.Cause(err, "close rule[", i, "]")
@@ -266,7 +271,9 @@ func (r *Router) RuleSet(tag string) (adapter.RuleSet, bool) {
 }
 
 func (r *Router) Rules() []adapter.Rule {
-	return r.rules
+	r.rulesAccess.Lock()
+	defer r.rulesAccess.Unlock()
+	return append([]adapter.Rule(nil), r.rules...)
 }
 
 func (r *Router) AppendTracker(tracker adapter.ConnectionTracker) {

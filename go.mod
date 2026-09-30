@@ -315,3 +315,5 @@ replace github.com/Psiphon-Labs/quic-go => ./engine/sing-box/replace/psiphon-qui
 replace github.com/Psiphon-Labs/psiphon-tls => ./engine/sing-box/replace/psiphon-tls
 
 replace github.com/sagernet/sing-tun => ./engine/sing-box/replace/sing-tun
+
+replace github.com/sagernet/sing-quic => ./engine/sing-box/replace/sing-quic

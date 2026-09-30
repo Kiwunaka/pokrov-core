@@ -3,12 +3,13 @@ package option
 import "github.com/sagernet/sing/common/json/badoption"
 
 type ExperimentalOptions struct {
-	UnifiedDelay *UnifiedDelayOptions `json:"unified_delay,omitempty"`
-	Monitoring   *MonitoringOptions   `json:"monitoring,omitempty"`
-	CacheFile    *CacheFileOptions    `json:"cache_file,omitempty"`
-	ClashAPI     *ClashAPIOptions     `json:"clash_api,omitempty"`
-	V2RayAPI     *V2RayAPIOptions     `json:"v2ray_api,omitempty"`
-	Debug        *DebugOptions        `json:"debug,omitempty"`
+	HysteriaReload bool                 `json:"hysteria_reload,omitempty"`
+	UnifiedDelay   *UnifiedDelayOptions `json:"unified_delay,omitempty"`
+	Monitoring     *MonitoringOptions   `json:"monitoring,omitempty"`
+	CacheFile      *CacheFileOptions    `json:"cache_file,omitempty"`
+	ClashAPI       *ClashAPIOptions     `json:"clash_api,omitempty"`
+	V2RayAPI       *V2RayAPIOptions     `json:"v2ray_api,omitempty"`
+	Debug          *DebugOptions        `json:"debug,omitempty"`
 }
 
 type CacheFileOptions struct {

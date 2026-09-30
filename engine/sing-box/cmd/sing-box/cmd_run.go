@@ -169,15 +169,29 @@ func create() (*box.Box, context.CancelFunc, error) {
 func run() error {
 	osSignals := make(chan os.Signal, 1)
 	signal.Notify(osSignals, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
+	if reloadSignal := hysteriaReloadSignal(); reloadSignal != nil {
+		signal.Notify(osSignals, reloadSignal)
+	}
 	defer signal.Stop(osSignals)
 	for {
 		instance, cancel, err := create()
 		if err != nil {
 			return err
 		}
+		if err := writeHysteriaRuntimeProof(instance); err != nil {
+			cancel()
+			_ = instance.Close()
+			return err
+		}
 		runtimeDebug.FreeOSMemory()
 		for {
 			osSignal := <-osSignals
+			if osSignal == hysteriaReloadSignal() {
+				if err := reloadHysteria(instance); err != nil {
+					log.Error("hysteria_reload_failed")
+				}
+				continue
+			}
 			if osSignal == syscall.SIGHUP {
 				err = check()
 				if err != nil {
