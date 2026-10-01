@@ -60,7 +60,9 @@ func (m *captureManager) NewConnection(_ context.Context, dialer N.Dialer, conn 
 	payload := make([]byte, m.size)
 	_, err := io.ReadFull(conn, payload)
 	m.result <- capturedConnection{dialer, payload}
-	onClose(err)
+	if onClose != nil {
+		onClose(err)
+	}
 }
 
 type failedDialer struct{ calls atomic.Int32 }
@@ -78,9 +80,13 @@ func testRuntime(size int) (*Outbound, *datacenter, *captureManager, *failedDial
 	vpn := &testOutbound{outbound.NewAdapter("vless", "vpn", []string{N.NetworkTCP}, nil)}
 	capture := &captureManager{size: size, result: make(chan capturedConnection, 1)}
 	gateway := &failedDialer{}
+	now := time.Now()
+	withdrawCtx, withdrawCancel := context.WithCancel(context.Background())
 	h := &Outbound{vpn: vpn, connection: capture, dialer: gateway,
 		addresses: map[netip.Addr]*datacenter{netip.MustParseAddr("149.154.167.50"): dc},
-		flows:     make(map[net.Conn]context.CancelFunc)}
+		flows:     make(map[*telegramFlow]struct{}), admissionID: "fixture", admitted: true,
+		issued: now.Add(-time.Minute), expires: now.Add(time.Minute), deadline: now.Add(time.Minute),
+		withdrawCtx: withdrawCtx, withdrawCancel: withdrawCancel}
 	return h, dc, capture, gateway
 }
 
@@ -91,7 +97,7 @@ func sendClient(t *testing.T, h *Outbound, payload []byte, destination M.Socksad
 	done := make(chan struct{})
 	go func() {
 		h.NewConnection(context.Background(), runtime,
-			adapter.InboundContext{Destination: destination}, nil)
+			adapter.InboundContext{Network: N.NetworkTCP, Destination: destination}, nil)
 		close(done)
 	}()
 	if _, err := client.Write(payload); err != nil {
@@ -180,7 +186,7 @@ func TestCloseInterruptsPendingInitialization(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		h.NewConnection(context.Background(), &signaledReadConn{runtime, started},
-			adapter.InboundContext{Destination: M.ParseSocksaddr("149.154.167.50:443")}, nil)
+			adapter.InboundContext{Network: N.NetworkTCP, Destination: M.ParseSocksaddr("149.154.167.50:443")}, nil)
 		close(done)
 	}()
 	<-started
@@ -239,18 +245,139 @@ func TestConstructorProtectsSocketAndRejectsSelectorWithDirect(t *testing.T) {
 	ctx := service.ContextWith[adapter.OutboundManager](context.Background(), manager)
 	ctx = service.ContextWith[adapter.ConnectionManager](ctx, &captureManager{})
 	ctx = service.ContextWith[adapter.NetworkManager](ctx, protect)
-	options := option.PokrovTelegramWSOutboundOptions{VPNOutbound: "vpn", Datacenters: []option.PokrovTelegramWSDatacenter{
-		{ID: 2, Addresses: []string{"149.154.167.50"}, WebsocketAddress: "149.154.167.220"},
-	}}
-	value, err := NewOutbound(ctx, nil, log.NewNOPFactory().Logger(), "telegram", options)
+	options, profile := preparedTestOptions(t, "149.154.167.220")
+	if _, err := NewOutbound(ctx, nil, log.NewNOPFactory().Logger(), "telegram", options); err == nil {
+		t.Fatal("prepared permission admitted a renamed derived tag")
+	}
+	unchecked, err := NewOutbound(ctx, nil, log.NewNOPFactory().Logger(), "pokrov-telegram-ws-service-a", options)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if protect.requests != 1 {
+	_ = unchecked.(*Outbound).Close() // CheckConfig constructs/closes without consuming proof.
+	badGraph := profile
+	leaf := *profile.Outbounds[0].Options.(*option.VLESSOutboundOptions)
+	leaf.TLS = &option.OutboundTLSOptions{Enabled: false}
+	badGraph.Outbounds = append([]option.Outbound(nil), profile.Outbounds...)
+	badGraph.Outbounds[0].Options = &leaf
+	if _, err := BindPreparations(ctx, badGraph); err == nil {
+		t.Fatal("modified plaintext fallback reused native preparation")
+	}
+	ctx, err = BindPreparations(ctx, profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	value, err := NewOutbound(ctx, nil, log.NewNOPFactory().Logger(), "pokrov-telegram-ws-service-a", options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if protect.requests != 2 {
 		t.Fatal("platform socket protection was not requested")
 	}
 	if err := value.(*Outbound).Start(); err != nil {
 		t.Fatal(err)
+	}
+	h := value.(*Outbound)
+	defer h.Close()
+	if h.IsReady() || !h.AdmitAdmission(h.AdmissionID()) {
+		t.Fatal("fresh runtime did not start unavailable")
+	}
+	if _, err := NewOutbound(ctx, nil, log.NewNOPFactory().Logger(), "pokrov-telegram-ws-service-a", options); err == nil {
+		t.Fatal("consumed preparation replayed")
+	}
+	h.InterfaceUpdated(ctx)
+	if h.IsReady() || h.AdmitAdmission(h.AdmissionID()) {
+		t.Fatal("network withdrawal reopened")
+	}
+	freshOptions, freshProfile := preparedTestOptions(t, "149.154.167.220")
+	freshCtx, err := BindPreparations(ctx, freshProfile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fresh, err := NewOutbound(freshCtx, nil, log.NewNOPFactory().Logger(), "pokrov-telegram-ws-service-a", freshOptions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer fresh.(*Outbound).Close()
+	if err := fresh.(*Outbound).Start(); err != nil || fresh.(*Outbound).AdmissionID() == h.AdmissionID() {
+		t.Fatal("same original scope reload did not get a fresh holder")
+	}
+}
+
+func preparedTestOptions(t *testing.T, gateway string) (option.PokrovTelegramWSOutboundOptions, option.Options) {
+	t.Helper()
+	now := time.Now().UTC()
+	options := option.PokrovTelegramWSOutboundOptions{VPNOutbound: "vpn", ServiceID: "service-a",
+		IssuedAt: now.Add(-time.Minute).Format(time.RFC3339), ExpiresAt: now.Add(time.Minute).Format(time.RFC3339),
+		Datacenters: []option.PokrovTelegramWSDatacenter{{ID: 2, Addresses: []string{"149.154.167.50"}, WebsocketAddress: gateway}}}
+	profile := option.Options{Outbounds: []option.Outbound{{Type: "vless", Tag: "vpn", Options: &option.VLESSOutboundOptions{
+		OutboundTLSOptionsContainer: option.OutboundTLSOptionsContainer{TLS: &option.OutboundTLSOptions{Enabled: true}}}}}}
+	graph, err := FallbackDefinitions(profile, "vpn")
+	if err != nil {
+		t.Fatal(err)
+	}
+	options.NativePreparationID, err = RegisterPreparation(options, graph)
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile.Outbounds = append(profile.Outbounds, option.Outbound{Type: Type, Tag: "pokrov-telegram-ws-service-a", Options: &options})
+	return options, profile
+}
+
+func TestTerminalWithdrawalFencesPayloadAndPreservesOrdinaryVPN(t *testing.T) {
+	h, _, _, _ := testRuntime(0)
+	parent, cancel := context.WithCancel(context.Background())
+	client, input := net.Pipe()
+	defer client.Close()
+	remote, wire := net.Pipe()
+	defer wire.Close()
+	f := &telegramFlow{ctx: parent, client: input, cancel: cancel}
+	if !f.attach(remote) {
+		t.Fatal("fixture attach failed")
+	}
+	h.flows[f] = struct{}{}
+	wrapped := &admittedConn{Conn: remote, owner: h, flow: f}
+	cancel()
+	if n, err := wrapped.Write([]byte{1}); n != 0 || err == nil || f.payloadCommitted {
+		t.Fatal("cancelled parent committed payload before its close callback")
+	}
+	if !h.WithdrawAdmission(h.AdmissionID()) {
+		t.Fatal("withdraw failed")
+	}
+	if n, err := wrapped.Write([]byte{1}); n != 0 || err == nil {
+		t.Fatal("withdrawn holder wrote payload")
+	}
+	// A copied withdrawal snapshot must not close a flow already transferred
+	// to ordinary VPN; parent cancellation still closes it at completion.
+	ctx, end := context.WithCancel(context.Background())
+	defer end()
+	a, b := net.Pipe()
+	defer a.Close()
+	defer b.Close()
+	ordinary := &telegramFlow{ctx: ctx, client: b, cancel: end}
+	if !ordinary.transferVPN() {
+		t.Fatal("VPN transfer failed")
+	}
+	ordinary.withdraw()
+	if ordinary.closed || ctx.Err() != nil {
+		t.Fatal("TG withdrawal closed ordinary VPN")
+	}
+	ordinary.close()
+	if ctx.Err() == nil {
+		t.Fatal("ordinary flow lost parent/completion cleanup")
+	}
+	pending := &telegramFlow{ctx: context.Background(), client: b, cancel: func() {}}
+	pending.withdraw()
+	if !pending.setupWithdrawn || pending.attach(remote) {
+		t.Fatal("pre-read withdrawal allowed late WSS attachment")
+	}
+	h2, _, _, _ := testRuntime(0)
+	h2.expires = time.Now().Add(-time.Second)
+	if h2.IsReady() {
+		t.Fatal("expired holder remained ready")
+	}
+	h2.expires = time.Now().Add(time.Minute)
+	if h2.IsReady() || h2.AdmitAdmission(h2.AdmissionID()) {
+		t.Fatal("observed expiry resumed after clock rollback")
 	}
 }
 
@@ -272,11 +399,12 @@ func TestTelegramWSReqPQ(t *testing.T) {
 	vpn := &testOutbound{outbound.NewAdapter("vless", "vpn", nil, nil)}
 	ctx = service.ContextWith[adapter.OutboundManager](ctx, &testManager{values: map[string]adapter.Outbound{"vpn": vpn}})
 	ctx = service.ContextWith[adapter.ConnectionManager](ctx, connection)
-	value, err := NewOutbound(ctx, nil, logger, "telegram", option.PokrovTelegramWSOutboundOptions{
-		VPNOutbound: "vpn", Datacenters: []option.PokrovTelegramWSDatacenter{
-			{ID: 2, Addresses: []string{"149.154.167.50"}, WebsocketAddress: addresses[0].String()},
-		},
-	})
+	options, profile := preparedTestOptions(t, addresses[0].String())
+	ctx, err = BindPreparations(ctx, profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	value, err := NewOutbound(ctx, nil, logger, "pokrov-telegram-ws-service-a", options)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -285,13 +413,16 @@ func TestTelegramWSReqPQ(t *testing.T) {
 	if err := h.Start(); err != nil {
 		t.Fatal(err)
 	}
+	if !h.AdmitAdmission(h.AdmissionID()) {
+		t.Fatal("fixture admission failed")
+	}
 	remote, runtime := net.Pipe()
 	defer remote.Close()
 	if err := remote.SetDeadline(time.Now().Add(10 * time.Second)); err != nil {
 		t.Fatal(err)
 	}
 	go h.NewConnection(ctx, runtime, adapter.InboundContext{
-		Destination: M.ParseSocksaddr("149.154.167.50:443"),
+		Network: N.NetworkTCP, Destination: M.ParseSocksaddr("149.154.167.50:443"),
 		TLSFragment: true, TLSRecordFragment: true, TLSSpoof: "kws2.web.telegram.org",
 	}, nil)
 	initial, encrypt, decrypt := testInitialization(t)

@@ -13,6 +13,7 @@ import (
 	"github.com/sagernet/sing-box/experimental/deprecated"
 	"github.com/sagernet/sing-box/include"
 	"github.com/sagernet/sing-box/option"
+	"github.com/sagernet/sing-box/protocol/pokrov/telegramws"
 	"github.com/sagernet/sing/common"
 	E "github.com/sagernet/sing/common/exceptions"
 	"github.com/sagernet/sing/common/json"
@@ -86,6 +87,11 @@ func (s *StartedService) newInstance(profileContent string, overrideOptions *Ove
 func (s *StartedService) newInstanceOptions(options option.Options, overrideOptions *OverrideOptions) (*Instance, error) {
 	ctx := s.ctx
 	ctx, cancel := context.WithCancel(include.Context(ctx))
+	ctx, err := telegramws.BindPreparations(ctx, options)
+	if err != nil {
+		cancel()
+		return nil, err
+	}
 	if overrideOptions != nil {
 		for _, inbound := range options.Inbounds {
 			if tunInboundOptions, isTUN := inbound.Options.(*option.TunInboundOptions); isTUN {

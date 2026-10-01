@@ -26,6 +26,9 @@ func (h *Outbound) connectGateway(ctx context.Context, dc *datacenter) (net.Conn
 	}
 	conn, err := tls.NewDialer(h.dialer, tlsConfig).DialContext(ctx, N.NetworkTCP, dc.address)
 	if err != nil {
+		if conn != nil {
+			_ = conn.Close()
+		}
 		return nil, err
 	}
 	deadline, _ := ctx.Deadline()
@@ -93,4 +96,104 @@ func (c *gatewayConn) Close() error {
 	c.closed.Store(true)
 	c.once.Do(func() { err = c.raw.Close() })
 	return err
+}
+
+// ConnectionManager can copy cached initialization without a context check.
+// Preserve this wrapper through handoff so every MTProto write consults the
+// same terminal admission latch that owns and closes the attached WSS socket.
+type admittedConn struct {
+	net.Conn
+	owner *Outbound
+	flow  *telegramFlow
+}
+
+func (c *admittedConn) Write(p []byte) (int, error) {
+	c.owner.mu.Lock()
+	current := c.owner.currentLocked()
+	var cleanup func()
+	if !current {
+		cleanup = c.owner.denyLocked()
+	}
+	allowed := current && c.owner.admitted && c.flow.commitPayload()
+	c.owner.mu.Unlock()
+	if cleanup != nil {
+		cleanup()
+	}
+	if !allowed {
+		return 0, errClosed
+	}
+	return c.Conn.Write(p)
+}
+
+type telegramFlow struct {
+	mu                                                                        sync.Mutex
+	client, remote                                                            net.Conn
+	ctx                                                                       context.Context
+	cancel                                                                    context.CancelFunc
+	reading, active, closed, vpnTransferred, payloadCommitted, setupWithdrawn bool
+}
+
+func (f *telegramFlow) attach(remote net.Conn) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.closed || f.setupWithdrawn || f.ctx.Err() != nil || remote == nil {
+		return false
+	}
+	f.remote, f.active = remote, true
+	return true
+}
+
+func (f *telegramFlow) withdraw() {
+	f.mu.Lock()
+	if f.vpnTransferred {
+		f.mu.Unlock()
+		return
+	}
+	f.setupWithdrawn = true
+	active := f.active
+	if f.reading {
+		_ = f.client.SetReadDeadline(time.Now())
+	}
+	f.mu.Unlock()
+	if active {
+		f.close()
+	}
+}
+
+func (f *telegramFlow) close() {
+	f.mu.Lock()
+	if f.closed {
+		f.mu.Unlock()
+		return
+	}
+	f.closed = true
+	remote := f.remote
+	f.mu.Unlock()
+	f.cancel()
+	if remote != nil {
+		_ = remote.Close()
+	}
+	_ = f.client.Close()
+}
+
+func (f *telegramFlow) transferVPN() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.closed || f.active || f.payloadCommitted {
+		return false
+	}
+	f.vpnTransferred = true
+	return true
+}
+
+func (f *telegramFlow) commitPayload() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.closed || !f.active || f.vpnTransferred || f.ctx.Err() != nil {
+		return false
+	}
+	// Linearize the first payload attempt under the same owner lock as deny.
+	// Denial closes an accepted in-flight write; it never replays it to VPN.
+	f.payloadCommitted = true
+	return true
 }

@@ -35,21 +35,37 @@ func verifyLocalDpiCatalog(envelopeJSON, publicKeysJSON, audience, expectedPaylo
 
 func verifyLocalDpiCatalogPlatform(envelopeJSON, publicKeysJSON, audience, expectedPayloadSHA256 string,
 	expectedRevision, expectedSecurityRevision int64, serviceID, controlHost, accessState, platform string, now time.Time) bool {
+	if !localDpiCatalogHost(controlHost) {
+		return false
+	}
+	verified := verifiedRoutingCatalogService(envelopeJSON, publicKeysJSON, audience, expectedPayloadSHA256,
+		expectedRevision, expectedSecurityRevision, serviceID, accessState, now)
+	return verified != nil && localDpiCatalogService(verified.service, controlHost, accessState, platform)
+}
+
+type verifiedCatalogService struct {
+	service             map[string]json.RawMessage
+	issuedAt, expiresAt string
+}
+
+// Shared only by the two concrete native DPI/Telegram catalog projections.
+func verifiedRoutingCatalogService(envelopeJSON, publicKeysJSON, audience, expectedPayloadSHA256 string,
+	expectedRevision, expectedSecurityRevision int64, serviceID, accessState string, now time.Time) *verifiedCatalogService {
 	if len(envelopeJSON) > 1<<20 || (audience != "lab" && audience != "production") ||
 		!smartAccessRuntimeDigest.MatchString(expectedPayloadSHA256) ||
 		expectedRevision < 1 || expectedRevision > 9007199254740991 ||
 		expectedSecurityRevision < 1 || expectedSecurityRevision > 9007199254740991 ||
-		!routingCatalogServiceID.MatchString(serviceID) || !localDpiCatalogHost(controlHost) {
-		return false
+		!routingCatalogServiceID.MatchString(serviceID) {
+		return nil
 	}
 	switch accessState {
 	case "trial_premium", "bonus_premium", "paid_unlimited", "free_monthly", "free_soft_mode":
 	default:
-		return false
+		return nil
 	}
 	envelope, ok := smartAccessControlObject([]byte(envelopeJSON), "algorithm", "key_id", "payload_sha256", "payload", "signature_b64")
 	if !ok {
-		return false
+		return nil
 	}
 	algorithm, _ := localDpiCatalogString(envelope["algorithm"])
 	keyID, _ := localDpiCatalogString(envelope["key_id"])
@@ -57,26 +73,26 @@ func verifyLocalDpiCatalogPlatform(envelopeJSON, publicKeysJSON, audience, expec
 	signatureText, _ := localDpiCatalogString(envelope["signature_b64"])
 	if algorithm != "Ed25519" || !routingCatalogServiceID.MatchString(keyID) ||
 		digest != expectedPayloadSHA256 || len(signatureText) != 86 {
-		return false
+		return nil
 	}
 	key, ok := localDpiCatalogPinnedKey(publicKeysJSON, keyID)
 	if !ok {
-		return false
+		return nil
 	}
 	rawPayload := envelope["payload"]
 	sum := sha256.Sum256(rawPayload)
 	if hex.EncodeToString(sum[:]) != digest {
-		return false
+		return nil
 	}
 	signature, err := base64.RawURLEncoding.Strict().DecodeString(signatureText)
 	if err != nil || len(signature) != ed25519.SignatureSize ||
 		!ed25519.Verify(key, append([]byte("pokrov-routing-catalog-v1\n"), rawPayload...), signature) {
-		return false
+		return nil
 	}
 	payload, ok := smartAccessControlObject(rawPayload, "schema_version", "revision", "security_revision", "audience",
 		"issued_at", "expires_at", "sources", "evidence", "services")
 	if !ok {
-		return false
+		return nil
 	}
 	schema, _ := localDpiCatalogString(payload["schema_version"])
 	signedAudience, _ := localDpiCatalogString(payload["audience"])
@@ -84,24 +100,24 @@ func verifyLocalDpiCatalogPlatform(envelopeJSON, publicKeysJSON, audience, expec
 	if schema != "pokrov-routing-catalog-v1" || signedAudience != audience ||
 		json.Unmarshal(payload["revision"], &revision) != nil || revision != expectedRevision ||
 		json.Unmarshal(payload["security_revision"], &securityRevision) != nil || securityRevision != expectedSecurityRevision {
-		return false
+		return nil
 	}
 	issuedText, _ := localDpiCatalogString(payload["issued_at"])
 	expiresText, _ := localDpiCatalogString(payload["expires_at"])
 	issued, validIssued := smartAccessControlTime(issuedText)
 	expires, validExpires := smartAccessControlTime(expiresText)
 	if !validIssued || !validExpires || !issued.Before(expires) || now.Before(issued) || !now.Before(expires) {
-		return false
+		return nil
 	}
 	if _, ok := localDpiCatalogArray(payload["sources"], 1, 128); !ok {
-		return false
+		return nil
 	}
 	if _, ok := localDpiCatalogArray(payload["evidence"], 0, 512); !ok {
-		return false
+		return nil
 	}
 	services, ok := localDpiCatalogArray(payload["services"], 1, 256)
 	if !ok {
-		return false
+		return nil
 	}
 	seen := make(map[string]bool, len(services))
 	var selected map[string]json.RawMessage
@@ -111,14 +127,17 @@ func verifyLocalDpiCatalogPlatform(envelopeJSON, publicKeysJSON, audience, expec
 			"android", "windows", "domains", "networks", "provider_capability_refs", "external_gateway_policy")
 		id, _ := localDpiCatalogString(service["service_id"])
 		if !valid || !routingCatalogServiceID.MatchString(id) || seen[id] {
-			return false
+			return nil
 		}
 		seen[id] = true
 		if id == serviceID {
 			selected = service
 		}
 	}
-	return selected != nil && localDpiCatalogService(selected, controlHost, accessState, platform)
+	if selected == nil {
+		return nil
+	}
+	return &verifiedCatalogService{selected, issuedText, expiresText}
 }
 
 func localDpiCatalogPinnedKey(raw, keyID string) (ed25519.PublicKey, bool) {
@@ -164,16 +183,18 @@ func localDpiCatalogService(service map[string]json.RawMessage, host, accessStat
 	seenModes := make(map[string]bool, len(intents))
 	selectiveVPN := false
 	for _, raw := range intents {
-		intent, valid := smartAccessControlObject(raw, "mode", "action")
-		if !valid {
-			intent, valid = smartAccessControlObject(raw, "mode", "action", "local_dpi_control_host")
-		}
+		intent, valid := catalogNativeRouteIntent(raw)
 		mode, _ := localDpiCatalogString(intent["mode"])
 		action, _ := localDpiCatalogString(intent["action"])
 		if !valid || mode == "" || seenModes[mode] {
 			return false
 		}
 		seenModes[mode] = true
+		if rawDCs, present := intent["telegram_ws_datacenters"]; present {
+			if mode != "selective" || action != "vpn" || telegramCatalogDatacenters(rawDCs) == nil {
+				return false
+			}
+		}
 		if rawHost, present := intent["local_dpi_control_host"]; present {
 			intentHost, _ := localDpiCatalogString(rawHost)
 			if mode != "selective" || action != "vpn" || intentHost != host {

@@ -23,10 +23,22 @@ other destinations, UDP, and failed WSS setup retain the VPN path; a WSS failure
 after transmission closes that stream and sends subsequent DC flows through
 VPN until the runtime restarts, without replaying ciphertext. Host policy must
 keep explicit VPN application choices ahead of this service rule. The source
-inventory reports `pokrov_telegram_ws_v1` as implementation support only. The
-signed DC producer and lifetime gate remain missing, and App emits no route,
-so Telegram offload remains off. The current App rejects unknown inventory
-features; it must recognize this feature before matching Core artifacts ship.
+inventory reports `pokrov_telegram_ws_v1` as implementation support only.
+Native TG admission version 1 verifies the original pinned signed catalog,
+selected service/access/platform, exact public DC literals and the current
+recursive encrypted VPN fallback. Its private one-use preparation retains
+original `_meta` for TG-first/DPI-second composition before final stripping and
+one CoreStart. CheckConfig does not consume permission; actual Start creates a
+fresh unavailable holder. The native owner captures its ID and current physical
+network/profile before admission. UTC plus monotonic expiry, interface updates
+and targeted catalog revocation terminally deny WSS before closing only owned
+setup/WSS streams. Untimed exact TCP443 routes keep VPN fallback after denial;
+parent-live setup can preserve bytes through VPN, while committed WSS payload
+is never replayed. Host original-request and final-profile digests are distinct.
+The signed producer and matching Windows consumer are source-only; App emits no
+TG metadata, and activation stays OFF until matching artifacts and device gates.
+Android's first asynchronous interface publication can withdraw the fresh holder
+before admission; this remains fail closed and does not establish device readiness.
 
 The dormant `pokrov-local-dpi` outbound starts unavailable and creates a fresh
 admission ID for each runtime. A trusted native owner must capture it with

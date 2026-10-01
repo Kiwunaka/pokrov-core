@@ -31,8 +31,9 @@ func TestWindowsLocalDpiPreparationRetainsVPNAndExactSignedScope(t *testing.T) {
 			"source_ids": []string{"test"}, "evidence_ids": []string{"test-proof"}, "android": []any{}, "windows": []any{},
 			"networks": []any{}, "provider_capability_refs": []any{}, "external_gateway_policy": "forbidden",
 			"access_states": []string{"paid_unlimited"},
-			"route_intents": []any{map[string]any{"mode": "selective", "action": "vpn", "local_dpi_control_host": "control.example"}},
-			"domains":       []any{map[string]any{"name": "control.example", "match": "exact", "shared": false, "role": "web", "source_ids": []string{"test"}}},
+			"route_intents": []any{map[string]any{"mode": "selective", "action": "vpn", "local_dpi_control_host": "control.example",
+				"telegram_ws_datacenters": []any{map[string]any{"id": 2, "addresses": []string{"149.154.167.50"}, "websocket_address": "149.154.167.220"}}}},
+			"domains": []any{map[string]any{"name": "control.example", "match": "exact", "shared": false, "role": "web", "source_ids": []string{"test"}}},
 		}},
 	})
 	digest := sha256.Sum256(payload)
@@ -53,6 +54,34 @@ func TestWindowsLocalDpiPreparationRetainsVPNAndExactSignedScope(t *testing.T) {
 			map[string]any{"action": "route", "domain": []string{"other.example"}, "outbound": "vpn", "pokrov_catalog_window": window}}},
 	}
 	encoded, _ := json.Marshal(config)
+	// Same-service TG + DPI compose from the original signed metadata, through
+	// one private intermediate, without replacing either existing VPN scope.
+	meta := config["_meta"].(map[string]any)
+	meta["telegram_ws"] = map[string]any{"schema_version": 1, "mode": "selective", "platform": "windows", "catalog_envelope": string(envelope),
+		"catalog_sha256": hex.EncodeToString(digest[:]), "revision": 7, "security_revision": 3, "access_state": "paid_unlimited", "services": map[string]string{"service-a": "group"}}
+	encoded, _ = json.Marshal(config)
+	tgResult, err := PrepareWindowsTelegramWSProfile(string(encoded), string(keys), "lab", "physical-fixture")
+	if err != nil {
+		t.Fatal("TG-first preparation failed")
+	}
+	var tgReceipt struct {
+		Profile json.RawMessage `json:"profile"`
+	}
+	if json.Unmarshal([]byte(tgResult), &tgReceipt) != nil {
+		t.Fatal("TG private receipt invalid")
+	}
+	combined, err := PrepareWindowsLocalDpiProfile(string(tgReceipt.Profile), string(keys), "lab", "physical-fixture")
+	var combinedReceipt windowsDpiPreparation
+	var combinedProfile struct {
+		Meta      json.RawMessage `json:"_meta"`
+		Outbounds []struct{ Type string }
+		Route     struct{ Rules []struct{ Outbound string } }
+	}
+	if err != nil || json.Unmarshal([]byte(combined), &combinedReceipt) != nil || json.Unmarshal(combinedReceipt.Profile, &combinedProfile) != nil || combinedProfile.Meta != nil || len(combinedProfile.Outbounds) != 5 || combinedProfile.Outbounds[3].Type != "pokrov-telegram-ws" || combinedProfile.Outbounds[4].Type != "pokrov-local-dpi" || combinedProfile.Route.Rules[0].Outbound != "pokrov-telegram-ws-service-a" || combinedProfile.Route.Rules[1].Outbound != "pokrov-local-dpi-service-a" {
+		t.Fatal("TG/DPI composition lost one authority or exact TG precedence")
+	}
+	delete(meta, "telegram_ws")
+	encoded, _ = json.Marshal(config)
 	result, err := PrepareWindowsLocalDpiProfile(string(encoded), string(keys), "lab", "physical-fixture")
 	if err != nil {
 		t.Fatal("signed Windows preparation failed")

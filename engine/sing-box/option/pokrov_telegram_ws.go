@@ -6,6 +6,11 @@ type PokrovTelegramWSOutboundOptions struct {
 	DialerOptions
 	VPNOutbound string                       `json:"vpn_outbound"`
 	Datacenters []PokrovTelegramWSDatacenter `json:"datacenters"`
+	ServiceID   string                       `json:"service_id"`
+	IssuedAt    string                       `json:"issued_at"`
+	ExpiresAt   string                       `json:"expires_at"`
+	// One-use proof created by native signed preparation, never catalog or IPC authority.
+	NativePreparationID string `json:"native_preparation_id"`
 }
 
 type PokrovTelegramWSDatacenter struct {

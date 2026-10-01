@@ -6,6 +6,7 @@ import (
 
 	"github.com/sagernet/sing-box/protocol/pokrov/localdpi"
 	"github.com/sagernet/sing-box/protocol/pokrov/smartaccess"
+	"github.com/sagernet/sing-box/protocol/pokrov/telegramws"
 )
 
 var routingCatalogServiceID = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
@@ -57,13 +58,22 @@ func (s *StartedService) WithdrawLocalDpiAdmission(admissionID string) (bool, er
 }
 
 func (s *StartedService) RevokeRoutingCatalogService(serviceID string) (bool, error) {
-	if !routingCatalogServiceID.MatchString(serviceID) { return false, errors.New("catalog_service_invalid") }
+	if !routingCatalogServiceID.MatchString(serviceID) {
+		return false, errors.New("catalog_service_invalid")
+	}
 	s.serviceAccess.RLock()
 	defer s.serviceAccess.RUnlock()
 	if s.closed || s.serviceStatus.Status != ServiceStatus_STARTED || s.instance == nil {
 		return false, errors.New("catalog_runtime_unavailable")
 	}
-	return s.instance.instance.RevokeRoutingCatalogService(serviceID), nil
+	instance := s.instance.instance
+	found := false
+	for _, outbound := range instance.Outbound().Outbounds() {
+		if tg, ok := outbound.(*telegramws.Outbound); ok && tg.ServiceID() == serviceID {
+			found = tg.WithdrawAdmission(tg.AdmissionID()) || found
+		}
+	}
+	return instance.RevokeRoutingCatalogService(serviceID) || found, nil
 }
 
 // A whole-catalog withdrawal closes leased provider flows as well as removing
@@ -75,7 +85,13 @@ func (s *StartedService) RevokeRoutingCatalog() (bool, error) {
 		return false, errors.New("catalog_runtime_unavailable")
 	}
 	instance := s.instance.instance
-	found := instance.RevokeRoutingCatalog()
+	found := false
+	for _, outbound := range instance.Outbound().Outbounds() {
+		if tg, ok := outbound.(*telegramws.Outbound); ok {
+			found = tg.WithdrawAdmission(tg.AdmissionID()) || found
+		}
+	}
+	found = instance.RevokeRoutingCatalog() || found
 	for _, outbound := range instance.Outbound().Outbounds() {
 		if lease, ok := outbound.(*smartaccess.Outbound); ok {
 			lease.Revoke(true)
@@ -83,4 +99,46 @@ func (s *StartedService) RevokeRoutingCatalog() (bool, error) {
 		}
 	}
 	return found, nil
+}
+
+func (s *StartedService) ReadTelegramWSAdmissionID(outboundTag string) (string, error) {
+	s.serviceAccess.RLock()
+	defer s.serviceAccess.RUnlock()
+	if s.closed || s.serviceStatus.Status != ServiceStatus_STARTED || s.instance == nil {
+		return "", errors.New("telegram_ws_runtime_unavailable")
+	}
+	for _, outbound := range s.instance.instance.Outbound().Outbounds() {
+		if tg, ok := outbound.(*telegramws.Outbound); ok && tg.Tag() == outboundTag {
+			return tg.AdmissionID(), nil
+		}
+	}
+	return "", errors.New("telegram_ws_admission_unavailable")
+}
+
+func (s *StartedService) AdmitTelegramWSAdmission(id string) (bool, error) {
+	s.serviceAccess.RLock()
+	defer s.serviceAccess.RUnlock()
+	if s.closed || s.serviceStatus.Status != ServiceStatus_STARTED || s.instance == nil {
+		return false, errors.New("telegram_ws_runtime_unavailable")
+	}
+	for _, outbound := range s.instance.instance.Outbound().Outbounds() {
+		if tg, ok := outbound.(*telegramws.Outbound); ok && tg.AdmissionID() == id {
+			return tg.AdmitAdmission(id), nil
+		}
+	}
+	return false, nil
+}
+
+func (s *StartedService) WithdrawTelegramWSAdmission(id string) (bool, error) {
+	s.serviceAccess.RLock()
+	defer s.serviceAccess.RUnlock()
+	if s.closed || s.serviceStatus.Status != ServiceStatus_STARTED || s.instance == nil {
+		return false, errors.New("telegram_ws_runtime_unavailable")
+	}
+	for _, outbound := range s.instance.instance.Outbound().Outbounds() {
+		if tg, ok := outbound.(*telegramws.Outbound); ok && tg.AdmissionID() == id {
+			return tg.WithdrawAdmission(id), nil
+		}
+	}
+	return false, nil
 }

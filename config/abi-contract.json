@@ -33,6 +33,11 @@
       "pokrovCoreReadLocalDpiAdmissionID",
       "pokrovCoreAdmitLocalDpiAdmission",
       "pokrovCoreWithdrawLocalDpiAdmission",
+      "pokrovCoreTelegramWSAdmissionVersion",
+      "pokrovCorePrepareTelegramWSProfile",
+      "pokrovCoreReadTelegramWSAdmissionID",
+      "pokrovCoreAdmitTelegramWSAdmission",
+      "pokrovCoreWithdrawTelegramWSAdmission",
       "pokrovCoreConfirmATSLease",
       "pokrovCoreRevokeATSLease",
       "pokrovCoreStartInterruptibleV1",
@@ -177,6 +182,18 @@
     "arguments": "Prepare: UTF-8 private config with _meta.local_dpi, compiled native pinned-key map JSON, compiled audience and captured physical interface name. Keys/audience never come from IPC metadata.",
     "returns": "Version is 1 on Windows, 0 elsewhere. Prepare returns caller-owned private JSON {profile,expires_at,services:[{service_id,outbound_tag,control_host,domains:[{name,match,shared}]}]} or empty on invalid scope; release with freeString. It does not start a child, prove TLS or admit a holder.",
     "scope": "Windows-only physically bound TCP443 local path with existing encrypted VPN fallback and exact-ID admission. Signed Windows Selective rules and nonshared exact control host are required. Windows service executor/assets and current profile/network proof are separate requirements; feature default remains OFF. Other desktop platforms retain the existing descriptor."
+  },
+  "telegram_ws_admission": {
+    "version_symbol": "pokrovCoreTelegramWSAdmissionVersion",
+    "prepare_symbol": "pokrovCorePrepareTelegramWSProfile",
+    "read_symbol": "pokrovCoreReadTelegramWSAdmissionID",
+    "admit_symbol": "pokrovCoreAdmitTelegramWSAdmission",
+    "withdraw_symbol": "pokrovCoreWithdrawTelegramWSAdmission",
+    "descriptor_field": "telegram_ws_admission_version",
+    "version": 1,
+    "arguments": "Prepare: private original config with _meta.telegram_ws schema 1, compiled native pinned-key map JSON, compiled audience and captured physical interface. Desktop wrapper fixes Windows; libbox fixes Android. Pins/audience do not come from IPC. TG preparation precedes DPI preparation, retaining original _meta until final runtime strip and one CoreStart.",
+    "returns": "Prepare returns caller-owned private {schema_version:1,profile,issued_at,expires_at,services:[{service_id,outbound_tag}]} or empty on invalid scope; freeString releases C strings. Host retains original request digest separately from final prepared profile digest. Read returns fresh 32-lowerhex runtime ID; admit/withdraw return 1 changed, 0 absent/terminal, -1 unavailable/invalid.",
+    "scope": "Signed exact public unscoped DC table, selected service/access/platform and actual recursive encrypted fallback graph are required. One-use native preparation is consumed only by actual Start, not CheckConfig. Every runtime starts unavailable. TTL, observed clock expiry, network update and targeted revoke terminally deny the holder before closing only its pending/active WSS flows. Exact TCP443 rules are untimed and retain VPN fallback. Parent-live setup fallback preserves bytes; committed WSS payload is never replayed. Source only, emission/activation OFF; matching built artifacts and device gates remain required."
   },
   "descriptor": {
     "schema_version": 1,

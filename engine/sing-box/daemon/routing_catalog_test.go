@@ -12,9 +12,78 @@ import (
 	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing-box/protocol/pokrov/localdpi"
+	"github.com/sagernet/sing-box/protocol/pokrov/telegramws"
 	"github.com/sagernet/sing-box/protocol/socks"
+	"github.com/sagernet/sing-box/protocol/vless"
 	"github.com/sagernet/sing/service"
 )
+
+func TestTelegramWSRevokeKeepsOtherHolderAndVPN(t *testing.T) {
+	registry := outbound.NewRegistry()
+	telegramws.RegisterOutbound(registry)
+	vless.RegisterOutbound(registry)
+	ctx := service.ContextWith[adapter.OutboundRegistry](context.Background(), registry)
+	ctx = service.ContextWith[option.OutboundOptionsRegistry](ctx, registry)
+	s := NewStartedService(ServiceOptions{Context: ctx, LogMaxLines: 1})
+	t.Cleanup(func() { _ = s.Close() })
+	options := option.Options{Log: &option.LogOptions{Disabled: true}, Outbounds: []option.Outbound{{Type: C.TypeVLESS, Tag: "vpn", Options: &option.VLESSOutboundOptions{
+		ServerOptions: option.ServerOptions{Server: "127.0.0.1", ServerPort: 1}, UUID: "00000000-0000-0000-0000-000000000001",
+		OutboundTLSOptionsContainer: option.OutboundTLSOptionsContainer{TLS: &option.OutboundTLSOptions{Enabled: true}},
+	}}}, Route: &option.RouteOptions{Final: "vpn"}}
+	graph, err := telegramws.FallbackDefinitions(options, "vpn")
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	for _, name := range []string{"a", "b"} {
+		tg := &option.PokrovTelegramWSOutboundOptions{VPNOutbound: "vpn", ServiceID: "service-" + name,
+			IssuedAt: now.Add(-time.Minute).Format(time.RFC3339), ExpiresAt: now.Add(time.Minute).Format(time.RFC3339),
+			Datacenters: []option.PokrovTelegramWSDatacenter{{ID: 2, Addresses: []string{"149.154.167.50"}, WebsocketAddress: "149.154.167.220"}}}
+		tg.NativePreparationID, err = telegramws.RegisterPreparation(*tg, graph)
+		if err != nil {
+			t.Fatal(err)
+		}
+		options.Outbounds = append(options.Outbounds, option.Outbound{Type: telegramws.Type, Tag: "pokrov-telegram-ws-service-" + name, Options: tg})
+	}
+	instance, err := s.newInstanceOptions(options, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.instance, s.serviceStatus.Status = instance, ServiceStatus_STARTED
+	var holders []*telegramws.Outbound
+	for _, tag := range []string{"pokrov-telegram-ws-service-a", "pokrov-telegram-ws-service-b"} {
+		raw, _ := instance.instance.Outbound().Outbound(tag)
+		h := raw.(*telegramws.Outbound)
+		// Start only these holders; no Box.Start, listeners, TUN or network dial.
+		if err := h.Start(); err != nil {
+			t.Fatal(err)
+		}
+		id, err := s.ReadTelegramWSAdmissionID(tag)
+		if err != nil || id == "" || h.IsReady() {
+			t.Fatal("TG holder did not start unavailable")
+		}
+		if ok, err := s.AdmitTelegramWSAdmission(id); err != nil || !ok {
+			t.Fatal("fresh TG ID was not admitted")
+		}
+		holders = append(holders, h)
+	}
+	vpn, _ := instance.instance.Outbound().Outbound("vpn")
+	if ok, err := s.RevokeRoutingCatalogService("service-a"); err != nil || !ok || holders[0].IsReady() || !holders[1].IsReady() {
+		t.Fatal("TG revoke changed another service")
+	}
+	if ok, err := s.AdmitTelegramWSAdmission(holders[0].AdmissionID()); err != nil || ok {
+		t.Fatal("revoked TG reopened")
+	}
+	if ok, err := s.WithdrawTelegramWSAdmission("stale-id"); err != nil || ok || !holders[1].IsReady() {
+		t.Fatal("stale TG ID changed a current holder")
+	}
+	if current, _ := instance.instance.Outbound().Outbound("vpn"); current != vpn {
+		t.Fatal("TG revoke changed ordinary VPN")
+	}
+	if ok, err := s.RevokeRoutingCatalog(); err != nil || !ok || holders[1].IsReady() {
+		t.Fatal("whole-catalog revoke left TG authority live")
+	}
+}
 
 func localDpiCatalogFixture(t *testing.T) (*StartedService, option.Options) {
 	t.Helper()
