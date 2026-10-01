@@ -22,8 +22,11 @@ original initialization and ciphertext stay unchanged. Unsupported formats,
 other destinations, UDP, and failed WSS setup retain the VPN path; a WSS failure
 after transmission closes that stream and sends subsequent DC flows through
 VPN until the runtime restarts, without replaying ciphertext. Host policy must
-keep explicit VPN application choices ahead of this service rule. This source
-addition is not advertised as a compiled capability or enabled by the app.
+keep explicit VPN application choices ahead of this service rule. The source
+inventory reports `pokrov_telegram_ws_v1` as implementation support only. The
+signed DC producer and lifetime gate remain missing, and App emits no route,
+so Telegram offload remains off. The current App rejects unknown inventory
+features; it must recognize this feature before matching Core artifacts ship.
 
 The dormant `pokrov-local-dpi` outbound starts unavailable and creates a fresh
 admission ID for each runtime. A trusted native owner must capture it with

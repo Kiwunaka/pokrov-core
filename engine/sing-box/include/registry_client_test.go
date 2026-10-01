@@ -2,7 +2,11 @@
 
 package include
 
-import "testing"
+import (
+	"encoding/json"
+	"slices"
+	"testing"
+)
 
 func TestClientRegistryExcludesUnusedProtocolsAndServers(t *testing.T) {
 	outbounds := OutboundRegistry()
@@ -26,5 +30,13 @@ func TestClientRegistryExcludesUnusedProtocolsAndServers(t *testing.T) {
 		if _, exists := outbounds.CreateOptions(protocol); !exists {
 			t.Errorf("client lost outbound %q", protocol)
 		}
+	}
+	var inventory struct {
+		Schema   int      `json:"schema"`
+		Features []string `json:"features"`
+	}
+	if err := json.Unmarshal([]byte(TransportCapabilities()), &inventory); err != nil ||
+		inventory.Schema != 1 || !slices.Contains(inventory.Features, "pokrov_telegram_ws_v1") {
+		t.Fatal("registered Telegram WSS support missing from transport inventory")
 	}
 }

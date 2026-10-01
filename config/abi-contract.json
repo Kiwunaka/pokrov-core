@@ -92,6 +92,7 @@
     "returns": "Caller-owned UTF-8 JSON, at most 4096 bytes, release desktop string with freeString. Closed shape: schema=1, features=sorted unique ASCII feature IDs. Absent symbol/null/invalid or unknown schema means unavailable, never inferred support. This optional additive export does not change desktop ABI 2 or the existing exact capability descriptor.",
     "features": {
       "pokrov_ats_lease_v1": "Core outbound wrapper for a single VLESS ATS endpoint. New TCP/UDP flows stop within 10 minutes of issue; admitted flows close within one hour. The host must bind and revoke the exact running profile/lease.",
+      "pokrov_telegram_ws_v1": "Native obfuscated Telegram TCP:443 to TLS-verified binary WSS with encrypted VPN fallback. Implementation support only; signed DC route authority, lifetime gate and matching App consumer remain required.",
       "singbox_tls_v1": "Native TLS client implementation; per-profile validation still required",
       "singbox_vless_v1": "sing-box VLESS outbound implementation; transport/TLS options require their own features",
       "singbox_grpc_v1": "sing-box V2Ray gRPC client transport, including the lite implementation without with_grpc",
@@ -101,7 +102,7 @@
       "singbox_hysteria2_v1": "Hysteria2 outbound, only with_quic",
       "pokrov_awg31_endpoint_v1": "Bounded pokrov.awg31.endpoint.v1 subset, only with_awg"
     },
-    "scope": "No artifact digest, opaque signed capability reference/revision, IP-family reachability, endpoint lease, entitlement, proof or production readiness. Those bindings remain independent requirements. The inventory is intentionally limited to current ATS transport ingredients, not every engine registration."
+    "scope": "No artifact digest, opaque signed capability reference/revision, IP-family reachability, endpoint lease, entitlement, proof or production readiness. Those bindings remain independent requirements. The inventory reports selected transport implementation support, not every engine registration or authority to use Telegram DC egress."
   },
   "linux_expected_identity_start": {
     "protocol": "pokrov-linux-core-v1",

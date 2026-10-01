@@ -9,7 +9,7 @@ import (
 // profile validity, signed policy references or host/TUN readiness. Registry
 // presence is insufficient: disabled protocols also register error stubs.
 func TransportCapabilities() string {
-	features := []string{"pokrov_ats_lease_v1", "singbox_grpc_v1", "singbox_tls_v1", "singbox_vless_v1", "singbox_xhttp_v1"}
+	features := []string{"pokrov_ats_lease_v1", "pokrov_telegram_ws_v1", "singbox_grpc_v1", "singbox_tls_v1", "singbox_vless_v1", "singbox_xhttp_v1"}
 	if pokrovTransportUTLS {
 		features = append(features, "singbox_utls_v1", "singbox_reality_v1")
 	}
@@ -22,7 +22,7 @@ func TransportCapabilities() string {
 	sort.Strings(features)
 	// Only fixed ASCII strings and an integer enter this bounded descriptor.
 	encoded, _ := json.Marshal(struct {
-		Schema int `json:"schema"`
+		Schema   int      `json:"schema"`
 		Features []string `json:"features"`
 	}{1, features})
 	return string(encoded)
