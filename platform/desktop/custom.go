@@ -131,6 +131,7 @@ func emptyOrErrorC(err error) *C.char {
 
 const pokrovDesktopABIVersion = 2
 const pokrovCoreCapabilitiesJSON = `{"schema_version":1,"desktop_abi":2,"event_abi":1,"routing_catalog_window_version":1,"smart_access_lease_version":1,"smart_access_runtime_control_version":1,"routing_catalog_control_version":4,"local_dpi_admission_version":1,"capabilities":["bounded_stop_reason","core_start_stop","materialized_profile","secure_profile_file","structured_operational_events","typed_lifecycle_events"],"lifecycle_events":["initialization","profile","core_start","tun","routes","dns","egress","recovery","stop"],"operational_events":{"contract":"config/core-event-abi.json","schema_version":1,"event_abi":1,"callback_symbol":"pokrovCoreSetEventCallback","context_symbol":"pokrovCoreSetEventContext","maximum_pending_events":128}}`
+const pokrovCoreWindowsCapabilitiesJSON = `{"schema_version":1,"desktop_abi":2,"event_abi":1,"routing_catalog_window_version":1,"smart_access_lease_version":1,"smart_access_runtime_control_version":1,"routing_catalog_control_version":4,"local_dpi_admission_version":1,"windows_local_dpi_admission_version":1,"capabilities":["bounded_stop_reason","core_start_stop","materialized_profile","secure_profile_file","structured_operational_events","typed_lifecycle_events"],"lifecycle_events":["initialization","profile","core_start","tun","routes","dns","egress","recovery","stop"],"operational_events":{"contract":"config/core-event-abi.json","schema_version":1,"event_abi":1,"callback_symbol":"pokrovCoreSetEventCallback","context_symbol":"pokrovCoreSetEventContext","maximum_pending_events":128}}`
 
 //export pokrovCoreAbiVersion
 func pokrovCoreAbiVersion() C.int {
@@ -144,6 +145,9 @@ func pokrovCoreVersion() *C.char {
 
 //export pokrovCoreCapabilities
 func pokrovCoreCapabilities() *C.char {
+	if hcore.WindowsLocalDpiAdmissionVersion() == 1 {
+		return C.CString(pokrovCoreWindowsCapabilitiesJSON)
+	}
 	return C.CString(pokrovCoreCapabilitiesJSON)
 }
 
@@ -155,6 +159,23 @@ func pokrovCoreTransportCapabilities() *C.char {
 //export pokrovCoreLocalDpiAdmissionVersion
 func pokrovCoreLocalDpiAdmissionVersion() C.int {
 	return C.int(libbox.LocalDpiAdmissionVersion())
+}
+
+//export pokrovCoreWindowsLocalDpiAdmissionVersion
+func pokrovCoreWindowsLocalDpiAdmissionVersion() C.int {
+	return C.int(hcore.WindowsLocalDpiAdmissionVersion())
+}
+
+//export pokrovCorePrepareWindowsLocalDpiProfile
+func pokrovCorePrepareWindowsLocalDpiProfile(config, publicKeys, audience, bindInterface *C.char) *C.char {
+	if config == nil || publicKeys == nil || audience == nil || bindInterface == nil {
+		return C.CString("")
+	}
+	prepared, err := hcore.PrepareWindowsLocalDpiProfile(C.GoString(config), C.GoString(publicKeys), C.GoString(audience), C.GoString(bindInterface))
+	if err != nil {
+		return C.CString("")
+	}
+	return C.CString(prepared)
 }
 
 //export pokrovCoreReadLocalDpiAdmissionID

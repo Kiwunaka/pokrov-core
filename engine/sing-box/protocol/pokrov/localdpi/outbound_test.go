@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"net/netip"
+	"runtime"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -204,6 +205,46 @@ func TestSOCKSConnectFailureHasNoPayloadAndOneVPNFallback(t *testing.T) {
 	}
 	if !<-noPayload || raw.calls.Load() != 1 || vpn.calls.Load() != 2 || h.IsReady() {
 		t.Fatal("CONNECT failure leaked payload, retried offload, or repeated VPN dial")
+	}
+}
+
+func TestWindowsPhysicalSetupFailureWithdrawsOnlyItsHolderAndUsesVPN(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("physical Windows admission is unavailable on this host")
+	}
+	h, vpn, payloads := newRuntime(t)
+	other, _, _ := newRuntime(t)
+	ctx := service.ContextWith[adapter.OutboundManager](context.Background(), &testManager{values: map[string]adapter.Outbound{"vpn": vpn}})
+	ctx = service.ContextWith[adapter.ConnectionManager](ctx, h.connection)
+	ctx = service.ContextWith[adapter.NetworkManager](ctx, &protectManager{})
+	options := option.PokrovLocalDPIOutboundOptions{
+		DialerOptions: option.DialerOptions{AbstractDialerOptions: option.AbstractDialerOptions{BindInterface: "physical-fixture"}},
+		WindowsDirect: true, VPNOutbound: "vpn", ServiceID: "windows-service",
+	}
+	value, err := NewOutbound(ctx, nil, log.NewNOPFactory().Logger(), "windows-local", options)
+	if err != nil {
+		t.Fatal("physically bound Windows construction failed")
+	}
+	local := value.(*Outbound)
+	t.Cleanup(func() { _ = local.Close() })
+	if local.IsReady() || local.AdmissionID() == other.AdmissionID() || local.Start() != nil {
+		t.Fatal("Windows runtime did not retain unpublished isolated admission")
+	}
+	if local.AdmitAdmission(other.AdmissionID()) || !local.AdmitAdmission(local.AdmissionID()) || !other.AdmitAdmission(other.AdmissionID()) {
+		t.Fatal("Windows admission accepted the wrong holder")
+	}
+	physical := &testDialer{dial: func(context.Context) (net.Conn, error) { return nil, errors.New("synthetic physical setup failure") }}
+	local.proxy = physical
+	for i := 0; i < 2; i++ {
+		waitFlow(t, startFlow(t, local, context.Background(), M.ParseSocksaddr("192.0.2.20:443"), true))
+		expectPayload(t, payloads)
+	}
+	if physical.calls.Load() != 1 || vpn.calls.Load() != 2 || local.IsReady() || !other.IsReady() {
+		t.Fatal("physical failure retried offload or escaped the captured holder")
+	}
+	options.BindInterface = ""
+	if _, err = NewOutbound(ctx, nil, log.NewNOPFactory().Logger(), "unbound", options); err == nil {
+		t.Fatal("Windows physical mode accepted an unbound dialer")
 	}
 }
 

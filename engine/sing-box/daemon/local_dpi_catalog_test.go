@@ -63,6 +63,21 @@ func TestLocalDpiCatalogVerifiesOriginalUnicodePayload(t *testing.T) {
 	}
 }
 
+func TestWindowsLocalDpiCatalogRequiresWindowsSignedAuthority(t *testing.T) {
+	now := time.Now()
+	payload := localDpiVerifierPayload(now)
+	envelope, keys, digest := localDpiSignedCatalog(payload)
+	if VerifyWindowsLocalDpiCatalog(envelope, keys, "lab", digest, 7, 3, "service-a", "control.example", "trial_premium") {
+		t.Fatal("Android authority admitted a Windows scope")
+	}
+	payload = strings.Replace(payload, `"platforms":["android"]`, `"platforms":["windows"]`, 1)
+	envelope, keys, digest = localDpiSignedCatalog(payload)
+	if !VerifyWindowsLocalDpiCatalog(envelope, keys, "lab", digest, 7, 3, "service-a", "control.example", "trial_premium") ||
+		VerifyLocalDpiCatalog(envelope, keys, "lab", digest, 7, 3, "service-a", "control.example", "trial_premium") {
+		t.Fatal("Windows authority did not remain platform-specific")
+	}
+}
+
 func TestLocalDpiCatalogRequiresSignedControlHostForOffload(t *testing.T) {
 	now := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
 	legacy := strings.Replace(localDpiVerifierPayload(now), `"local_dpi_control_host":"control.example",`, "", 1)

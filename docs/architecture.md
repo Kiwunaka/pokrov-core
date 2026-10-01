@@ -44,6 +44,18 @@ host. It does not admit a holder or perform the TLS proof. Signed Selective
 authority and native proof integration remain separate, with the feature
 disabled; existing Full and expiry behavior is unchanged.
 
+Windows source has a separate `WindowsLocalDpiAdmissionVersion` and desktop
+`windows_local_dpi_admission_version:1` descriptor. Native
+`PrepareWindowsLocalDpiProfile` verifies Windows authority with the host's
+compiled pins and prepares only matching nonshared Selective domain rules,
+including the exact control host, with a physically bound TCP:443 local path
+and the original encrypted VPN fallback. It does not start winws, perform proof
+or admit a holder. Android retains its loopback SOCKS path. Setup failure uses
+one VPN dial; transmitted streams are never replayed. Windows service executor,
+assets, current profile/network proof and captured-holder lifetime ownership
+remain required, so this source capability does not enable the feature or
+change retained releases.
+
 The device-local WARP path registers on the device and caches its material by
 `install_unique_id`; a caller must use its own authenticated installation ID
 and cannot reuse another installation's material. First TCP and UDP operations

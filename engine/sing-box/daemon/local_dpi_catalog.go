@@ -20,8 +20,21 @@ func VerifyLocalDpiCatalog(envelopeJSON, publicKeysJSON, audience, expectedPaylo
 		expectedRevision, expectedSecurityRevision, serviceID, controlHost, accessState, time.Now())
 }
 
+// The platform is fixed by this native entrypoint, not caller catalog metadata.
+func VerifyWindowsLocalDpiCatalog(envelopeJSON, publicKeysJSON, audience, expectedPayloadSHA256 string,
+	expectedRevision, expectedSecurityRevision int64, serviceID, controlHost, accessState string) bool {
+	return verifyLocalDpiCatalogPlatform(envelopeJSON, publicKeysJSON, audience, expectedPayloadSHA256,
+		expectedRevision, expectedSecurityRevision, serviceID, controlHost, accessState, "windows", time.Now())
+}
+
 func verifyLocalDpiCatalog(envelopeJSON, publicKeysJSON, audience, expectedPayloadSHA256 string,
 	expectedRevision, expectedSecurityRevision int64, serviceID, controlHost, accessState string, now time.Time) bool {
+	return verifyLocalDpiCatalogPlatform(envelopeJSON, publicKeysJSON, audience, expectedPayloadSHA256,
+		expectedRevision, expectedSecurityRevision, serviceID, controlHost, accessState, "android", now)
+}
+
+func verifyLocalDpiCatalogPlatform(envelopeJSON, publicKeysJSON, audience, expectedPayloadSHA256 string,
+	expectedRevision, expectedSecurityRevision int64, serviceID, controlHost, accessState, platform string, now time.Time) bool {
 	if len(envelopeJSON) > 1<<20 || (audience != "lab" && audience != "production") ||
 		!smartAccessRuntimeDigest.MatchString(expectedPayloadSHA256) ||
 		expectedRevision < 1 || expectedRevision > 9007199254740991 ||
@@ -105,7 +118,7 @@ func verifyLocalDpiCatalog(envelopeJSON, publicKeysJSON, audience, expectedPaylo
 			selected = service
 		}
 	}
-	return selected != nil && localDpiCatalogService(selected, controlHost, accessState)
+	return selected != nil && localDpiCatalogService(selected, controlHost, accessState, platform)
 }
 
 func localDpiCatalogPinnedKey(raw, keyID string) (ed25519.PublicKey, bool) {
@@ -138,10 +151,10 @@ func localDpiCatalogPinnedKey(raw, keyID string) (ed25519.PublicKey, bool) {
 	return selected, selected != nil
 }
 
-func localDpiCatalogService(service map[string]json.RawMessage, host, accessState string) bool {
+func localDpiCatalogService(service map[string]json.RawMessage, host, accessState, platform string) bool {
 	evidenceStatus, _ := localDpiCatalogString(service["evidence_status"])
 	if string(service["enabled"]) != "true" || evidenceStatus != "verified" ||
-		!localDpiCatalogContains(service["platforms"], "android") || !localDpiCatalogContains(service["access_states"], accessState) {
+		!localDpiCatalogContains(service["platforms"], platform) || !localDpiCatalogContains(service["access_states"], accessState) {
 		return false
 	}
 	intents, ok := localDpiCatalogArray(service["route_intents"], 0, 5)

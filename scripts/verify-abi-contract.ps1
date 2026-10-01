@@ -107,6 +107,19 @@ $expectedDescriptor = $contract.descriptor | ConvertTo-Json -Depth 10 -Compress
 if ($descriptorConstant.Groups[1].Value -ne $expectedDescriptor) {
   throw "pokrovCoreCapabilitiesJSON disagrees with config\abi-contract.json."
 }
+$windowsDescriptorConstant = [regex]::Match(
+  $sourceText,
+  '(?m)^const pokrovCoreWindowsCapabilitiesJSON = `([^`]+)`\s*$'
+)
+$windowsDpi = $contract.windows_local_dpi_admission
+$expectedWindowsDescriptor = $expectedDescriptor.Replace(
+  '"local_dpi_admission_version":1,',
+  '"local_dpi_admission_version":1,"' + $windowsDpi.descriptor_field + '":' + $windowsDpi.version + ','
+)
+if (-not $windowsDescriptorConstant.Success -or
+    $windowsDescriptorConstant.Groups[1].Value -ne $expectedWindowsDescriptor) {
+  throw "Windows capability descriptor disagrees with config\abi-contract.json."
+}
 if ([int]$contract.descriptor.desktop_abi -ne [int]$contract.desktop_abi.version -or
     [int]$contract.descriptor.schema_version -ne 1 -or
     [int]$contract.descriptor.event_abi -ne 1) {

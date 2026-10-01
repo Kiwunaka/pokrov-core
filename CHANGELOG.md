@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.2.3 — unreleased (`PRE_CANDIDATE_LOCAL`)
+
+- Add separate Windows localDPI source support for signed Selective scope and
+  physically bound TCP:443 with fresh admission IDs and the original encrypted
+  VPN fallback; native child lifecycle and current TLS proof remain required.
+- Keep Android's SOCKS behavior and retained releases unchanged; no Windows
+  executor, assets, build or release readiness is implied by the Core capability.
+
 ## 1.2.2 — 2026-10-01 (prerelease)
 
 - Honor an explicit REALITY `record_fragment: false`; an omitted setting

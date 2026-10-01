@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net"
 	"net/netip"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -62,10 +63,21 @@ type Outbound struct {
 
 func NewOutbound(ctx context.Context, _ adapter.Router, _ log.ContextLogger, tag string,
 	options option.PokrovLocalDPIOutboundOptions) (adapter.Outbound, error) {
-	server, err := netip.ParseAddr(options.Server)
-	if err != nil || !server.IsLoopback() || options.ServerPort == 0 || tag == "" ||
+	if tag == "" ||
 		options.ServiceID == "" || options.VPNOutbound == "" || options.VPNOutbound == tag || options.Detour != "" {
 		return nil, errScope
+	}
+	var server netip.Addr
+	if options.WindowsDirect {
+		if runtime.GOOS != "windows" || options.BindInterface == "" || options.Server != "" || options.ServerPort != 0 {
+			return nil, errScope
+		}
+	} else {
+		var err error
+		server, err = netip.ParseAddr(options.Server)
+		if err != nil || !server.IsLoopback() || options.ServerPort == 0 {
+			return nil, errScope
+		}
 	}
 	manager := service.FromContext[adapter.OutboundManager](ctx)
 	connection := service.FromContext[adapter.ConnectionManager](ctx)
@@ -78,6 +90,10 @@ func NewOutbound(ctx context.Context, _ adapter.Router, _ log.ContextLogger, tag
 	if err != nil {
 		return nil, err
 	}
+	var proxy N.Dialer = transport
+	if !options.WindowsDirect {
+		proxy = socks.NewClient(transport, M.Socksaddr{Addr: server, Port: options.ServerPort}, socks.Version5, "", "")
+	}
 	var identity [16]byte
 	if _, err := rand.Read(identity[:]); err != nil {
 		return nil, err
@@ -86,7 +102,7 @@ func NewOutbound(ctx context.Context, _ adapter.Router, _ log.ContextLogger, tag
 	return &Outbound{
 		Adapter: outbound.NewAdapter(Type, tag, []string{N.NetworkTCP, N.NetworkUDP}, []string{options.VPNOutbound}),
 		manager: manager, connection: connection,
-		proxy:  socks.NewClient(transport, M.Socksaddr{Addr: server, Port: options.ServerPort}, socks.Version5, "", ""),
+		proxy:  proxy,
 		vpnTag: options.VPNOutbound, serviceID: options.ServiceID, admissionID: hex.EncodeToString(identity[:]),
 		withdrawCtx: withdrawCtx, withdrawCancel: withdrawCancel, flows: make(map[*flow]struct{}),
 	}, nil
@@ -214,7 +230,7 @@ func (h *Outbound) NewConnection(ctx context.Context, conn net.Conn, metadata ad
 		N.CloseOnHandshakeFailure(conn, finish, errUnavailable)
 		return
 	}
-	// Exhausting our CONNECT budget while the caller's flow is still alive is
+	// Exhausting our setup budget while the caller's flow is still alive is
 	// a transport failure. A late socket is closed before the one VPN fallback.
 	if err != nil || errors.Is(setupErr, context.DeadlineExceeded) {
 		if remote != nil {
@@ -228,7 +244,7 @@ func (h *Outbound) NewConnection(ctx context.Context, conn net.Conn, metadata ad
 		h.connectVPN(flowCtx, f, metadata, finish)
 		return
 	}
-	// CONNECT contains no client payload. After handing off this connection,
+	// SOCKS CONNECT and direct TCP setup contain no client payload. After handoff,
 	// every write (including a partial write) belongs to it; no retry exists.
 	observed := &observedConn{Conn: remote, ctx: flowCtx, admission: &h.admission}
 	if !f.attach(observed) {

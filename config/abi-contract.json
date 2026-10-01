@@ -28,6 +28,8 @@
       "pokrovCoreCapabilities",
       "pokrovCoreTransportCapabilities",
       "pokrovCoreLocalDpiAdmissionVersion",
+      "pokrovCoreWindowsLocalDpiAdmissionVersion",
+      "pokrovCorePrepareWindowsLocalDpiProfile",
       "pokrovCoreReadLocalDpiAdmissionID",
       "pokrovCoreAdmitLocalDpiAdmission",
       "pokrovCoreWithdrawLocalDpiAdmission",
@@ -165,6 +167,15 @@
     "arguments": "Read: UTF-8 localDPI outbound tag. Admit/withdraw: captured Core-generated admission ID. Trusted native owner captures the ID before signed exact-domain HEAD proof, then rechecks profile/session/operation/network/signature lifetime before Admit.",
     "returns": "Version reports API support 1, not proof/readiness. Read returns a caller-owned 32-hex ID or empty when unavailable; release with freeString. Admit/withdraw return 1 for a changed exact holder, 0 for absent/terminal holder, -1 for invalid input or unavailable runtime.",
     "scope": "Default unavailable; failed or withdrawn admission cannot reopen. Each new runtime generates a fresh ID. Scoped withdrawal leaves VPN and catalog windows intact. Additive optional desktop ABI 2 symbols; production caller and signed Selective intent remain disabled. Source support is not installed-artifact or device proof."
+  },
+  "windows_local_dpi_admission": {
+    "version_symbol": "pokrovCoreWindowsLocalDpiAdmissionVersion",
+    "prepare_symbol": "pokrovCorePrepareWindowsLocalDpiProfile",
+    "descriptor_field": "windows_local_dpi_admission_version",
+    "version": 1,
+    "arguments": "Prepare: UTF-8 private config with _meta.local_dpi, compiled native pinned-key map JSON, compiled audience and captured physical interface name. Keys/audience never come from IPC metadata.",
+    "returns": "Version is 1 on Windows, 0 elsewhere. Prepare returns caller-owned private JSON {profile,expires_at,services:[{service_id,outbound_tag,control_host,domains:[{name,match,shared}]}]} or empty on invalid scope; release with freeString. It does not start a child, prove TLS or admit a holder.",
+    "scope": "Windows-only physically bound TCP443 local path with existing encrypted VPN fallback and exact-ID admission. Signed Windows Selective rules and nonshared exact control host are required. Windows service executor/assets and current profile/network proof are separate requirements; feature default remains OFF. Other desktop platforms retain the existing descriptor."
   },
   "descriptor": {
     "schema_version": 1,
