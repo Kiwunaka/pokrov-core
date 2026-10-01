@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.2.2 — 2026-10-01 (prerelease candidate)
+
+- Honor an explicit REALITY `record_fragment: false`; an omitted setting
+  retains the existing fragmentation default.
+- Expose Android runtime DNS normalization for the command-server caller;
+  normalize a runtime copy after verification and retain the signed bytes.
+
 ## 1.2.1 — 2026-09-30 (prerelease)
 
 - Add a dormant localDPI outbound with fresh runtime admission IDs and scoped

@@ -40,8 +40,8 @@ the client seed.
 6. Record remaining physical-device and Apple checks without converting them into passes.
 7. Commit the exact source, create an annotated `vX.Y.Z` tag, then publish artifacts from that commit.
 
-Core `1.2.0` is a prerelease for these Android and Windows libraries; `1.1.2`
-remains the latest stable release.
+Core `1.2.2` is the current source candidate for the Android and Windows
+libraries; published `1.2.1` remains a prerelease and `1.1.2` remains latest stable.
 `config/release.json` retains the immutable prior `1.0.3` evidence in a
 separate `retained_public_release` block.
 
@@ -77,6 +77,13 @@ nil/stopped admission controls and cleanup checks. The Portal Unicode fixture
 passed the stateless verifier, and Android consumer compilation passed against
 the final AAR. Foreign-UID, TLS-proof and cancellation checks on the phone
 remain queued; these results do not assert localDPI device readiness.
+
+Core `1.2.2` honors an explicit REALITY `record_fragment: false` and exposes
+Android `mobile.NormalizeRuntimeConfig` for the command-server caller. The host
+verifies saved signed bytes first, then normalizes only the runtime copy; an
+error stops startup. New versioned AAR/DLL builds, the Windows VM runtime-version
+and lifecycle checks, and Android caller smoke are required before publication.
+The candidate does not change app `1.4.0`'s Core `1.1.2` pin or latest stable.
 
 For the REALITY version gate, build the current `engine/sing-box` CLI with
 `with_utls` and run `scripts/test-reality-xray-matrix.py` with each official
