@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.2.2 — 2026-10-01 (prerelease candidate)
+## 1.2.2 — 2026-10-01 (prerelease)
 
 - Honor an explicit REALITY `record_fragment: false`; an omitted setting
   retains the existing fragmentation default.

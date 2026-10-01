@@ -40,8 +40,8 @@ the client seed.
 6. Record remaining physical-device and Apple checks without converting them into passes.
 7. Commit the exact source, create an annotated `vX.Y.Z` tag, then publish artifacts from that commit.
 
-Core `1.2.2` is the current source candidate for the Android and Windows
-libraries; published `1.2.1` remains a prerelease and `1.1.2` remains latest stable.
+Core `1.2.2` is a prerelease for the Android and Windows libraries; `1.1.2`
+remains latest stable. Prior prerelease assets are retained.
 `config/release.json` retains the immutable prior `1.0.3` evidence in a
 separate `retained_public_release` block.
 
@@ -81,9 +81,15 @@ remain queued; these results do not assert localDPI device readiness.
 Core `1.2.2` honors an explicit REALITY `record_fragment: false` and exposes
 Android `mobile.NormalizeRuntimeConfig` for the command-server caller. The host
 verifies saved signed bytes first, then normalizes only the runtime copy; an
-error stops startup. New versioned AAR/DLL builds, the Windows VM runtime-version
-and lifecycle checks, and Android caller smoke are required before publication.
-The candidate does not change app `1.4.0`'s Core `1.1.2` pin or latest stable.
+error stops startup. The final AAR passed all four Android ABI checks, the new
+Java binding check and caller compilation; the DLL passed 38 desktop export
+checks. The Windows VM loaded Core `1.2.2` with ABI 2, completed 100 proxy-only
+start/stop cycles with no remaining test host or listener, and confirmed an
+ordinary CH candidate in 833 ms while preserving the saved profile bytes. The
+phone loaded Core `1.2.2`, confirmed CH VPN egress, and passed the QS staged-byte
+integrity check without Flutter. This prerelease does not
+change app `1.4.0`'s Core `1.1.2` pin or latest stable; these checks do not assert
+localDPI, Windows TUN or Apple acceptance.
 
 For the REALITY version gate, build the current `engine/sing-box` CLI with
 `with_utls` and run `scripts/test-reality-xray-matrix.py` with each official
