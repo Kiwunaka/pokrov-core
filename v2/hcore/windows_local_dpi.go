@@ -143,8 +143,10 @@ func PrepareWindowsLocalDpiProfile(configJSON, publicKeysJSON, audience, bindInt
 			if _, leasedGroup := window["lease_group"]; leasedGroup {
 				continue
 			}
-			// These selectors are OR-ed with exact/suffix domains by the router.
-			if rule["domain_regex"] != nil || rule["domain_keyword"] != nil {
+			// Address selectors and merged rule sets can satisfy the same OR group
+			// as exact/suffix domains, outside the signed service scope.
+			if rule["domain_regex"] != nil || rule["domain_keyword"] != nil ||
+				rule["ip_cidr"] != nil || rule["ip_is_private"] != nil || rule["rule_set"] != nil {
 				continue
 			}
 			for _, domain := range domains {
