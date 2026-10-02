@@ -304,7 +304,6 @@ func (g *URLTestGroup) Close() error {
 func (g *URLTestGroup) Select(network string) (adapter.Outbound, bool) {
 	var minDelay uint16
 	var minOutbound adapter.Outbound
-	preferredConfigured := len(g.preferredTags) > 0
 	preferredAvailable := false
 	for _, detour := range g.outbounds {
 		if !common.Contains(g.preferredTags, detour.Tag()) || !common.Contains(detour.Network(), network) {
@@ -318,16 +317,14 @@ func (g *URLTestGroup) Select(network string) (adapter.Outbound, bool) {
 	switch network {
 	case N.NetworkTCP:
 		if g.selectedOutboundTCP != nil {
-			if history := g.history.LoadURLTestHistory(RealTag(g.outbound, g.selectedOutboundTCP)); history != nil &&
-				(!preferredConfigured || history.Delay != 65535) {
+			if history := g.history.LoadURLTestHistory(RealTag(g.outbound, g.selectedOutboundTCP)); history != nil && history.Delay != 65535 {
 				minOutbound = g.selectedOutboundTCP
 				minDelay = history.Delay
 			}
 		}
 	case N.NetworkUDP:
 		if g.selectedOutboundUDP != nil {
-			if history := g.history.LoadURLTestHistory(RealTag(g.outbound, g.selectedOutboundUDP)); history != nil &&
-				(!preferredConfigured || history.Delay != 65535) {
+			if history := g.history.LoadURLTestHistory(RealTag(g.outbound, g.selectedOutboundUDP)); history != nil && history.Delay != 65535 {
 				minOutbound = g.selectedOutboundUDP
 				minDelay = history.Delay
 			}
@@ -345,10 +342,10 @@ func (g *URLTestGroup) Select(network string) (adapter.Outbound, bool) {
 			continue
 		}
 		history := g.history.LoadURLTestHistory(RealTag(g.outbound, detour))
-		if history == nil || (preferredConfigured && history.Delay == 65535) {
+		if history == nil || history.Delay == 65535 {
 			continue
 		}
-		if minDelay == 0 || minDelay > history.Delay+g.tolerance {
+		if minDelay == 0 || uint32(minDelay) > uint32(history.Delay)+uint32(g.tolerance) {
 			minDelay = history.Delay
 			minOutbound = detour
 		}

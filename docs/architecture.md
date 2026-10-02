@@ -10,8 +10,10 @@ Managed Country Auto can explicitly list `preferred_outbounds` in its existing
 URLTest group. A healthy member of that tier takes precedence over other members;
 latency and hysteresis still select within the tier. When its probes fail, the
 remaining live members become eligible; recovery restores the preferred tier.
-Groups without this field keep the existing selection behavior. The managed
-issuer gates this input to Core 1.2.4 or later. Published Core 1.2.3 and
+Groups without this field use ordinary latency selection. Failed probe history
+is excluded from live selection, and tolerance arithmetic cannot wrap into a
+smaller delay. The managed issuer gates this input to Core 1.2.4 or later.
+Published Core 1.2.3 and
 subscription exports for external clients omit this option.
 
 Android callers that start Libbox CommandServer directly use the mobile SDK's

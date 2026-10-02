@@ -15,6 +15,28 @@ type selectionTestOutbound struct {
 func (o selectionTestOutbound) Tag() string       { return o.tag }
 func (o selectionTestOutbound) Network() []string { return []string{"tcp"} }
 
+func TestURLTestFailureDoesNotReplaceHealthyOutbound(t *testing.T) {
+	healthy := selectionTestOutbound{tag: "healthy-path"}
+	failed := selectionTestOutbound{tag: "failed-path"}
+	history := urltest.NewHistoryStorage()
+	history.StoreURLTestHistory(healthy.Tag(), &adapter.URLTestHistory{Delay: 100})
+	history.DeleteURLTestHistory(failed.Tag())
+	group := &URLTestGroup{
+		outbounds: []adapter.Outbound{healthy, failed}, history: history, tolerance: 50,
+		selectedOutboundTCP: healthy,
+	}
+	assertHealthy := func() {
+		t.Helper()
+		selected, live := group.Select("tcp")
+		if !live || selected == nil || selected.Tag() != healthy.Tag() {
+			t.Fatal("failed probe displaced the healthy outbound")
+		}
+	}
+	assertHealthy()
+	group.selectedOutboundTCP = failed
+	assertHealthy()
+}
+
 func TestURLTestPreferredDirectSurvivesFasterBridgeAndRecovers(t *testing.T) {
 	direct := selectionTestOutbound{tag: "direct-path"}
 	directAlt := selectionTestOutbound{tag: "direct-alternate"}
