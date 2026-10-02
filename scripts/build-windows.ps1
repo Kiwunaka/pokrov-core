@@ -67,6 +67,7 @@ $previousCgo = $env:CGO_ENABLED
 $previousCc = $env:CC
 $previousToolchain = $env:GOTOOLCHAIN
 $previousGoFlags = $env:GOFLAGS
+$previousPath = $env:PATH
 try {
   $env:GOOS = "windows"
   $env:GOARCH = "amd64"
@@ -74,6 +75,7 @@ try {
   $env:CC = $compilerCommand.Source
   $env:GOTOOLCHAIN = "local"
   $env:GOFLAGS = "-buildvcs=false"
+  $env:PATH = $toolchainDirectory + [IO.Path]::PathSeparator + $previousPath
 
   Push-Location $root
   try {
@@ -97,6 +99,7 @@ try {
   $env:CC = $previousCc
   $env:GOTOOLCHAIN = $previousToolchain
   $env:GOFLAGS = $previousGoFlags
+  $env:PATH = $previousPath
 }
 
 $objdumpOutput = @(& $objdumpPath -p $outputPath 2>&1)
