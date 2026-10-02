@@ -143,6 +143,10 @@ func PrepareWindowsLocalDpiProfile(configJSON, publicKeysJSON, audience, bindInt
 			if _, leasedGroup := window["lease_group"]; leasedGroup {
 				continue
 			}
+			var inverted bool
+			if raw, present := rule["invert"]; present && (json.Unmarshal(raw, &inverted) != nil || inverted) {
+				continue
+			}
 			// Address selectors and merged rule sets can satisfy the same OR group
 			// as exact/suffix domains, outside the signed service scope.
 			if rule["domain_regex"] != nil || rule["domain_keyword"] != nil ||

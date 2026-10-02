@@ -62,6 +62,7 @@ type Outbound struct {
 	withdrawCtx               context.Context
 	withdrawCancel            context.CancelFunc
 	expiryTimer               *time.Timer
+	stopParent                func() bool
 	preparedOptions           option.PokrovTelegramWSOutboundOptions
 	startContext              context.Context
 }
@@ -166,6 +167,7 @@ func (h *Outbound) Start() error {
 	h.mu.Lock()
 	h.deadline = deadline
 	h.expiryTimer = time.AfterFunc(time.Until(deadline), func() { h.WithdrawAdmission(h.admissionID) })
+	h.stopParent = context.AfterFunc(h.startContext, func() { h.WithdrawAdmission(h.admissionID) })
 	h.mu.Unlock()
 	return nil
 }

@@ -30,8 +30,8 @@ recursive encrypted VPN fallback. Its private one-use preparation retains
 original `_meta` for TG-first/DPI-second composition before final stripping and
 one CoreStart. CheckConfig does not consume permission; actual Start creates a
 fresh unavailable holder. The native owner captures its ID and current physical
-network/profile before admission. UTC plus monotonic expiry, interface updates
-and targeted catalog revocation terminally deny WSS before closing only owned
+network/profile before admission. Native owner cancellation, UTC plus monotonic
+expiry, interface updates and targeted catalog revocation terminally deny WSS before closing only owned
 setup/WSS streams. Untimed exact TCP443 routes keep VPN fallback after denial;
 parent-live setup can preserve bytes through VPN, while committed WSS payload
 is never replayed. Host original-request and final-profile digests are distinct.
@@ -52,6 +52,9 @@ before application bytes permits one encrypted VPN dial; subsequent transport
 failure withdraws only this admission and never replays the stream. The exact-ID
 `WithdrawLocalDpiAdmission` leaves catalog windows and VPN outbounds intact;
 withdrawal is terminal for this runtime. Remote bytes are not TLS/HTTP success.
+Withdrawal denies cached payload writes and closes only owned local setup and
+offloaded sockets before the native owner stops winws/WinDivert or its SOCKS
+child; established ordinary VPN flows keep running.
 Libbox `VerifyLocalDpiCatalog` uses Core's Ed25519 implementation and native
 compiled key pins to verify the original canonical payload bytes, current signed
 lifetime and exact Android Selective VPN intent with a nonshared exact control
@@ -277,6 +280,8 @@ remain individually revocable until their original active deadline; expiry of
 an old flow closes only that flow. At most 256 generation identities are retained,
 with expired history pruned on renewal. Global or current-generation revocation
 prevents renewal and cannot be cleared by a new identity.
+Runtime grant identities accept `selective` (including selected-service DNS-only
+routing) and `smart_safe`; renewal preserves the original routing mode.
 
 Control version 4 exposes this through `CommandServer.RenewSmartAccessLease`
 and desktop `pokrovCoreRenewSmartAccessLease`, with five strings: expected/next

@@ -67,7 +67,7 @@ func parseSmartAccessRuntimeLeaseIdentity(raw []byte) (smartAccessRuntimeLeaseId
 		"permission_id", "capability_id", "provider_policy_revision", "provider_security_revision", "provider_policy_sha256",
 		"issued_at", "new_flows_until", "active_flows_until", "profile_sha256", "route_mode", "runtime_scope_sha256",
 		"origin", "family", "feature", "provider_revision", "permission_revision", "catalog_revision", "catalog_security_revision"); !ok { return lease, false }
-	if json.Unmarshal(raw, &lease) != nil || !smartAccessLeaseID.MatchString(lease.LeaseID) || lease.RouteMode != "selective" ||
+	if json.Unmarshal(raw, &lease) != nil || !smartAccessLeaseID.MatchString(lease.LeaseID) || (lease.RouteMode != "selective" && lease.RouteMode != "smart_safe") ||
 		(lease.Platform != "android" && lease.Platform != "windows") || (lease.Audience != "lab" && lease.Audience != "production") ||
 		(lease.Family != "ipv4" && lease.Family != "ipv6") { return lease, false }
 	switch lease.Origin { case "current-origin", "brain-origin", "RU-origin", "synthetic": default: return lease, false }

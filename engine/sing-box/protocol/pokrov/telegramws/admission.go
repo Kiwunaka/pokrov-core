@@ -205,7 +205,7 @@ func (h *Outbound) ServiceID() string   { return h.serviceID }
 
 func (h *Outbound) currentLocked() bool {
 	now := time.Now()
-	return !h.closed && !h.withdrawn && !now.Before(h.issued) && now.Before(h.expires) && now.Before(h.deadline)
+	return !h.closed && !h.withdrawn && h.withdrawCtx.Err() == nil && !now.Before(h.issued) && now.Before(h.expires) && now.Before(h.deadline)
 }
 
 func (h *Outbound) IsReady() bool {
@@ -253,6 +253,9 @@ func (h *Outbound) denyLocked() func() {
 	}
 	if h.expiryTimer != nil {
 		h.expiryTimer.Stop()
+	}
+	if h.stopParent != nil {
+		h.stopParent()
 	}
 	return func() {
 		h.withdrawCancel()

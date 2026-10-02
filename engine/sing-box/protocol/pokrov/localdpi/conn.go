@@ -29,6 +29,9 @@ func (c *observedConn) Read(p []byte) (int, error) {
 }
 
 func (c *observedConn) Write(p []byte) (int, error) {
+	if c.admission.Load() == admissionWithdrawn || c.ctx.Err() != nil {
+		return 0, errUnavailable
+	}
 	n, err := c.Conn.Write(p)
 	c.observe(err)
 	return n, err
@@ -54,6 +57,7 @@ type flow struct {
 	mu     sync.Mutex
 	remote net.Conn
 	closed bool
+	local  bool // guarded by Outbound.mu; excludes ordinary VPN streams
 }
 
 func (f *flow) attach(remote net.Conn) bool {

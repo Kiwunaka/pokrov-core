@@ -293,6 +293,8 @@ func TestConstructorProtectsSocketAndRejectsSelectorWithDirect(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	freshCtx, cancelRuntime := context.WithCancel(freshCtx)
+	defer cancelRuntime()
 	fresh, err := NewOutbound(freshCtx, nil, log.NewNOPFactory().Logger(), "pokrov-telegram-ws-service-a", freshOptions)
 	if err != nil {
 		t.Fatal(err)
@@ -300,6 +302,27 @@ func TestConstructorProtectsSocketAndRejectsSelectorWithDirect(t *testing.T) {
 	defer fresh.(*Outbound).Close()
 	if err := fresh.(*Outbound).Start(); err != nil || fresh.(*Outbound).AdmissionID() == h.AdmissionID() {
 		t.Fatal("same original scope reload did not get a fresh holder")
+	}
+	owner := fresh.(*Outbound)
+	if !owner.AdmitAdmission(owner.AdmissionID()) {
+		t.Fatal("fresh holder admission failed")
+	}
+	client, input := net.Pipe()
+	defer client.Close()
+	remote, wire := net.Pipe()
+	defer wire.Close()
+	flowCtx, cancelFlow := context.WithCancel(context.Background())
+	defer cancelFlow()
+	active := &telegramFlow{ctx: flowCtx, client: input, cancel: cancelFlow}
+	active.attach(remote)
+	owner.mu.Lock()
+	owner.flows[active] = struct{}{}
+	owner.mu.Unlock()
+	cancelRuntime()
+	_ = wire.SetReadDeadline(time.Now().Add(time.Second))
+	_, err = wire.Read(make([]byte, 1))
+	if err != io.EOF || flowCtx.Err() == nil || owner.IsReady() || owner.AdmitAdmission(owner.AdmissionID()) {
+		t.Fatal("native owner cancellation retained an independent WSS flow or admission")
 	}
 }
 

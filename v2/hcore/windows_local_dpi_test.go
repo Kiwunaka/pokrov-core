@@ -115,8 +115,8 @@ func TestWindowsLocalDpiPreparationRetainsVPNAndExactSignedScope(t *testing.T) {
 		}
 	}
 	vpn["tls"] = vpnTLS
-	for selector, names := range map[string][]string{"domain_regex": {".*"}, "domain_keyword": {"foreign"}, "ip_cidr": {"0.0.0.0/0"}} {
-		rule[selector] = names
+	for selector, value := range map[string]any{"domain_regex": []string{".*"}, "domain_keyword": []string{"foreign"}, "ip_cidr": []string{"0.0.0.0/0"}, "invert": true} {
+		rule[selector] = value
 		encoded, _ = json.Marshal(config)
 		if result, err = PrepareWindowsLocalDpiProfile(string(encoded), string(keys), "lab", "physical-fixture"); err == nil || result != "" {
 			t.Fatal("OR address selector expanded signed local-DPI scope")

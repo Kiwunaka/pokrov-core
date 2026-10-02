@@ -324,6 +324,64 @@ func TestPendingCancelWithdrawAndRuntimeClose(t *testing.T) {
 	waitFlow(t, done)
 }
 
+func TestWithdrawalClosesOnlyOffloadAndFencesCachedPayload(t *testing.T) {
+	h, vpn, payloads := newRuntime(t)
+	h.AdmitAdmission(h.AdmissionID())
+	received := make(chan *closeConn, 2)
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	holdingDial := func(context.Context) (net.Conn, error) {
+		remote, peer := net.Pipe()
+		tracked := &closeConn{Conn: remote}
+		go func() {
+			defer peer.Close()
+			payload := make([]byte, len(testPayload))
+			if _, err := io.ReadFull(peer, payload); err == nil && bytes.Equal(payload, testPayload) {
+				received <- tracked
+			}
+			<-release
+		}()
+		return tracked, nil
+	}
+	h.proxy = &testDialer{dial: holdingDial}
+	localDone := startFlow(t, h, context.Background(), M.ParseSocksaddr("192.0.2.20:443"), true)
+	var localRemote *closeConn
+	select {
+	case localRemote = <-received:
+	case <-time.After(time.Second):
+		t.Fatal("local stream did not start")
+	}
+	baseVPN := vpn.dial
+	vpn.dial = holdingDial
+	vpnDone := startFlow(t, h, context.Background(), M.ParseSocksaddr("ordinary.test:443"), true)
+	var vpnRemote *closeConn
+	select {
+	case vpnRemote = <-received:
+	case <-time.After(time.Second):
+		t.Fatal("ordinary VPN stream did not start")
+	}
+	if !h.WithdrawAdmission(h.AdmissionID()) || !localRemote.closed.Load() || vpnRemote.closed.Load() {
+		t.Fatal("withdrawal did not close only its offloaded socket")
+	}
+	waitFlow(t, localDone)
+	select {
+	case <-vpnDone:
+		t.Fatal("withdrawal closed an ordinary VPN flow")
+	default:
+	}
+	late := &fastConn{Conn: localRemote}
+	observed := &observedConn{Conn: late, ctx: context.Background(), admission: &h.admission}
+	if n, err := observed.Write(testPayload); n != 0 || err == nil || late.writes.Load() != 0 {
+		t.Fatal("cached payload crossed terminal admission")
+	}
+	vpn.dial = baseVPN
+	waitFlow(t, startFlow(t, h, context.Background(), M.ParseSocksaddr("192.0.2.20:443"), true))
+	expectPayload(t, payloads)
+	if vpn.calls.Load() != 2 || h.AdmitAdmission(h.AdmissionID()) {
+		t.Fatal("withdrawn stream was replayed or admission reopened")
+	}
+}
+
 type closeConn struct {
 	net.Conn
 	closed atomic.Bool

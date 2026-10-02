@@ -119,11 +119,28 @@ func (h *Outbound) AdmitAdmission(expectedID string) bool {
 }
 
 func (h *Outbound) WithdrawAdmission(expectedID string) bool {
+	h.mu.Lock()
 	if expectedID != h.admissionID || h.admission.Swap(admissionWithdrawn) == admissionWithdrawn {
+		h.mu.Unlock()
 		return false
 	}
-	// Pending CONNECTs stop, while established streams are never replayed.
+	flows := make([]*flow, 0, len(h.flows))
+	for f := range h.flows {
+		if f.local {
+			flows = append(flows, f)
+		}
+	}
+	h.mu.Unlock()
+	// Deny before the native owner stops its filter or SOCKS child. Close only
+	// offloaded streams; ordinary VPN streams remain owned by the runtime.
 	h.withdrawCancel()
+	for _, f := range flows {
+		h.mu.Lock()
+		if f.local {
+			f.close()
+		}
+		h.mu.Unlock()
+	}
 	return true
 }
 
@@ -193,8 +210,11 @@ func (h *Outbound) NewConnection(ctx context.Context, conn net.Conn, metadata ad
 		return
 	}
 	flowCtx, cancel := context.WithCancel(ctx)
-	f := &flow{client: conn, cancel: cancel}
+	eligible := metadata.Network == N.NetworkTCP && metadata.Destination.Port == 443 && metadata.Destination.Addr.IsGlobalUnicast() &&
+		!metadata.Destination.Addr.IsPrivate() && !metadata.Destination.Addr.Is4In6()
+	f := &flow{client: conn, cancel: cancel, local: eligible && h.IsReady()}
 	h.flows[f] = struct{}{}
+	local := f.local
 	h.mu.Unlock()
 	stopCancel := context.AfterFunc(flowCtx, f.close)
 	finish := N.OnceClose(func(err error) {
@@ -211,9 +231,7 @@ func (h *Outbound) NewConnection(ctx context.Context, conn net.Conn, metadata ad
 		N.CloseOnHandshakeFailure(conn, finish, flowCtx.Err())
 		return
 	}
-	eligible := metadata.Network == N.NetworkTCP && metadata.Destination.Port == 443 && metadata.Destination.Addr.IsGlobalUnicast() &&
-		!metadata.Destination.Addr.IsPrivate() && !metadata.Destination.Addr.Is4In6()
-	if !eligible || !h.IsReady() {
+	if !local {
 		h.connectVPN(flowCtx, f, metadata, finish)
 		return
 	}
@@ -247,7 +265,11 @@ func (h *Outbound) NewConnection(ctx context.Context, conn net.Conn, metadata ad
 	// SOCKS CONNECT and direct TCP setup contain no client payload. After handoff,
 	// every write (including a partial write) belongs to it; no retry exists.
 	observed := &observedConn{Conn: remote, ctx: flowCtx, admission: &h.admission}
-	if !f.attach(observed) {
+	h.mu.Lock()
+	attached := !h.closed && h.IsReady() && flowCtx.Err() == nil && f.attach(observed)
+	h.mu.Unlock()
+	if !attached {
+		_ = observed.Close()
 		N.CloseOnHandshakeFailure(conn, finish, errUnavailable)
 		return
 	}
@@ -256,6 +278,9 @@ func (h *Outbound) NewConnection(ctx context.Context, conn net.Conn, metadata ad
 }
 
 func (h *Outbound) connectVPN(ctx context.Context, f *flow, metadata adapter.InboundContext, finish N.CloseHandlerFunc) {
+	h.mu.Lock()
+	f.local = false
+	h.mu.Unlock()
 	if ctx.Err() != nil {
 		N.CloseOnHandshakeFailure(f.client, finish, ctx.Err())
 		return
