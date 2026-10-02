@@ -6,6 +6,14 @@ POKROV Core is one client runtime with three layers:
 2. `v2/` owns setup, configuration, lifecycle, WARP, DNS, and safe shutdown behavior.
 3. `engine/sing-box/` owns transports, routing, TLS, TUN, and protocol implementations.
 
+Managed Country Auto can explicitly list `preferred_outbounds` in its existing
+URLTest group. A healthy member of that tier takes precedence over other members;
+latency and hysteresis still select within the tier. When its probes fail, the
+remaining live members become eligible; recovery restores the preferred tier.
+Groups without this field keep the existing selection behavior. The managed
+issuer gates this input to Core 1.2.4 or later; published Core 1.2.3 and external
+Hiddify/Happ subscription formats do not receive it.
+
 Android callers that start Libbox CommandServer directly use the mobile SDK's
 `NormalizeRuntimeConfig` on a runtime copy after validating the saved profile's
 signature and digest. It reuses the existing legacy DNS normalizer before the

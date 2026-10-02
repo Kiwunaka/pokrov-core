@@ -41,6 +41,7 @@ type URLTest struct {
 	connection                   adapter.ConnectionManager
 	logger                       log.ContextLogger
 	tags                         []string
+	preferredTags                []string
 	link                         string
 	interval                     time.Duration
 	tolerance                    uint16
@@ -58,6 +59,7 @@ func NewURLTest(ctx context.Context, router adapter.Router, logger log.ContextLo
 		connection:                   service.FromContext[adapter.ConnectionManager](ctx),
 		logger:                       logger,
 		tags:                         options.Outbounds,
+		preferredTags:                options.PreferredOutbounds,
 		link:                         options.URL,
 		interval:                     time.Duration(options.Interval),
 		tolerance:                    options.Tolerance,
@@ -66,6 +68,11 @@ func NewURLTest(ctx context.Context, router adapter.Router, logger log.ContextLo
 	}
 	if len(outbound.tags) == 0 {
 		return nil, E.New("missing tags")
+	}
+	for _, preferred := range outbound.preferredTags {
+		if !common.Contains(outbound.tags, preferred) {
+			return nil, E.New("preferred outbound is not a group member")
+		}
 	}
 	return outbound, nil
 }
@@ -83,6 +90,7 @@ func (s *URLTest) Start() error {
 	if err != nil {
 		return err
 	}
+	group.preferredTags = s.preferredTags
 	s.group = group
 	return nil
 }
@@ -202,6 +210,7 @@ type URLTestGroup struct {
 	pauseCallback                *list.Element[pause.Callback]
 	logger                       log.Logger
 	outbounds                    []adapter.Outbound
+	preferredTags                []string
 	link                         string
 	interval                     time.Duration
 	tolerance                    uint16
@@ -295,28 +304,48 @@ func (g *URLTestGroup) Close() error {
 func (g *URLTestGroup) Select(network string) (adapter.Outbound, bool) {
 	var minDelay uint16
 	var minOutbound adapter.Outbound
+	preferredConfigured := len(g.preferredTags) > 0
+	preferredAvailable := false
+	for _, detour := range g.outbounds {
+		if !common.Contains(g.preferredTags, detour.Tag()) || !common.Contains(detour.Network(), network) {
+			continue
+		}
+		if history := g.history.LoadURLTestHistory(RealTag(g.outbound, detour)); history != nil && history.Delay != 65535 {
+			preferredAvailable = true
+			break
+		}
+	}
 	switch network {
 	case N.NetworkTCP:
 		if g.selectedOutboundTCP != nil {
-			if history := g.history.LoadURLTestHistory(RealTag(g.outbound, g.selectedOutboundTCP)); history != nil {
+			if history := g.history.LoadURLTestHistory(RealTag(g.outbound, g.selectedOutboundTCP)); history != nil &&
+				(!preferredConfigured || history.Delay != 65535) {
 				minOutbound = g.selectedOutboundTCP
 				minDelay = history.Delay
 			}
 		}
 	case N.NetworkUDP:
 		if g.selectedOutboundUDP != nil {
-			if history := g.history.LoadURLTestHistory(RealTag(g.outbound, g.selectedOutboundUDP)); history != nil {
+			if history := g.history.LoadURLTestHistory(RealTag(g.outbound, g.selectedOutboundUDP)); history != nil &&
+				(!preferredConfigured || history.Delay != 65535) {
 				minOutbound = g.selectedOutboundUDP
 				minDelay = history.Delay
 			}
 		}
 	}
+	if preferredAvailable && minOutbound != nil && !common.Contains(g.preferredTags, minOutbound.Tag()) {
+		minOutbound = nil
+		minDelay = 0
+	}
 	for _, detour := range g.outbounds {
 		if !common.Contains(detour.Network(), network) {
 			continue
 		}
+		if preferredAvailable && !common.Contains(g.preferredTags, detour.Tag()) {
+			continue
+		}
 		history := g.history.LoadURLTestHistory(RealTag(g.outbound, detour))
-		if history == nil {
+		if history == nil || (preferredConfigured && history.Delay == 65535) {
 			continue
 		}
 		if minDelay == 0 || minDelay > history.Delay+g.tolerance {

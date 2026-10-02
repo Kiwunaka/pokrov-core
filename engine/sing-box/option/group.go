@@ -10,6 +10,7 @@ type SelectorOutboundOptions struct {
 
 type URLTestOutboundOptions struct {
 	Outbounds                 []string           `json:"outbounds" reference:"outbound"`
+	PreferredOutbounds        []string           `json:"preferred_outbounds,omitempty" reference:"outbound"`
 	URL                       string             `json:"url,omitempty"`
 	URLs                      []string           `json:"urls,omitempty"` //H
 	Interval                  badoption.Duration `json:"interval,omitempty"`
