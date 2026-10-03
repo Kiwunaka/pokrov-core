@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.2.7 — unreleased (`PRE_CANDIDATE_LOCAL`)
+## 1.2.7 — 2026-10-03 (prerelease)
 
 - Classify a successful selected-route HTTPS check whose selected leaf changed as
   unavailable, retaining the real-error and captured-ownership fences.
