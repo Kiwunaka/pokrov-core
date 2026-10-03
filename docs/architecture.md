@@ -16,6 +16,14 @@ smaller delay. The managed issuer gates this input to Core 1.2.4 or later.
 Published Core 1.2.3 and
 subscription exports for external clients omit this option.
 
+An owned Windows A/B comparison kept public client 1.4.1, identical profile
+bytes, the effective digest and all four SRS files. Stock Core 1.2.2 reached the
+native TLS deadline after 19.542 seconds; exact Core 1.2.2 with only the URLTest
+selection fix retained native DNS and egress health beyond 200 seconds and
+passed strict HTTPS 204 and 64 KiB checks. This supports the isolated selection
+fix; the selected member/history was not exposed. Live acceptance of the
+complete Core 1.2.5 SDK remains pending.
+
 Android callers that start Libbox CommandServer directly use the mobile SDK's
 `NormalizeRuntimeConfig` on a runtime copy after validating the saved profile's
 signature and digest. It reuses the existing legacy DNS normalizer before the
