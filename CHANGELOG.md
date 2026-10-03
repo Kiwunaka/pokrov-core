@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.2.6 — unreleased (`PRE_CANDIDATE_LOCAL`)
+## 1.2.6 — 2026-10-03 (prerelease)
 
 - Report a cold URLTest group's existing TCP fallback as its current tag, so
   startup egress verification can resolve the same route that dialing uses.
