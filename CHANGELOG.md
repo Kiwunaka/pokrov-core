@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.2.7 — unreleased (`PRE_CANDIDATE_LOCAL`)
+
+- Classify a successful selected-route HTTPS check whose selected leaf changed as
+  unavailable, retaining the real-error and captured-ownership fences.
+- Include the existing opt-in Hysteria reload support for an immutable private AWG
+  DNS listener and scoped DNS hijack; client profiles do not enable that server path.
+
 ## 1.2.6 — 2026-10-03 (prerelease)
 
 - Report a cold URLTest group's existing TCP fallback as its current tag, so
