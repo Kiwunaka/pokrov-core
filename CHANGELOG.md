@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.2.6 — unreleased (`PRE_CANDIDATE_LOCAL`)
+
+- Report a cold URLTest group's existing TCP fallback as its current tag, so
+  startup egress verification can resolve the same route that dialing uses.
+  Reading the tag does not publish a selection or successful probe history;
+  actual HTTPS verification still establishes health.
+
 ## 1.2.3 — unreleased (`PRE_CANDIDATE_LOCAL`)
 
 - Add separate Windows localDPI source support for signed Selective scope and

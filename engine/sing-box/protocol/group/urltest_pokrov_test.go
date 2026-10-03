@@ -19,12 +19,23 @@ func TestURLTestFailureDoesNotReplaceHealthyOutbound(t *testing.T) {
 	healthy := selectionTestOutbound{tag: "healthy-path"}
 	failed := selectionTestOutbound{tag: "failed-path"}
 	history := urltest.NewHistoryStorage()
-	history.StoreURLTestHistory(healthy.Tag(), &adapter.URLTestHistory{Delay: 100})
-	history.DeleteURLTestHistory(failed.Tag())
 	group := &URLTestGroup{
 		outbounds: []adapter.Outbound{healthy, failed}, history: history, tolerance: 50,
-		selectedOutboundTCP: healthy,
 	}
+	fallback, live := group.Select("tcp")
+	if live || fallback == nil || fallback.Tag() != healthy.Tag() {
+		t.Fatal("cold group did not provide its TCP fallback")
+	}
+	if current := (&URLTest{group: group}).Now(); current != fallback.Tag() {
+		t.Fatal("cold current tag did not match the TCP dial fallback")
+	}
+	if group.selectedOutboundTCP != nil || group.selectedOutboundUDP != nil ||
+		history.LoadURLTestHistory(healthy.Tag()) != nil {
+		t.Fatal("reading the cold current tag published selection or probe history")
+	}
+	history.StoreURLTestHistory(healthy.Tag(), &adapter.URLTestHistory{Delay: 100})
+	history.DeleteURLTestHistory(failed.Tag())
+	group.selectedOutboundTCP = healthy
 	assertHealthy := func() {
 		t.Helper()
 		selected, live := group.Select("tcp")
