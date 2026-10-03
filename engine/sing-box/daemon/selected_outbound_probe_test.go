@@ -48,8 +48,28 @@ func TestSelectedProbeCannotConfirmChangedRouteOrDirectLeaf(t *testing.T) {
 			group.selected.Store("b")
 			return 10, nil
 		})
-	if healthy || err != nil {
+	if healthy || err == nil || err.Error() != "selected route probe unavailable" {
 		t.Fatal("success for A confirmed the replacement B route")
+	}
+	healthy, err = probeSelectedOutbound(context.Background(), "select", lookup,
+		func(_ context.Context, outbound adapter.Outbound) (uint16, error) {
+			if outbound.Tag() != "b" {
+				t.Error("fresh probe did not capture the replacement leaf")
+			}
+			return 10, nil
+		})
+	if !healthy || err != nil {
+		t.Fatal("fresh proof for the replacement leaf was unavailable")
+	}
+	networkFailure := errors.New("URL probe connection failed")
+	group.selected.Store("a")
+	healthy, err = probeSelectedOutbound(context.Background(), "select", lookup,
+		func(context.Context, adapter.Outbound) (uint16, error) {
+			group.selected.Store("b")
+			return 0, networkFailure
+		})
+	if healthy || !errors.Is(err, networkFailure) {
+		t.Fatal("route change reclassified a real network failure")
 	}
 	for _, tag := range []string{"direct", "select"} {
 		group.selected.Store(tag)
@@ -58,13 +78,13 @@ func TestSelectedProbeCannotConfirmChangedRouteOrDirectLeaf(t *testing.T) {
 		}
 	}
 	leaf := &probeLeaf{tag: "same-tag", kind: "hysteria2"}
-	healthy, _ = probeSelectedOutbound(context.Background(), leaf.tag,
+	healthy, err = probeSelectedOutbound(context.Background(), leaf.tag,
 		func(string) (adapter.Outbound, bool) { return leaf, true },
 		func(context.Context, adapter.Outbound) (uint16, error) {
 			leaf = &probeLeaf{tag: "same-tag", kind: "hysteria2"}
 			return 10, nil
 		})
-	if healthy {
+	if healthy || err == nil || err.Error() != "selected route probe unavailable" {
 		t.Fatal("old leaf confirmed its replacement with the same tag")
 	}
 }

@@ -608,6 +608,10 @@ the result if the selected leaf or runtime instance changed. Direct, block, DNS,
 unsupported groups and cyclic selection cannot supply protected egress proof.
 The shared URL-test cache remains diagnostic data and is not a response channel
 for this verifier. Timeout and late results cannot settle a different call.
+A successful URL test whose selected leaf changed returns the existing closed
+`selected route probe unavailable` error, so the host's bounded group retry can
+verify the current leaf. It supplies no replacement proof and does not reclassify
+real transport errors or expired/cancelled contexts as a selection change.
 Periodic Android checks use `CommandServer.ProbeRuntimeEgress(tag, timeoutMs,
 cancellation)` with a maximum 3000 ms budget for the selected group or endpoint,
 without the startup endpoint initialization wait. Cancellation reaches the probe
