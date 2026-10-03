@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"net/netip"
 	"reflect"
 	"slices"
 
@@ -13,9 +14,31 @@ import (
 	"github.com/sagernet/sing/common"
 )
 
+const hysteriaAWGDNSInboundTag = "pokrov-awg-dns"
+
 func validateHysteriaReloadOptions(options option.Options) error {
-	if options.Experimental == nil || !options.Experimental.HysteriaReload || len(options.Inbounds) != 1 || options.Inbounds[0].Type != C.TypeHysteria2 || options.Route == nil {
+	if options.Experimental == nil || !options.Experimental.HysteriaReload || (len(options.Inbounds) != 1 && len(options.Inbounds) != 2) || options.Inbounds[0].Type != C.TypeHysteria2 || options.Route == nil {
 		return errors.New("hysteria_reload_scope_invalid")
+	}
+	hasAWGDNS := len(options.Inbounds) == 2
+	if hasAWGDNS {
+		auxiliary := options.Inbounds[1]
+		if auxiliary.Type != C.TypeDirect || auxiliary.Tag != hysteriaAWGDNSInboundTag || options.Inbounds[0].Tag == auxiliary.Tag {
+			return errors.New("hysteria_reload_dns_inbound_invalid")
+		}
+		dnsInbound := auxiliary.Options.(*option.DirectInboundOptions)
+		address := dnsInbound.Listen.Build(netip.Addr{})
+		expected := option.DirectInboundOptions{ListenOptions: option.ListenOptions{Listen: dnsInbound.Listen, ListenPort: 53}}
+		if !address.Is4() || !address.IsPrivate() || !reflect.DeepEqual(*dnsInbound, expected) {
+			return errors.New("hysteria_reload_dns_inbound_invalid")
+		}
+		expectedRule := option.Rule{Type: C.RuleTypeDefault, DefaultOptions: option.DefaultRule{
+			RawDefaultRule: option.RawDefaultRule{Inbound: []string{hysteriaAWGDNSInboundTag}},
+			RuleAction:     option.RuleAction{Action: C.RuleActionTypeHijackDNS},
+		}}
+		if len(options.Route.Rules) == 0 || !reflect.DeepEqual(options.Route.Rules[0], expectedRule) {
+			return errors.New("hysteria_reload_dns_rule_invalid")
+		}
 	}
 	users := options.Inbounds[0].Options.(*option.Hysteria2InboundOptions).Users
 	names, passwords := map[string]bool{}, map[string]bool{}
@@ -32,11 +55,15 @@ func validateHysteriaReloadOptions(options option.Options) error {
 		}
 		tags[outbound.Tag] = true
 	}
-	for _, rule := range options.Route.Rules {
+	for index, rule := range options.Route.Rules {
 		if rule.Type != C.RuleTypeDefault {
 			return errors.New("hysteria_reload_rule_invalid")
 		}
 		switch rule.DefaultOptions.Action {
+		case C.RuleActionTypeHijackDNS:
+			if !hasAWGDNS || index != 0 {
+				return errors.New("hysteria_reload_rule_invalid")
+			}
 		case C.RuleActionTypeRoute:
 			if !tags[rule.DefaultOptions.RouteOptions.Outbound] {
 				return errors.New("hysteria_reload_route_invalid")
@@ -148,6 +175,9 @@ func hysteriaImmutableOptions(options option.Options) option.Options {
 	options.Inbounds[0].Options = &inbound
 	route := *options.Route
 	route.Rules = nil
+	if len(options.Inbounds) == 2 {
+		route.Rules = append([]option.Rule(nil), options.Route.Rules[:1]...)
+	}
 	options.Route = &route
 	return options
 }

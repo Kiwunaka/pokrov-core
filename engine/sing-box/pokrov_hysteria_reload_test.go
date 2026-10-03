@@ -32,10 +32,87 @@ import (
 	"github.com/sagernet/sing-box/adapter/service"
 	"github.com/sagernet/sing-box/dns"
 	"github.com/sagernet/sing-box/dns/transport"
+	"github.com/sagernet/sing-box/dns/transport/local"
 	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing-box/protocol/direct"
 	"github.com/sagernet/sing-box/protocol/hysteria2"
 )
+
+func TestHysteriaReloadKeepsPrivateDNSImmutable(t *testing.T) {
+	ctx := context.Background()
+	inbounds, outbounds, transports := inbound.NewRegistry(), outbound.NewRegistry(), dns.NewTransportRegistry()
+	hysteria2.RegisterInbound(inbounds)
+	direct.RegisterInbound(inbounds)
+	direct.RegisterOutbound(outbounds)
+	local.RegisterTransport(transports)
+	ctx = box.Context(ctx, inbounds, outbounds, endpoint.NewRegistry(), transports, service.NewRegistry(), certificate.NewRegistry())
+	cert, key, _ := hysteriaLabTLS(t)
+	hy2 := map[string]any{"type": "hysteria2", "tag": "hy2", "listen": "127.0.0.1", "listen_port": 4430,
+		"tls": map[string]any{"enabled": true, "certificate": []string{cert}, "key": []string{key}}}
+	auxiliary := map[string]any{"type": "direct", "tag": "pokrov-awg-dns", "listen": "10.250.0.1", "listen_port": 53}
+	hijack := map[string]any{"inbound": []string{"pokrov-awg-dns"}, "action": "hijack-dns"}
+	dnsRule := map[string]any{"inbound": []string{"pokrov-awg-dns"}, "rule_set": []string{"pokrov-ads"}, "action": "predefined", "rcode": "NXDOMAIN"}
+	route := map[string]any{"rule_set": []any{map[string]any{"type": "inline", "tag": "pokrov-ads", "rules": []any{map[string]any{"domain_suffix": []string{"ads.pokrov.test"}}}}}}
+	document := map[string]any{
+		"log":          map[string]any{"disabled": true},
+		"experimental": map[string]any{"hysteria_reload": true},
+		"inbounds":     []any{hy2, auxiliary},
+		"outbounds":    []any{map[string]any{"type": "direct", "tag": "account"}},
+		"route":        route,
+		"dns": map[string]any{"servers": []any{map[string]any{"type": "local", "tag": "local"}},
+			"rules": []any{dnsRule}, "final": "local"},
+	}
+	setUser := func(name string) {
+		hy2["users"] = []any{map[string]any{"name": name, "password": "synthetic-" + name}}
+		route["rules"] = []any{hijack, map[string]any{"auth_user": []string{name}, "action": "route", "outbound": "account"}, map[string]any{"action": "reject"}}
+	}
+	options := func() option.Options {
+		data, err := json.Marshal(document)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var parsed option.Options
+		if err := parsed.UnmarshalJSONContext(ctx, data); err != nil {
+			t.Fatal(err)
+		}
+		return parsed
+	}
+	setUser("a")
+	instance, err := box.New(box.Options{Context: ctx, Options: options()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Do not start listeners: the private AWG address is not assigned to the test host.
+	t.Cleanup(func() { _ = instance.Close() })
+	initialDigest := instance.HysteriaRuntimeDigest()
+	requireRejected := func(want string) {
+		t.Helper()
+		err := instance.ReloadHysteria(options())
+		if err == nil || err.Error() != want || instance.HysteriaRuntimeDigest() != initialDigest {
+			t.Fatalf("invalid reload changed authority: %v", err)
+		}
+	}
+	auxiliary["listen"] = "10.250.0.2"
+	requireRejected("hysteria_reload_immutable_change")
+	auxiliary["listen"] = "10.250.0.1"
+	dnsRule["rcode"] = "REFUSED"
+	requireRejected("hysteria_reload_immutable_change")
+	dnsRule["rcode"] = "NXDOMAIN"
+	delete(hijack, "inbound")
+	requireRejected("hysteria_reload_dns_rule_invalid")
+	hijack["inbound"] = []string{"pokrov-awg-dns"}
+	route["rules"] = append(route["rules"].([]any), map[string]any{"action": "hijack-dns"})
+	requireRejected("hysteria_reload_rule_invalid")
+	setUser("b")
+	next := options()
+	if err := instance.ReloadHysteria(next); err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256(next.RawMessage)
+	if instance.HysteriaRuntimeDigest() != hex.EncodeToString(digest[:]) {
+		t.Fatal("valid auth reload did not preserve the private DNS configuration")
+	}
+}
 
 func TestHysteriaReloadClosesOldQUICAndSwapsAccountRoutes(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
