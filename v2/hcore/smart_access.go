@@ -2,8 +2,50 @@ package hcore
 
 import (
 	"errors"
+	"time"
+
 	"github.com/sagernet/sing-box/daemon"
 )
+
+func ProbeSelectedOutbound(tag string) (bool, error) {
+	static.lock.Lock()
+	started := static.StartedService
+	static.lock.Unlock()
+	if started == nil {
+		return false, errors.New("selected route probe unavailable")
+	}
+	healthy, err := started.ProbeSelectedOutboundResult(tag)
+	if !static.lock.TryLock() {
+		return false, errors.New("selected route probe unavailable")
+	}
+	current := static.StartedService == started
+	static.lock.Unlock()
+	if !current {
+		return false, errors.New("selected route probe unavailable")
+	}
+	return healthy, err
+}
+
+func ProbeRuntimeEgress(tag string, timeout time.Duration, interrupted func() bool) (bool, error) {
+	if !static.lock.TryLock() {
+		return false, errors.New("runtime egress probe unavailable")
+	}
+	started := static.StartedService
+	static.lock.Unlock()
+	if started == nil {
+		return false, errors.New("runtime egress probe unavailable")
+	}
+	healthy, err := started.ProbeRuntimeEgressResult(tag, timeout, interrupted)
+	if !static.lock.TryLock() {
+		return false, errors.New("runtime egress probe unavailable")
+	}
+	current := static.StartedService == started
+	static.lock.Unlock()
+	if !current {
+		return false, errors.New("runtime egress probe unavailable")
+	}
+	return healthy, err
+}
 
 func ConfigureSmartAccessRuntimeControl(profileDigest, configJSON string) (bool, error) {
 	static.lock.Lock()

@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"regexp"
+	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/sagernet/sing-box/adapter"
+	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing-box/protocol/pokrov/smartaccess"
 	"github.com/sagernet/sing/service"
@@ -29,6 +31,12 @@ type catalogRuleWindow struct {
 	lease         *smartaccess.Outbound
 	leaseGroupIDs []string
 	leaseGroup    *smartaccess.ServiceLeaseGroup
+	probeCurrent  func(string) bool
+	probeDNS      bool
+	probeServer   string
+	dnsTransports adapter.DNSTransportManager
+	probeUnbind   func()
+	probeAccess   sync.Mutex
 }
 
 func newCatalogRuleWindow(ctx context.Context, options *option.PokrovCatalogWindow, invert bool, domains int) (*catalogRuleWindow, error) {
@@ -62,6 +70,7 @@ func newCatalogRuleWindow(ctx context.Context, options *option.PokrovCatalogWind
 		}
 		window.leaseID = options.LeaseID
 		window.outbounds = service.FromContext[adapter.OutboundManager](ctx)
+		window.dnsTransports = service.FromContext[adapter.DNSTransportManager](ctx)
 		if window.outbounds == nil {
 			return nil, errors.New("catalog_window_lease_unavailable")
 		}
@@ -119,8 +128,31 @@ func (w *catalogRuleWindow) start() error {
 			return err
 		}
 		w.leaseGroup = group
+		if w.probeCurrent != nil {
+			var transport adapter.DNSTransport
+			if w.probeDNS {
+				if w.dnsTransports != nil && w.probeServer == "pokrov-smart-access-dns-" + w.leaseID {
+					if bound, ok := w.dnsTransports.Transport(w.probeServer); ok && bound.Type() == C.DNSTypeHTTPS {
+						transport = bound
+					}
+				}
+			}
+			w.probeAccess.Lock()
+			w.probeUnbind = group.BindProbeWindow(lease, w.probeDNS, transport, w.active, w.probeCurrent)
+			w.probeAccess.Unlock()
+		}
 	}
 	return nil
+}
+
+func (w *catalogRuleWindow) closeProbe() {
+	w.expired.Store(true)
+	w.probeAccess.Lock()
+	defer w.probeAccess.Unlock()
+	if w.probeUnbind != nil {
+		w.probeUnbind()
+		w.probeUnbind = nil
+	}
 }
 
 func (w *catalogRuleWindow) active() bool {

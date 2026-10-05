@@ -9,6 +9,8 @@ import (
 	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing/common"
 	E "github.com/sagernet/sing/common/exceptions"
+	M "github.com/sagernet/sing/common/metadata"
+	N "github.com/sagernet/sing/common/network"
 	"github.com/sagernet/sing/service"
 )
 
@@ -313,6 +315,14 @@ func NewDefaultRule(ctx context.Context, logger log.ContextLogger, options optio
 		item := NewRuleSetItem(router, options.RuleSet, matchSource, false)
 		rule.ruleSetItem = item
 		rule.allItems = append(rule.allItems, item)
+	}
+	if window != nil && (options.Action == "" || options.Action == C.RuleActionTypeRoute) &&
+		options.RouteOptions.Outbound == "pokrov-smart-access-"+window.leaseID {
+		window.probeCurrent = func(domain string) bool {
+			metadata := adapter.InboundContext{Domain: domain, Network: N.NetworkTCP, IPVersion: 4,
+				Destination: M.Socksaddr{Fqdn: domain, Port: 443}}
+			return rule.Match(&metadata)
+		}
 	}
 	return rule, nil
 }

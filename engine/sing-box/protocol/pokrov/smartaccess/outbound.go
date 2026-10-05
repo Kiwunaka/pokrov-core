@@ -36,6 +36,7 @@ func RegisterOutbound(registry *outbound.Registry) {
 
 type Outbound struct {
 	outbound.Adapter
+	ctx context.Context
 	dialer N.Dialer
 	connection adapter.ConnectionManager
 	relays []M.Socksaddr
@@ -122,7 +123,7 @@ func NewOutbound(ctx context.Context, _ adapter.Router, _ log.ContextLogger, tag
 	manager := service.FromContext[adapter.ConnectionManager](ctx)
 	if manager == nil { return nil, errLease }
 	return &Outbound{
-		Adapter: outbound.NewAdapter(Type, tag, []string{N.NetworkTCP}, nil), dialer: transport, connection: manager,
+		Adapter: outbound.NewAdapter(Type, tag, []string{N.NetworkTCP}, nil), ctx: ctx, dialer: transport, connection: manager,
 		relays: relays, relayPolicy: options.RelayConnectPolicy, relayStates: make([]relayConnectState, len(relays)),
 		domains: append([]option.PokrovSmartAccessDomain(nil), options.Domains...),
 		lease: lease, leases: map[string]*leaseAuthorization{lease.id: lease},
@@ -270,6 +271,10 @@ func (h *Outbound) allows(name string) bool {
 }
 
 func (h *Outbound) NewConnection(ctx context.Context, conn net.Conn, metadata adapter.InboundContext, onClose N.CloseHandlerFunc) {
+	h.newConnection(ctx, conn, metadata, onClose, nil)
+}
+
+func (h *Outbound) newConnection(ctx context.Context, conn net.Conn, metadata adapter.InboundContext, onClose N.CloseHandlerFunc, probe *serviceProbeState) {
 	if metadata.Destination.Port != 443 {
 		N.CloseOnHandshakeFailure(conn, onClose, errScope)
 		return
@@ -319,13 +324,18 @@ func (h *Outbound) NewConnection(ctx context.Context, conn net.Conn, metadata ad
 	dialCtx, stopDial := context.WithDeadline(flowCtx, connectDeadline)
 	remote, err := h.connectRelay(dialCtx, flow.authorization)
 	stopDial()
-	if err != nil { N.CloseOnHandshakeFailure(flow, finish, errLease); return }
+	if err != nil {
+		if probe != nil { probe.connectError = err }
+		N.CloseOnHandshakeFailure(flow, finish, errLease)
+		return
+	}
 	if !flow.setRemote(remote) { _ = remote.Close(); N.CloseOnHandshakeFailure(flow, finish, errLease); return }
 	h.mu.Lock()
 	allowed = h.admitsLeaseLocked(flow.authorization, time.Now())
 	if allowed { flow.active = true }
 	h.mu.Unlock()
 	if !allowed { N.CloseOnHandshakeFailure(flow, finish, errLease); return }
+	if probe != nil { probe.connected = true }
 	if err := flow.SetReadDeadline(time.Time{}); err != nil {
 		N.CloseOnHandshakeFailure(flow, finish, errLease)
 		return

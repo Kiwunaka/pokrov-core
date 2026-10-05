@@ -273,6 +273,23 @@ is retained after earlier candidates recover. If all candidates are unavailable,
 the host's existing scoped VPN/block rules follow. Group reads reserve no probes;
 the actual connection rechecks lease, half-open and quota limits.
 
+Selected-outbound/runtime probes of a Smart Access anchor check only that
+service group's current IPv4 lease: an uncached A answer from its bound HTTPS
+resolver must contain only owned relay addresses, followed by a visible-SNI TLS
+handshake through `NewConnection` with normal CA/hostname verification. Both
+compiled DNS and TCP rule windows, member/lease identity and instance cancellation
+must remain current. Direct/block/DNS leaves remain ineligible. This explicit
+resolver check does not prove the ordinary DNS rule walk, HTTP feature access or
+other service groups; production admission still requires its capability proofs.
+Desktop ABI 2 exposes the same checks through `pokrovCoreProbeSelectedOutbound`
+and `pokrovCoreProbeRuntimeEgressV1`; `smart_access_probe_version=1` identifies
+support. Startup retains its existing selected-probe budget; the periodic call
+accepts at most 3000 ms and joins its cancellation observer before return.
+Only an empty caller-owned string means healthy; fixed errors disclose no
+transport details. The caller releases every string with `freeString` and owns
+the profile/generation fence. Missing older-library support fails closed for
+Smart Access without changing ordinary VPN verification.
+
 A provider DoH transport error retires that selected member for the remaining
 profile lifetime, then reevaluates the domain from the first rule. Subsequent DNS
 and TCP choose the same available standby or the scoped VPN/block fallback.

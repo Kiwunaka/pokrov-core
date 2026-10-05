@@ -425,6 +425,14 @@ func NewDefaultDNSRule(ctx context.Context, logger log.ContextLogger, options op
 		rule.ruleSetItem = item
 		rule.allItems = append(rule.allItems, item)
 	}
+	if window != nil && (options.Action == "" || options.Action == C.RuleActionTypeRoute) {
+		window.probeDNS = true
+		window.probeServer = options.RouteOptions.Server
+		window.probeCurrent = func(domain string) bool {
+			metadata := adapter.InboundContext{Domain: domain, QueryType: dns.TypeA, IPVersion: 4}
+			return rule.Match(&metadata)
+		}
+	}
 	return rule, nil
 }
 

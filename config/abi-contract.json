@@ -43,6 +43,8 @@
       "pokrovCoreStartInterruptibleV1",
       "pokrovCoreSelectOutboundV1",
       "pokrovCoreResetNetworkV1",
+      "pokrovCoreProbeSelectedOutbound",
+      "pokrovCoreProbeRuntimeEgressV1",
       "pokrovCoreProbeCandidateV1",
       "pokrovCoreCancelCandidateProbeV1",
       "pokrovCoreAcknowledgeSmartAccessRestrictions",
@@ -203,6 +205,7 @@
     "smart_access_lease_version": 1,
     "smart_access_runtime_control_version": 1,
     "routing_catalog_control_version": 4,
+    "smart_access_probe_version": 1,
     "local_dpi_admission_version": 1,
     "capabilities": [
       "bounded_stop_reason",

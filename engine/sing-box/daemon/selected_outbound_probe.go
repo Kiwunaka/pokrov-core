@@ -8,6 +8,7 @@ import (
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/common/urltest"
 	C "github.com/sagernet/sing-box/constant"
+	"github.com/sagernet/sing-box/protocol/pokrov/smartaccess"
 )
 
 // ProbeSelectedOutboundResult tests the captured selected leaf, without using
@@ -145,7 +146,13 @@ func probeSelectedOutbound(ctx context.Context, tag string,
 	// A late return belongs only to this call, even after its timeout.
 	done := make(chan result, 1)
 	go func() {
-		delay, err := probe(ctx, selected)
+		var delay uint16
+		var err error
+		if anchor, ok := selected.(*smartaccess.Outbound); ok {
+			delay, err = anchor.ProbeServiceReadiness(ctx)
+		} else {
+			delay, err = probe(ctx, selected)
+		}
 		done <- result{delay, err}
 	}()
 	select {

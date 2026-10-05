@@ -63,6 +63,8 @@ static void pokrov_core_emit_event_v1(
 import "C"
 
 import (
+	"context"
+	"errors"
 	// "os"
 	// "os/signal"
 
@@ -75,6 +77,7 @@ import (
 	"github.com/Kiwunaka/POKROV-core/v2/hcommon/constants"
 	hcore "github.com/Kiwunaka/POKROV-core/v2/hcore"
 	"github.com/Kiwunaka/POKROV-core/v2/hutils"
+	"github.com/sagernet/sing-box/common/urltest"
 	"github.com/sagernet/sing-box/experimental/libbox"
 )
 
@@ -130,8 +133,8 @@ func emptyOrErrorC(err error) *C.char {
 }
 
 const pokrovDesktopABIVersion = 2
-const pokrovCoreCapabilitiesJSON = `{"schema_version":1,"desktop_abi":2,"event_abi":1,"routing_catalog_window_version":1,"smart_access_lease_version":1,"smart_access_runtime_control_version":1,"routing_catalog_control_version":4,"local_dpi_admission_version":1,"capabilities":["bounded_stop_reason","core_start_stop","materialized_profile","secure_profile_file","structured_operational_events","typed_lifecycle_events"],"lifecycle_events":["initialization","profile","core_start","tun","routes","dns","egress","recovery","stop"],"operational_events":{"contract":"config/core-event-abi.json","schema_version":1,"event_abi":1,"callback_symbol":"pokrovCoreSetEventCallback","context_symbol":"pokrovCoreSetEventContext","maximum_pending_events":128}}`
-const pokrovCoreWindowsCapabilitiesJSON = `{"schema_version":1,"desktop_abi":2,"event_abi":1,"routing_catalog_window_version":1,"smart_access_lease_version":1,"smart_access_runtime_control_version":1,"routing_catalog_control_version":4,"local_dpi_admission_version":1,"windows_local_dpi_admission_version":1,"telegram_ws_admission_version":1,"capabilities":["bounded_stop_reason","core_start_stop","materialized_profile","secure_profile_file","structured_operational_events","typed_lifecycle_events"],"lifecycle_events":["initialization","profile","core_start","tun","routes","dns","egress","recovery","stop"],"operational_events":{"contract":"config/core-event-abi.json","schema_version":1,"event_abi":1,"callback_symbol":"pokrovCoreSetEventCallback","context_symbol":"pokrovCoreSetEventContext","maximum_pending_events":128}}`
+const pokrovCoreCapabilitiesJSON = `{"schema_version":1,"desktop_abi":2,"event_abi":1,"routing_catalog_window_version":1,"smart_access_lease_version":1,"smart_access_runtime_control_version":1,"routing_catalog_control_version":4,"smart_access_probe_version":1,"local_dpi_admission_version":1,"capabilities":["bounded_stop_reason","core_start_stop","materialized_profile","secure_profile_file","structured_operational_events","typed_lifecycle_events"],"lifecycle_events":["initialization","profile","core_start","tun","routes","dns","egress","recovery","stop"],"operational_events":{"contract":"config/core-event-abi.json","schema_version":1,"event_abi":1,"callback_symbol":"pokrovCoreSetEventCallback","context_symbol":"pokrovCoreSetEventContext","maximum_pending_events":128}}`
+const pokrovCoreWindowsCapabilitiesJSON = `{"schema_version":1,"desktop_abi":2,"event_abi":1,"routing_catalog_window_version":1,"smart_access_lease_version":1,"smart_access_runtime_control_version":1,"routing_catalog_control_version":4,"smart_access_probe_version":1,"local_dpi_admission_version":1,"windows_local_dpi_admission_version":1,"telegram_ws_admission_version":1,"capabilities":["bounded_stop_reason","core_start_stop","materialized_profile","secure_profile_file","structured_operational_events","typed_lifecycle_events"],"lifecycle_events":["initialization","profile","core_start","tun","routes","dns","egress","recovery","stop"],"operational_events":{"contract":"config/core-event-abi.json","schema_version":1,"event_abi":1,"callback_symbol":"pokrovCoreSetEventCallback","context_symbol":"pokrovCoreSetEventContext","maximum_pending_events":128}}`
 
 //export pokrovCoreAbiVersion
 func pokrovCoreAbiVersion() C.int {
@@ -584,6 +587,42 @@ func pokrovCoreSelectOutboundV1(groupTag, outboundTag *C.char) *C.char {
 //export pokrovCoreResetNetworkV1
 func pokrovCoreResetNetworkV1() *C.char {
 	return emptyOrErrorC(hcore.ResetNetwork())
+}
+
+// Both probe exports return caller-owned strings, released by freeString.
+// Only typed probe stages and closed lifecycle outcomes cross the C boundary.
+func protectedProbeResult(healthy bool, err error) *C.char {
+	if err == nil && healthy {
+		return C.CString("")
+	}
+	if errors.Is(err, context.Canceled) {
+		return C.CString("context canceled")
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return C.CString("context deadline exceeded")
+	}
+	var probeError *urltest.ProbeError
+	if errors.As(err, &probeError) {
+		return C.CString(probeError.Error())
+	}
+	return C.CString("selected route probe unavailable")
+}
+
+//export pokrovCoreProbeSelectedOutbound
+func pokrovCoreProbeSelectedOutbound(tag *C.char) *C.char {
+	if tag == nil {
+		return C.CString("selected route probe unavailable")
+	}
+	return protectedProbeResult(hcore.ProbeSelectedOutbound(C.GoString(tag)))
+}
+
+//export pokrovCoreProbeRuntimeEgressV1
+func pokrovCoreProbeRuntimeEgressV1(tag *C.char, timeoutMs C.int, callback C.pokrov_core_interrupted_v1, owner unsafe.Pointer) *C.char {
+	if tag == nil {
+		return C.CString("selected route probe unavailable")
+	}
+	return protectedProbeResult(hcore.ProbeRuntimeEgress(C.GoString(tag), time.Duration(timeoutMs)*time.Millisecond,
+		func() bool { return C.pokrov_core_is_interrupted_v1(callback, owner) != 0 }))
 }
 
 //export pokrovCoreProbeCandidateV1

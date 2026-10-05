@@ -34,7 +34,7 @@ func (r *abstractDefaultRule) RevokeRoutingCatalog() bool {
 	if r.catalogWindow == nil {
 		return false
 	}
-	r.catalogWindow.expired.Store(true)
+	r.catalogWindow.closeProbe()
 	return true
 }
 
@@ -43,7 +43,7 @@ func (r *abstractDefaultRule) RevokeRoutingCatalogService(serviceID string) bool
 	if window == nil || window.serviceID == "" || window.serviceID != serviceID {
 		return false
 	}
-	window.expired.Store(true)
+	window.closeProbe()
 	if window.lease != nil {
 		window.lease.Revoke(true)
 	}
@@ -70,6 +70,9 @@ func (r *abstractDefaultRule) Start() error {
 }
 
 func (r *abstractDefaultRule) Close() error {
+	if r.catalogWindow != nil {
+		r.catalogWindow.closeProbe()
+	}
 	for _, item := range r.allItems {
 		err := common.Close(item)
 		if err != nil {

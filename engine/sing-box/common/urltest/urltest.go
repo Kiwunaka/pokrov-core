@@ -29,6 +29,7 @@ const (
 	ProbeStageConnect ProbeStage = iota
 	ProbeStageTLS
 	ProbeStageResponse
+	ProbeStageDNS
 )
 
 // ProbeError retains the observed stage without exposing the target or the
@@ -46,6 +47,8 @@ func (e *ProbeError) Error() string {
 		return "URL probe TLS negotiation failed"
 	case ProbeStageResponse:
 		return "URL probe response failed"
+	case ProbeStageDNS:
+		return "URL probe DNS resolution failed"
 	default:
 		return "URL probe failed"
 	}

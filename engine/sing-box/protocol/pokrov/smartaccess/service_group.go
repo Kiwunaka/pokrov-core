@@ -4,6 +4,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/option"
 )
 
@@ -16,6 +17,48 @@ type ServiceLeaseGroup struct {
 	selected int
 	evaluated bool
 	dnsFailed map[*Outbound]bool
+	probeWindows []*serviceProbeWindow
+}
+
+type serviceProbeWindow struct {
+	member *Outbound
+	dns bool
+	transport adapter.DNSTransport
+	active func() bool
+	current func(string) bool
+}
+
+// A scoped probe must retain both real compiled rule windows. Closing a rule
+// removes its binding; checking a member's lease alone cannot extend a catalog.
+func (group *ServiceLeaseGroup) BindProbeWindow(member *Outbound, dns bool, transport adapter.DNSTransport, active func() bool, current func(string) bool) func() {
+	window := &serviceProbeWindow{member: member, dns: dns, transport: transport, active: active, current: current}
+	group.mu.Lock()
+	group.probeWindows = append(group.probeWindows, window)
+	group.mu.Unlock()
+	return func() {
+		group.mu.Lock()
+		defer group.mu.Unlock()
+		for index, bound := range group.probeWindows {
+			if bound == window {
+				group.probeWindows = append(group.probeWindows[:index], group.probeWindows[index+1:]...)
+				return
+			}
+		}
+	}
+}
+
+func (group *ServiceLeaseGroup) probeScope(member *Outbound, domain string, selected bool) (adapter.DNSTransport, bool) {
+	if selected && group.Selected() != member { return nil, false }
+	group.mu.Lock()
+	windows := append([]*serviceProbeWindow(nil), group.probeWindows...)
+	group.mu.Unlock()
+	var transport adapter.DNSTransport
+	var route bool
+	for _, window := range windows {
+		if window.member != member || !window.active() || (selected && !window.current(domain)) { continue }
+		if window.dns { transport = window.transport } else { route = true }
+	}
+	return transport, route && transport != nil && (!selected || group.Selected() == member)
 }
 
 func (h *Outbound) ServiceLeaseGroup(serviceID string, members []*Outbound) (*ServiceLeaseGroup, error) {
