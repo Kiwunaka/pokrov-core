@@ -959,5 +959,10 @@ is absent. The app's direct final route is not used as proof of the VPN path.
 Cancellation closes the instance and waits
 for the request and observer to return before releasing the caller-owned callback.
 The existing active runtime and its TUN remain untouched by probes. The optional
-desktop ABI 2 exports return only a fixed failure kind and duration, with strings
+desktop ABI 2 exports return a fixed failure kind and duration, with strings
 released by `freeString`; profiles and transport errors never enter the result.
+The candidate result retains its last fixed stage and the monotonic
+`stage_started_ms` offset from probe entry. TLS stages distinguish blocking reads
+and writes from processing and completion of the default CA/hostname check;
+they do not change trust, curves or probe deadlines. Cleanup preserves the last
+observed stage, while `duration_ms` continues to include cleanup.

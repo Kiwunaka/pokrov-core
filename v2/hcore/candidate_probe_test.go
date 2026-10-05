@@ -146,20 +146,49 @@ func TestCandidateProbeCancellationClosesTLSAndJoins(t *testing.T) {
 	client, server := net.Pipe()
 	defer server.Close()
 	ctx, cancel := context.WithCancel(context.Background())
-	dialed := make(chan struct{})
-	done := make(chan string, 1)
+	defer cancel()
+	reading := make(chan struct{})
+	serverDone := make(chan error, 1)
 	go func() {
-		done <- candidateHTTPProbe(ctx, func(context.Context, string, M.Socksaddr) (net.Conn, error) {
-			close(dialed)
-			return client, nil
-		})
+		var header [5]byte
+		_, err := io.ReadFull(server, header[:])
+		if err == nil {
+			_, err = io.CopyN(io.Discard, server, int64(header[3])<<8|int64(header[4]))
+		}
+		serverDone <- err
 	}()
-	<-dialed
+	type observed struct{ kind, stage string }
+	done := make(chan observed, 1)
+	go func() {
+		stage := ""
+		kind := candidateHTTPProbe(ctx, func(context.Context, string, M.Socksaddr) (net.Conn, error) {
+			return client, nil
+		}, func(name string) {
+			stage = name
+			if name == "tls_read" {
+				close(reading)
+			}
+		})
+		done <- observed{kind, stage}
+	}()
+	select {
+	case <-reading:
+	case result := <-done:
+		t.Fatalf("TLS did not reach its response read: %s", result.kind)
+	case <-time.After(time.Second):
+		t.Fatal("TLS did not start its response read")
+	}
+	if err := <-serverDone; err != nil {
+		t.Fatal(err)
+	}
 	cancel()
 	select {
-	case kind := <-done:
-		if kind == "" {
+	case result := <-done:
+		if result.kind == "" {
 			t.Fatal("cancelled TLS handshake succeeded")
+		}
+		if result.stage != "tls_read" {
+			t.Fatalf("blocked TLS read lost its stage: %s", result.stage)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("cancelled probe retained its connection")
@@ -226,10 +255,17 @@ func TestCandidateProbeStageDoesNotExposeProfile(t *testing.T) {
 	stage := ""
 	result := ProbeCandidate(profile, "safe-stage", time.Second, "", nil, nil,
 		func(name string) { stage = name })
-	if result.Success || result.FailureKind != "invalid_profile" || stage != "parse_profile" {
+	if result.Success || result.FailureKind != "invalid_profile" || stage != "parse_profile" || result.Stage != stage {
 		t.Fatal("invalid profile did not retain its safe stage")
 	}
-	if strings.Contains(stage, "address-private") || strings.Contains(stage, "key-s3cr3t") {
+	if result.StageStartedMS < 0 || result.StageStartedMS > result.DurationMS {
+		t.Fatal("stage start is outside the probe duration")
+	}
+	value := result.JSON()
+	if !strings.Contains(value, `"stage":"parse_profile"`) || !strings.Contains(value, `"stage_started_ms":`) {
+		t.Fatal("native result did not retain its safe stage and monotonic time")
+	}
+	if strings.Contains(value, "address-private") || strings.Contains(value, "key-s3cr3t") {
 		t.Fatal("connection material leaked into stage")
 	}
 }

@@ -1,8 +1,8 @@
 {
   "name": "POKROV Core",
-  "version": "1.2.7",
-  "state": "RELEASED",
-  "candidate_created": true,
+  "version": "1.2.8",
+  "state": "PRE_CANDIDATE_LOCAL",
+  "candidate_created": false,
   "go_toolchain": "go1.26.8",
   "desktop_abi": 2,
   "abi_contract": "config/abi-contract.json",

@@ -38,9 +38,11 @@ type candidateProbeTarget struct {
 }
 
 type CandidateProbeResult struct {
-	Success     bool   `json:"success"`
-	FailureKind string `json:"failure_kind"`
-	DurationMS  int64  `json:"duration_ms"`
+	Success        bool   `json:"success"`
+	FailureKind    string `json:"failure_kind"`
+	DurationMS     int64  `json:"duration_ms"`
+	Stage          string `json:"stage,omitempty"`
+	StageStartedMS int64  `json:"stage_started_ms"`
 }
 
 func (r CandidateProbeResult) JSON() string {
@@ -79,6 +81,8 @@ func ProbeCandidate(config, id string, timeout time.Duration, bindInterface stri
 	started := time.Now()
 	defer func() { result.DurationMS = time.Since(started).Milliseconds() }()
 	reportStage := func(name string) {
+		result.Stage = name
+		result.StageStartedMS = time.Since(started).Milliseconds()
 		if len(stage) > 0 && stage[0] != nil {
 			stage[0](name)
 		}
@@ -192,7 +196,7 @@ func ProbeCandidate(config, id string, timeout time.Duration, bindInterface stri
 		}
 		return conn, err
 	}
-	result.FailureKind = candidateHTTPProbe(ctx, probeDial)
+	result.FailureKind = candidateHTTPProbe(ctx, probeDial, reportStage)
 	result.Success = result.FailureKind == ""
 	return
 }
@@ -343,7 +347,7 @@ func candidateProtectedLeaf(tag string, lookup func(string) (adapter.Outbound, b
 	return nil
 }
 
-func candidateHTTPProbe(ctx context.Context, dial func(context.Context, string, M.Socksaddr) (net.Conn, error)) string {
+func candidateHTTPProbe(ctx context.Context, dial func(context.Context, string, M.Socksaddr) (net.Conn, error), reportStage func(string)) string {
 	primary := candidateProbeTarget{"api.pokrov.space", candidateProbeURL, candidatePayloadURL}
 	reserve := candidateProbeTarget{"pokrov.space", candidateReserveProbeURL, candidateReserveDataURL}
 	// Leave a quarter of the caller's deadline for the static responder.
@@ -352,22 +356,22 @@ func candidateHTTPProbe(ctx context.Context, dial func(context.Context, string, 
 	if deadline, ok := ctx.Deadline(); ok {
 		primaryCtx, cancel = context.WithTimeout(ctx, time.Until(deadline)*3/4)
 	}
-	first := candidateProbeAt(primaryCtx, dial, primary)
+	first := candidateProbeAt(primaryCtx, dial, primary, reportStage)
 	cancel()
 	if first == "" || ctx.Err() != nil {
 		return first
 	}
-	return candidateProbeAt(ctx, dial, reserve)
+	return candidateProbeAt(ctx, dial, reserve, reportStage)
 }
 
-func candidateProbeAt(ctx context.Context, dial func(context.Context, string, M.Socksaddr) (net.Conn, error), target candidateProbeTarget) string {
-	if kind := candidateHTTPSGet(ctx, dial, target.host, target.probeURL, false); kind != "" {
+func candidateProbeAt(ctx context.Context, dial func(context.Context, string, M.Socksaddr) (net.Conn, error), target candidateProbeTarget, reportStage func(string)) string {
+	if kind := candidateHTTPSGet(ctx, dial, target.host, target.probeURL, false, reportStage); kind != "" {
 		return kind
 	}
-	return candidateHTTPSGet(ctx, dial, target.host, target.payloadURL, true)
+	return candidateHTTPSGet(ctx, dial, target.host, target.payloadURL, true, reportStage)
 }
 
-func candidateHTTPSGet(ctx context.Context, dial func(context.Context, string, M.Socksaddr) (net.Conn, error), host, endpoint string, payload bool) string {
+func candidateHTTPSGet(ctx context.Context, dial func(context.Context, string, M.Socksaddr) (net.Conn, error), host, endpoint string, payload bool, reportStage func(string)) string {
 	// Keep dial, TLS and HTTP synchronous so no transport worker outlives cancel.
 	conn, err := dial(ctx, "tcp", M.ParseSocksaddr(host+":443"))
 	if err != nil {
@@ -385,14 +389,59 @@ func candidateHTTPSGet(ctx context.Context, dial func(context.Context, string, M
 		}
 	}()
 	defer func() { close(closeStop); <-closeDone }()
-	secured := tls.Client(conn, &tls.Config{ServerName: host, MinVersion: tls.VersionTLS12})
+	reportStage("tls_handshake")
+	tracked := &candidateTLSConn{Conn: conn, reportStage: reportStage}
+	secured := tls.Client(tracked, &tls.Config{
+		ServerName: host,
+		MinVersion: tls.VersionTLS12,
+		// This callback runs after the default CA and hostname verification.
+		VerifyConnection: func(tls.ConnectionState) error {
+			reportStage("tls_certificate_verified")
+			return nil
+		},
+	})
 	if err := secured.HandshakeContext(ctx); err != nil {
 		return "tls_failed"
 	}
+	tracked.reportStage = nil
+	reportStage("tls_complete")
 	if payload {
+		reportStage("http_64k")
 		return candidateGET64K(ctx, secured, endpoint)
 	}
+	reportStage("http_204")
 	return candidateGET204(ctx, secured, endpoint)
+}
+
+// Observe only synchronous TLS IO; Close and deadlines still belong to the
+// underlying transport. HTTP IO retains its own stage after the handshake.
+type candidateTLSConn struct {
+	net.Conn
+	reportStage func(string)
+}
+
+func (c *candidateTLSConn) Read(p []byte) (n int, err error) {
+	if c.reportStage == nil {
+		return c.Conn.Read(p)
+	}
+	c.reportStage("tls_read")
+	n, err = c.Conn.Read(p)
+	if n > 0 {
+		c.reportStage("tls_processing")
+	}
+	return
+}
+
+func (c *candidateTLSConn) Write(p []byte) (n int, err error) {
+	if c.reportStage == nil {
+		return c.Conn.Write(p)
+	}
+	c.reportStage("tls_write")
+	n, err = c.Conn.Write(p)
+	if n > 0 {
+		c.reportStage("tls_processing")
+	}
+	return
 }
 
 func candidateGET204(ctx context.Context, conn net.Conn, endpoint string) string {
