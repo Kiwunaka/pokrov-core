@@ -964,5 +964,9 @@ released by `freeString`; profiles and transport errors never enter the result.
 The candidate result retains its last fixed stage and the monotonic
 `stage_started_ms` offset from probe entry. TLS stages distinguish blocking reads
 and writes from processing and completion of the default CA/hostname check;
-they do not change trust, curves or probe deadlines. Cleanup preserves the last
+the result also measures profile parsing, Box creation and the certificate-store
+part of that creation independently for each call, including constructor errors.
+Zero setup milliseconds mean sub-millisecond work or a phase not entered, as
+identified by the last stage. The diagnostics preserve execution, trust, curves
+and probe deadlines. Cleanup preserves the last
 observed stage, while `duration_ms` continues to include cleanup.

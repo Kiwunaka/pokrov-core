@@ -265,8 +265,31 @@ func TestCandidateProbeStageDoesNotExposeProfile(t *testing.T) {
 	if !strings.Contains(value, `"stage":"parse_profile"`) || !strings.Contains(value, `"stage_started_ms":`) {
 		t.Fatal("native result did not retain its safe stage and monotonic time")
 	}
+	if result.ParseDurationMS < 0 || result.CreateDurationMS != 0 || result.CertificateDurationMS != 0 ||
+		result.ParseDurationMS > result.DurationMS {
+		t.Fatal("invalid parse lost bounded setup timings")
+	}
+	for _, field := range []string{"parse_duration_ms", "create_duration_ms", "certificate_duration_ms"} {
+		if !strings.Contains(value, field) {
+			t.Fatal("native result lost setup timing", field)
+		}
+	}
 	if strings.Contains(value, "address-private") || strings.Contains(value, "key-s3cr3t") {
 		t.Fatal("connection material leaked into stage")
+	}
+	result = ProbeCandidate(`{"certificate":{"store":"unsupported-test-store"}}`,
+		"create-timing", time.Second, "", nil, nil)
+	if result.Success || result.Stage != "create_instance" || result.FailureKind != "invalid_profile" ||
+		result.CertificateDurationMS < 0 || result.CertificateDurationMS > result.CreateDurationMS ||
+		result.ParseDurationMS+result.CreateDurationMS > result.DurationMS {
+		t.Fatal("constructor failure lost bounded setup timings")
+	}
+	certificateDuration := time.Duration(-1)
+	_, err := box.New(box.Options{Context: libbox.BaseContext(nil),
+		Options:                  option.Options{Certificate: &option.CertificateOptions{Store: "unsupported-test-store"}},
+		CertificateStoreDuration: &certificateDuration})
+	if err == nil || certificateDuration < 0 {
+		t.Fatal("certificate error path did not fill its local duration")
 	}
 }
 

@@ -38,11 +38,14 @@ type candidateProbeTarget struct {
 }
 
 type CandidateProbeResult struct {
-	Success        bool   `json:"success"`
-	FailureKind    string `json:"failure_kind"`
-	DurationMS     int64  `json:"duration_ms"`
-	Stage          string `json:"stage,omitempty"`
-	StageStartedMS int64  `json:"stage_started_ms"`
+	Success               bool   `json:"success"`
+	FailureKind           string `json:"failure_kind"`
+	DurationMS            int64  `json:"duration_ms"`
+	Stage                 string `json:"stage,omitempty"`
+	StageStartedMS        int64  `json:"stage_started_ms"`
+	ParseDurationMS       int64  `json:"parse_duration_ms"`
+	CreateDurationMS      int64  `json:"create_duration_ms"`
+	CertificateDurationMS int64  `json:"certificate_duration_ms"`
 }
 
 func (r CandidateProbeResult) JSON() string {
@@ -151,13 +154,20 @@ func ProbeCandidate(config, id string, timeout time.Duration, bindInterface stri
 		return
 	}
 	reportStage("parse_profile")
+	parseStarted := time.Now()
 	options, target, err := candidateOptions(ctx, config, bindInterface)
+	result.ParseDurationMS = time.Since(parseStarted).Milliseconds()
 	if err != nil {
 		result.FailureKind = "invalid_profile"
 		return
 	}
 	reportStage("create_instance")
-	instance, err := box.New(box.Options{Context: ctx, Options: options})
+	createStarted := time.Now()
+	var certificateDuration time.Duration
+	instance, err := box.New(box.Options{Context: ctx, Options: options,
+		CertificateStoreDuration: &certificateDuration})
+	result.CreateDurationMS = time.Since(createStarted).Milliseconds()
+	result.CertificateDurationMS = certificateDuration.Milliseconds()
 	if err != nil {
 		result.FailureKind = "invalid_profile"
 		return

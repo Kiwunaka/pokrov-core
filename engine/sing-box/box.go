@@ -72,6 +72,7 @@ type Options struct {
 	option.Options
 	Context                    context.Context
 	PlatformLogWriter          log.PlatformWriter
+	CertificateStoreDuration   *time.Duration
 	NetworkNamespaceHolderArgs []string
 }
 
@@ -202,7 +203,11 @@ func New(options Options) (*Box, error) {
 		len(certificateOptions.Certificate) > 0 ||
 		len(certificateOptions.CertificatePath) > 0 ||
 		len(certificateOptions.CertificateDirectoryPath) > 0 {
+		certificateStarted := time.Now()
 		certificateStore, err := certificate.NewStore(ctx, logFactory.NewLogger("certificate"), certificateOptions)
+		if options.CertificateStoreDuration != nil {
+			*options.CertificateStoreDuration = time.Since(certificateStarted)
+		}
 		if err != nil {
 			return nil, err
 		}
