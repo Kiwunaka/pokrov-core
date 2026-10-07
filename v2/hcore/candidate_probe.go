@@ -6,9 +6,7 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"errors"
-	"io"
 	"net"
-	"net/http"
 	"regexp"
 	"sync"
 	"time"
@@ -16,6 +14,7 @@ import (
 	coreconfig "github.com/Kiwunaka/POKROV-core/v2/config"
 	box "github.com/sagernet/sing-box"
 	"github.com/sagernet/sing-box/adapter"
+	"github.com/sagernet/sing-box/common/urltest"
 	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/experimental/libbox"
 	"github.com/sagernet/sing-box/option"
@@ -25,12 +24,12 @@ import (
 )
 
 const (
-	candidateProbeURL        = "https://api.pokrov.space/api/public/authenticated-egress-probe"
-	candidatePayloadURL      = "https://api.pokrov.space/api/public/egress-probe-64k"
+	candidateProbeURL        = urltest.ProtectedProbeURL
+	candidatePayloadURL      = urltest.ProtectedPayloadURL
 	candidateReserveProbeURL = "https://pokrov.space/.well-known/pokrov/egress-probe"
 	candidateReserveDataURL  = "https://pokrov.space/.well-known/pokrov/egress-probe-64k.bin"
-	candidateProbeMarker     = "pokrov-authenticated-egress-v1"
-	candidatePayloadBytes    = 64 * 1024
+	candidateProbeMarker     = urltest.ProtectedProbeMarker
+	candidatePayloadBytes    = urltest.ProtectedPayloadBytes
 )
 
 type candidateProbeTarget struct {
@@ -453,41 +452,11 @@ func (c *candidateTLSConn) Write(p []byte) (n int, err error) {
 }
 
 func candidateGET204(ctx context.Context, conn net.Conn, reader *bufio.Reader, endpoint string) string {
-	request, _ := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
-	if err := request.Write(conn); err != nil {
-		return "probe_failed"
-	}
-	response, err := http.ReadResponse(reader, request)
-	if err != nil {
-		return "probe_failed"
-	}
-	defer response.Body.Close()
-	if response.StatusCode != http.StatusNoContent || response.Header.Get("X-Pokrov-Egress-Probe") != candidateProbeMarker {
-		return "unexpected_status"
-	}
-	return ""
+	kind, _ := urltest.ProbeGET204(ctx, conn, reader, endpoint)
+	return kind
 }
 
 func candidateGET64K(ctx context.Context, conn net.Conn, reader *bufio.Reader, endpoint string) string {
-	request, _ := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
-	request.Close = true
-	if err := request.Write(conn); err != nil {
-		return "probe_failed"
-	}
-	response, err := http.ReadResponse(reader, request)
-	if err != nil {
-		return "probe_failed"
-	}
-	defer response.Body.Close()
-	if response.StatusCode != http.StatusOK || response.Header.Get("X-Pokrov-Egress-Probe") != candidateProbeMarker ||
-		response.ContentLength != candidatePayloadBytes || response.Header.Get("Content-Encoding") != "" {
-		return "unexpected_status"
-	}
-	if _, err := io.CopyN(io.Discard, response.Body, candidatePayloadBytes); err != nil {
-		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return "data_stalled"
-		}
-		return "probe_failed"
-	}
-	return ""
+	kind, _ := urltest.ProbeGET64K(ctx, conn, reader, endpoint)
+	return kind
 }

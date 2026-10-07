@@ -26,7 +26,7 @@ func (s *StartedService) ProbeSelectedOutboundResult(tag string) (bool, error) {
 	defer cancel()
 	healthy, err := probeSelectedOutbound(ctx, tag, instance.instance.Outbound().Outbound,
 		func(ctx context.Context, outbound adapter.Outbound) (uint16, error) {
-			return urltest.URLTest(ctx, "", outbound)
+			return urltest.ProtectedURLTest(ctx, outbound)
 		})
 	s.serviceAccess.RLock()
 	current := s.serviceStatus.Status == ServiceStatus_STARTED && s.instance == instance

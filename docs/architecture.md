@@ -994,6 +994,14 @@ for the request and observer to return before releasing the caller-owned callbac
 The existing active runtime and its TUN remain untouched by probes. The optional
 desktop ABI 2 exports return a fixed failure kind and duration, with strings
 released by `freeString`; profiles and transport errors never enter the result.
+
+Startup proof for an ordinary selected outbound now uses the same strict HTTP
+exchange: owned GET 204 and marker, then GET 200 with a full uncompressed 64 KiB
+body and marker in one verified TLS session. It retains the 15-second deadline
+and captured instance/leaf checks. Periodic 3-second liveness, latency URL tests,
+Smart Access service readiness and endpoint initialization remain separate.
+This Core outbound proof does not measure an OS-TUN browser transfer.
+
 The candidate result retains its last fixed stage and the monotonic
 `stage_started_ms` offset from probe entry. TLS stages distinguish blocking reads
 and writes from processing and completion of the default CA/hostname check;
