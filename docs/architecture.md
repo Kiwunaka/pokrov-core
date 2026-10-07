@@ -694,8 +694,13 @@ its strategy, allowing managed AWG to use the profile's protected DNS transport.
 Without that field, the endpoint retains the profile's
 `route.default_domain_resolver` and its strategy, including the existing
 bootstrap behavior for DNS graphs with FakeIP. AWG peers remain IP literals;
-their outer socket and bootstrap handling are unchanged, as are TLS verification
+their socket protection and bootstrap policy remain intact, as do TLS verification
 and the authenticated egress hostname.
+
+The default dialer keeps explicit IPv4/IPv6 wildcard UDP requests on `udp4`/`udp6`.
+AWG's separate wildcard sockets therefore receive the matching Windows interface
+control instead of leaving IPv4 traffic on an IPv6-only interface binding through
+a dual-stack socket. Unspecified destination family retains the generic UDP path.
 
 Cross-field validation also requires disjoint H1-H4 ranges. S1/S2/S3 plus
 their pinned handshake/cookie sizes, S4 plus MTU and the 32-byte transport

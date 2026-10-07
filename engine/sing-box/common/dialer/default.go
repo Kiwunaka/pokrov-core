@@ -362,8 +362,8 @@ func (d *DefaultDialer) ListenPacket(ctx context.Context, destination M.Socksadd
 				})
 			}
 			if destination.IsIPv6() {
-				return listenConfig.ListenPacket(ctx, N.NetworkUDP, d.udpAddr6)
-			} else if destination.IsIPv4() && !destination.Addr.IsUnspecified() {
+				return listenConfig.ListenPacket(ctx, N.NetworkUDP+"6", d.udpAddr6)
+			} else if destination.IsIPv4() {
 				return listenConfig.ListenPacket(ctx, N.NetworkUDP+"4", d.udpAddr4)
 			} else {
 				return listenConfig.ListenPacket(ctx, N.NetworkUDP, d.udpAddr4)
