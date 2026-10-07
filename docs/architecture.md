@@ -1021,6 +1021,15 @@ still require only 204 and the owned marker. General URLTest/latency selection
 does not acquire this retry, and no target, allowance or deadline is added.
 This Core outbound proof does not measure an OS-TUN browser transfer.
 
+The 64 KiB payload exchange classifies IO timeouts only from typed deadline or
+`net.Error.Timeout()` evidence through the error chain. Write/header timeouts
+return `timeout`; a body timeout after valid headers returns `data_stalled` even
+while the caller context is live. With a live caller, short EOF, reset and
+untyped IO failures remain `probe_failed`; invalid status, marker, length or
+encoding remains `unexpected_status`. Original IO causes and caller cancellation,
+deadline overrides, strict body size and primary/reserve budgets are retained.
+GET 204 keeps its existing IO failure mapping.
+
 The candidate result retains its last fixed stage and the monotonic
 `stage_started_ms` offset from probe entry. TLS stages distinguish blocking reads
 and writes from processing and completion of the default CA/hostname check;

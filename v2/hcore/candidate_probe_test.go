@@ -22,6 +22,7 @@ import (
 	mDNS "github.com/miekg/dns"
 	box "github.com/sagernet/sing-box"
 	"github.com/sagernet/sing-box/adapter"
+	"github.com/sagernet/sing-box/common/urltest"
 	"github.com/sagernet/sing-box/experimental/libbox"
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
@@ -268,7 +269,57 @@ func TestCandidateProbeGET64KShortBodyIsNotStall(t *testing.T) {
 	}
 }
 
+type candidateProbeFaultConn struct {
+	net.Conn
+	reader   io.Reader
+	writeErr error
+}
+
+func (c *candidateProbeFaultConn) Read(buffer []byte) (int, error) {
+	return c.reader.Read(buffer)
+}
+
+func (c *candidateProbeFaultConn) Write(buffer []byte) (int, error) {
+	if c.writeErr != nil {
+		return 0, c.writeErr
+	}
+	return len(buffer), nil
+}
+
+type candidateProbeReadError struct{ err error }
+
+func (r candidateProbeReadError) Read([]byte) (int, error) { return 0, r.err }
+
+func TestCandidateProbeTypedWriteAndHeaderTimeoutsKeepTheirKind(t *testing.T) {
+	ctx := context.Background()
+	cause := fmt.Errorf("transport wrapper: %w", os.ErrDeadlineExceeded)
+	writeConn := &candidateProbeFaultConn{writeErr: cause}
+	kind, err := urltest.ProbeGET64K(ctx, writeConn, bufio.NewReader(writeConn), candidatePayloadURL)
+	if kind != "timeout" || !errors.Is(err, cause) {
+		t.Fatalf("typed request-write timeout: kind=%s, cause retained=%t", kind, errors.Is(err, cause))
+	}
+	headerConn := &candidateProbeFaultConn{reader: candidateProbeReadError{cause}}
+	kind, err = urltest.ProbeGET64K(ctx, headerConn, bufio.NewReader(headerConn), candidatePayloadURL)
+	if kind != "timeout" || !errors.Is(err, cause) || ctx.Err() != nil {
+		t.Fatalf("typed response-header timeout with live context: kind=%s, cause retained=%t", kind, errors.Is(err, cause))
+	}
+	untyped := &candidateProbeFaultConn{reader: candidateProbeReadError{errors.New("untyped timeout")}}
+	if kind := candidateGET64K(ctx, untyped, bufio.NewReader(untyped), candidatePayloadURL); kind != "probe_failed" {
+		t.Fatalf("untyped timeout text became typed evidence: %s", kind)
+	}
+}
+
 func TestCandidateProbeGET64KDetectsStallAfter16K(t *testing.T) {
+	t.Run("wrapped transport timeout with live context", func(t *testing.T) {
+		ctx := context.Background()
+		cause := fmt.Errorf("transport wrapper: %w", os.ErrDeadlineExceeded)
+		header := fmt.Sprintf("HTTP/1.1 200 OK\r\nX-Pokrov-Egress-Probe: %s\r\nContent-Length: %d\r\n\r\n", candidateProbeMarker, candidatePayloadBytes)
+		conn := &candidateProbeFaultConn{reader: io.MultiReader(strings.NewReader(header+strings.Repeat("p", 16*1024)), candidateProbeReadError{cause})}
+		kind, err := urltest.ProbeGET64K(ctx, conn, bufio.NewReader(conn), candidatePayloadURL)
+		if kind != "data_stalled" || !errors.Is(err, cause) || ctx.Err() != nil {
+			t.Fatalf("typed body timeout with live context: kind=%s, cause retained=%t", kind, errors.Is(err, cause))
+		}
+	})
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 	client, server := net.Pipe()

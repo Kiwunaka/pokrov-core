@@ -138,11 +138,11 @@ func ProbeGET64K(ctx context.Context, conn net.Conn, reader *bufio.Reader, endpo
 	request, _ := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	request.Close = true
 	if err := request.Write(conn); err != nil {
-		return "probe_failed", err
+		return probeIOFailureKind(err), err
 	}
 	response, err := http.ReadResponse(reader, request)
 	if err != nil {
-		return "probe_failed", err
+		return probeIOFailureKind(err), err
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK || response.Header.Get("X-Pokrov-Egress-Probe") != ProtectedProbeMarker ||
@@ -153,7 +153,18 @@ func ProbeGET64K(ctx context.Context, conn net.Conn, reader *bufio.Reader, endpo
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			return "data_stalled", ctx.Err()
 		}
+		if probeIOFailureKind(err) == "timeout" {
+			return "data_stalled", err
+		}
 		return "probe_failed", err
 	}
 	return "", nil
+}
+
+func probeIOFailureKind(err error) string {
+	var networkError net.Error
+	if errors.Is(err, context.DeadlineExceeded) || errors.As(err, &networkError) && networkError.Timeout() {
+		return "timeout"
+	}
+	return "probe_failed"
 }
