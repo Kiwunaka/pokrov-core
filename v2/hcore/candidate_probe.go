@@ -375,15 +375,20 @@ func candidateHTTPProbe(ctx context.Context, dial func(context.Context, string, 
 }
 
 func candidateProbeAt(ctx context.Context, dial func(context.Context, string, M.Socksaddr) (net.Conn, error), target candidateProbeTarget, reportStage func(string)) string {
-	if kind := candidateHTTPSGet(ctx, dial, target.host, target.probeURL, false, reportStage); kind != "" {
-		return kind
-	}
-	return candidateHTTPSGet(ctx, dial, target.host, target.payloadURL, true, reportStage)
+	return candidateHTTPSProbe(ctx, dial, target, &tls.Config{
+		ServerName: target.host,
+		MinVersion: tls.VersionTLS12,
+		// This callback runs after the default CA and hostname verification.
+		VerifyConnection: func(tls.ConnectionState) error {
+			reportStage("tls_certificate_verified")
+			return nil
+		},
+	}, reportStage)
 }
 
-func candidateHTTPSGet(ctx context.Context, dial func(context.Context, string, M.Socksaddr) (net.Conn, error), host, endpoint string, payload bool, reportStage func(string)) string {
+func candidateHTTPSProbe(ctx context.Context, dial func(context.Context, string, M.Socksaddr) (net.Conn, error), target candidateProbeTarget, tlsConfig *tls.Config, reportStage func(string)) string {
 	// Keep dial, TLS and HTTP synchronous so no transport worker outlives cancel.
-	conn, err := dial(ctx, "tcp", M.ParseSocksaddr(host+":443"))
+	conn, err := dial(ctx, "tcp", M.ParseSocksaddr(target.host+":443"))
 	if err != nil {
 		return "connect_failed"
 	}
@@ -401,26 +406,19 @@ func candidateHTTPSGet(ctx context.Context, dial func(context.Context, string, M
 	defer func() { close(closeStop); <-closeDone }()
 	reportStage("tls_handshake")
 	tracked := &candidateTLSConn{Conn: conn, reportStage: reportStage}
-	secured := tls.Client(tracked, &tls.Config{
-		ServerName: host,
-		MinVersion: tls.VersionTLS12,
-		// This callback runs after the default CA and hostname verification.
-		VerifyConnection: func(tls.ConnectionState) error {
-			reportStage("tls_certificate_verified")
-			return nil
-		},
-	})
+	secured := tls.Client(tracked, tlsConfig)
 	if err := secured.HandshakeContext(ctx); err != nil {
 		return "tls_failed"
 	}
 	tracked.reportStage = nil
 	reportStage("tls_complete")
-	if payload {
-		reportStage("http_64k")
-		return candidateGET64K(ctx, secured, endpoint)
-	}
+	reader := bufio.NewReader(secured)
 	reportStage("http_204")
-	return candidateGET204(ctx, secured, endpoint)
+	if kind := candidateGET204(ctx, secured, reader, target.probeURL); kind != "" {
+		return kind
+	}
+	reportStage("http_64k")
+	return candidateGET64K(ctx, secured, reader, target.payloadURL)
 }
 
 // Observe only synchronous TLS IO; Close and deadlines still belong to the
@@ -454,13 +452,12 @@ func (c *candidateTLSConn) Write(p []byte) (n int, err error) {
 	return
 }
 
-func candidateGET204(ctx context.Context, conn net.Conn, endpoint string) string {
+func candidateGET204(ctx context.Context, conn net.Conn, reader *bufio.Reader, endpoint string) string {
 	request, _ := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
-	request.Close = true
 	if err := request.Write(conn); err != nil {
 		return "probe_failed"
 	}
-	response, err := http.ReadResponse(bufio.NewReader(conn), request)
+	response, err := http.ReadResponse(reader, request)
 	if err != nil {
 		return "probe_failed"
 	}
@@ -471,13 +468,13 @@ func candidateGET204(ctx context.Context, conn net.Conn, endpoint string) string
 	return ""
 }
 
-func candidateGET64K(ctx context.Context, conn net.Conn, endpoint string) string {
+func candidateGET64K(ctx context.Context, conn net.Conn, reader *bufio.Reader, endpoint string) string {
 	request, _ := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	request.Close = true
 	if err := request.Write(conn); err != nil {
 		return "probe_failed"
 	}
-	response, err := http.ReadResponse(bufio.NewReader(conn), request)
+	response, err := http.ReadResponse(reader, request)
 	if err != nil {
 		return "probe_failed"
 	}

@@ -296,10 +296,18 @@ the client recognize the completed Smart Access failure and apply its existing
 scoped VPN recovery, matching Android. Caller cancellation, an outer probe
 deadline and late results retain their existing lifecycle outcomes.
 
-A provider DoH transport error retires that selected member for the remaining
-profile lifetime, then reevaluates the domain from the first rule. Subsequent DNS
-and TCP choose the same available standby or the scoped VPN/block fallback.
-Caller cancellation and valid negative DNS answers do not retire a member. In-flight
+If every current service grant has reached its new-flow deadline while the paired
+compiled DNS/TCP catalog windows remain current, the probe returns the closed typed
+outcome `Smart Access lease expired` for host VPN recovery. A revoked or closed
+lease, withdrawn/expired catalog, retired resolver, cancellation or replaced DNS
+transport does not acquire this expiry outcome. Desktop and gomobile retain the
+same fixed message through the existing probe APIs; no ABI symbol changes.
+
+A provider DoH transport error or DNS REFUSED retires that selected member for the
+remaining profile lifetime, then reevaluates the domain from the first rule. Both
+DNS Exchange and Lookup handle REFUSED; subsequent DNS and TCP choose the same
+available standby or the scoped VPN/block fallback. Caller cancellation and valid
+negative DNS answers such as NXDOMAIN do not retire a member. In-flight
 queries and already established connections keep their original owner.
 
 Selection affects subsequent DNS/connection evaluation, never moves/replays an
@@ -952,7 +960,10 @@ Server inbounds, panel state, provisioning, and traffic accounting remain outsid
 Ordinary candidate selection uses an isolated raw-profile Core instance with no
 inbounds, host routes, command server or persistent cache. The selected protected
 outbound requires an owned HTTPS 204 with the egress marker, then reads a full
-64 KiB response through the same outbound. If the API target fails, it tries the
+64 KiB response through the same outbound. Both requests share one verified TLS
+connection within that isolated probe; the connection closes after the payload
+or cancellation, and the next probe opens its own connection. If the API target
+fails, it tries the
 static `pokrov.space` target within the remaining deadline. A body that stalls
 after TLS returns `data_stalled`; an invalid status, marker or body length does
 not prove a network failure. Node-local targets require the later 443 front.

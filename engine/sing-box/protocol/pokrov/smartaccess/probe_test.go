@@ -241,7 +241,7 @@ func TestServiceReadinessRequiresOwnedDNSVerifiedTLSAndCurrentScope(t *testing.T
 		}
 	}
 	assertUnavailable("bare lease supplied readiness without catalog windows")
-	active := func() bool { return member.AdmitsNewFlows() }
+	active := func() bool { return true }
 	closeDNS := group.BindProbeWindow(member, true, transport, active, func(domain string) bool { return domain == "service.test" })
 	assertUnavailable("DNS window supplied readiness without TCP window")
 	closeRoute := group.BindProbeWindow(member, false, nil, active, func(domain string) bool { return domain == "service.test" })
@@ -289,4 +289,56 @@ func TestServiceReadinessRequiresOwnedDNSVerifiedTLSAndCurrentScope(t *testing.T
 	}
 	closeDNS()
 	closeRoute()
+}
+
+func TestServiceReadinessDistinguishesGrantExpiryFromWithdrawal(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	leaseID := "0123456789abcdef0123456789abcdef"
+	lease, err := newLeaseAuthorization(leaseID, now.Add(-2*time.Minute).Format(timeLayout),
+		now.Add(-time.Minute).Format(timeLayout), now.Add(time.Minute).Format(timeLayout))
+	if err != nil {
+		t.Fatal(err)
+	}
+	transport := &readinessTransport{tag: "pokrov-smart-access-dns-" + leaseID}
+	ctx := service.ContextWith[adapter.DNSTransportManager](context.Background(), &readinessTransports{transport: transport})
+	member := &Outbound{ctx: ctx, lease: lease, domains: []option.PokrovSmartAccessDomain{{Name: "service.test", Match: "exact"}}}
+	group, err := member.ServiceLeaseGroup("ai", []*Outbound{member})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var catalogCurrent atomic.Bool
+	catalogCurrent.Store(true)
+	closeDNS := group.BindProbeWindow(member, true, transport, catalogCurrent.Load, func(string) bool { return true })
+	defer closeDNS()
+	closeRoute := group.BindProbeWindow(member, false, nil, catalogCurrent.Load, func(string) bool { return true })
+	defer closeRoute()
+	probeExpiry := func() bool {
+		t.Helper()
+		delay, err := member.ProbeServiceReadiness(ctx)
+		var failure *urltest.ProbeError
+		return delay == 0 && errors.As(err, &failure) && failure.Stage == urltest.ProbeStageLeaseExpired &&
+			failure.Error() == "Smart Access lease expired"
+	}
+	if !probeExpiry() {
+		t.Fatal("expired grant lost its closed recovery outcome")
+	}
+	expired := member.lease
+	member.lease, err = newLeaseAuthorization(leaseID, now.Add(-time.Minute).Format(timeLayout),
+		now.Add(time.Minute).Format(timeLayout), now.Add(2*time.Minute).Format(timeLayout))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if probeExpiry() {
+		t.Fatal("current grant became an expiry outcome")
+	}
+	member.lease = expired
+	catalogCurrent.Store(false)
+	if probeExpiry() {
+		t.Fatal("withdrawn or expired catalog became grant expiry")
+	}
+	catalogCurrent.Store(true)
+	member.Revoke(false)
+	if probeExpiry() {
+		t.Fatal("revoked access became recoverable grant expiry")
+	}
 }

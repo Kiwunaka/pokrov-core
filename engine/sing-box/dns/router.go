@@ -1167,12 +1167,12 @@ func (r *Router) exchangeLegacy(ctx context.Context, exchangeCtx *dnsExchangeCon
 		}
 		responseCheck := addressLimitResponseCheck(rule, exchangeCtx.metadata)
 		response, err := r.client.Exchange(dnsCtx, transport, message, r.finalizeExchangeOptions(dnsOptions), responseCheck)
-		if err != nil && rule != nil && ruleIndex != -1 && ctx.Err() == nil {
-			if smartAccessDNSTransportFailed(err) && markSmartAccessDNSFailure(rule) {
+		if rule != nil && ruleIndex != -1 && ctx.Err() == nil {
+			if smartAccessDNSFailed(response, err) && markSmartAccessDNSFailure(rule) {
 				ruleIndex = -1
 				continue
 			}
-			if rule.BypassIfFailed() {
+			if err != nil && rule.BypassIfFailed() {
 				continue
 			}
 		}
@@ -1344,7 +1344,7 @@ func (r *Router) Lookup(ctx context.Context, domain string, options adapter.DNSQ
 			}
 			responseAddrs, err = r.client.Lookup(dnsCtx, transport, domain, dnsOptions, responseCheck)
 			if rule != nil && ruleIndex != -1 && ctx.Err() == nil {
-				if smartAccessDNSTransportFailed(err) && markSmartAccessDNSFailure(rule) {
+				if smartAccessDNSFailed(nil, err) && markSmartAccessDNSFailure(rule) {
 					ruleIndex = -1
 					continue
 				}
@@ -1803,12 +1803,18 @@ func markSmartAccessDNSFailure(rule adapter.DNSRule) bool {
 	return ok && marker.MarkPokrovSmartAccessDNSFailure()
 }
 
-func smartAccessDNSTransportFailed(err error) bool {
-	if err == nil || errors.Is(err, ErrResponseRejected) {
+func smartAccessDNSFailed(response *mDNS.Msg, err error) bool {
+	if err == nil {
+		return response != nil && response.Rcode == mDNS.RcodeRefused
+	}
+	if errors.Is(err, ErrResponseRejected) {
 		return false
 	}
 	var rcode RcodeError
-	return !errors.As(err, &rcode)
+	if errors.As(err, &rcode) {
+		return int(rcode) == mDNS.RcodeRefused
+	}
+	return true
 }
 
 func pokrovDNSFallbackRules(rules []option.DNSRule) bool {

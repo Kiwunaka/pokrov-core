@@ -33,6 +33,10 @@ func (h *Outbound) ProbeServiceReadiness(ctx context.Context) (uint16, error) {
 	}
 	member := group.Selected()
 	if member == nil {
+		if group.probeGrantsExpired(service.FromContext[adapter.DNSTransportManager](h.ctx)) &&
+			ctx.Err() == nil && h.ctx.Err() == nil {
+			return 0, &urltest.ProbeError{Stage: urltest.ProbeStageLeaseExpired, Err: errLease}
+		}
 		return 0, errLease
 	}
 	leaseID := member.LeaseID()

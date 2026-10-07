@@ -138,7 +138,7 @@ func (w *catalogRuleWindow) start() error {
 				}
 			}
 			w.probeAccess.Lock()
-			w.probeUnbind = group.BindProbeWindow(lease, w.probeDNS, transport, w.active, w.probeCurrent)
+			w.probeUnbind = group.BindProbeWindow(lease, w.probeDNS, transport, w.catalogCurrent, w.probeCurrent)
 			w.probeAccess.Unlock()
 		}
 	}
@@ -156,10 +156,11 @@ func (w *catalogRuleWindow) closeProbe() {
 }
 
 func (w *catalogRuleWindow) active() bool {
+	return w.catalogCurrent() && (w.leaseID == "" || (w.lease != nil && w.lease.AdmitsNewFlows()))
+}
+
+func (w *catalogRuleWindow) catalogCurrent() bool {
 	if w.expired.Load() {
-		return false
-	}
-	if w.leaseID != "" && (w.lease == nil || !w.lease.AdmitsNewFlows()) {
 		return false
 	}
 	now := time.Now()

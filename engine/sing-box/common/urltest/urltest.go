@@ -30,6 +30,7 @@ const (
 	ProbeStageTLS
 	ProbeStageResponse
 	ProbeStageDNS
+	ProbeStageLeaseExpired
 )
 
 // ProbeError retains the observed stage without exposing the target or the
@@ -49,6 +50,8 @@ func (e *ProbeError) Error() string {
 		return "URL probe response failed"
 	case ProbeStageDNS:
 		return "URL probe DNS resolution failed"
+	case ProbeStageLeaseExpired:
+		return "Smart Access lease expired"
 	default:
 		return "URL probe failed"
 	}

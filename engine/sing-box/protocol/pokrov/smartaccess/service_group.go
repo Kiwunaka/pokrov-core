@@ -1,6 +1,7 @@
 package smartaccess
 
 import (
+	"sort"
 	"sync"
 	"time"
 
@@ -29,7 +30,8 @@ type serviceProbeWindow struct {
 }
 
 // A scoped probe must retain both real compiled rule windows. Closing a rule
-// removes its binding; checking a member's lease alone cannot extend a catalog.
+// removes its binding; active checks only the catalog window, independently of
+// the member's lease. Checking that lease alone cannot extend a catalog.
 func (group *ServiceLeaseGroup) BindProbeWindow(member *Outbound, dns bool, transport adapter.DNSTransport, active func() bool, current func(string) bool) func() {
 	window := &serviceProbeWindow{member: member, dns: dns, transport: transport, active: active, current: current}
 	group.mu.Lock()
@@ -48,6 +50,7 @@ func (group *ServiceLeaseGroup) BindProbeWindow(member *Outbound, dns bool, tran
 }
 
 func (group *ServiceLeaseGroup) probeScope(member *Outbound, domain string, selected bool) (adapter.DNSTransport, bool) {
+	if !member.AdmitsNewFlows() { return nil, false }
 	if selected && group.Selected() != member { return nil, false }
 	group.mu.Lock()
 	windows := append([]*serviceProbeWindow(nil), group.probeWindows...)
@@ -59,6 +62,49 @@ func (group *ServiceLeaseGroup) probeScope(member *Outbound, domain string, sele
 		if window.dns { transport = window.transport } else { route = true }
 	}
 	return transport, route && transport != nil && (!selected || group.Selected() == member)
+}
+
+// Expiry is a recoverable grant outcome only while the actual compiled catalog
+// windows remain current. Revocation, withdrawn scope and resolver retirement
+// must keep their distinct authority/lifecycle outcome.
+func (group *ServiceLeaseGroup) probeGrantsExpired(manager adapter.DNSTransportManager) bool {
+	if manager == nil {
+		return false
+	}
+	group.mu.Lock()
+	defer group.mu.Unlock()
+	// Outbound tags are immutable and manager-unique; overlapping groups must
+	// lock their grants in the same order while renewal/revoke is excluded.
+	members := append([]*Outbound(nil), group.members...)
+	sort.Slice(members, func(i, j int) bool { return members[i].Tag() < members[j].Tag() })
+	for _, member := range members {
+		member.mu.Lock()
+		defer member.mu.Unlock()
+	}
+	now := time.Now()
+	for _, member := range group.members {
+		lease := member.lease
+		if member.closed || member.revoked || lease.revoked || group.dnsFailed[member] || now.Before(lease.issued) ||
+			(now.Before(lease.newUntil) && now.Before(lease.newDeadline)) {
+			return false
+		}
+		var dns, route bool
+		for _, window := range group.probeWindows {
+			if window.member != member || !window.active() {
+				continue
+			}
+			if !window.dns {
+				route = true
+			} else if window.transport != nil {
+				bound, ok := manager.Transport(window.transport.Tag())
+				dns = ok && bound == window.transport
+			}
+		}
+		if !dns || !route {
+			return false
+		}
+	}
+	return true
 }
 
 func (h *Outbound) ServiceLeaseGroup(serviceID string, members []*Outbound) (*ServiceLeaseGroup, error) {

@@ -3,10 +3,13 @@ package hcore
 import (
 	"bufio"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"sync/atomic"
@@ -48,7 +51,7 @@ func TestCandidateProbeGETRequires204AndMarker(t *testing.T) {
 				_, err = fmt.Fprintf(server, "HTTP/1.1 %d test\r\n%sContent-Length: 0\r\n\r\n", sample.status, marker)
 				done <- err
 			}()
-			kind := candidateGET204(context.Background(), client, candidateProbeURL)
+			kind := candidateGET204(context.Background(), client, bufio.NewReader(client), candidateProbeURL)
 			if (kind == "") != (sample.status == 204 && sample.marker) {
 				t.Fatalf("status %d, marker %t: %s", sample.status, sample.marker, kind)
 			}
@@ -79,7 +82,7 @@ func TestCandidateProbeGET64KReadsFullBody(t *testing.T) {
 		}
 		done <- err
 	}()
-	if kind := candidateGET64K(context.Background(), client, candidatePayloadURL); kind != "" {
+	if kind := candidateGET64K(context.Background(), client, bufio.NewReader(client), candidatePayloadURL); kind != "" {
 		t.Fatal(kind)
 	}
 	if err := <-done; err != nil {
@@ -103,7 +106,7 @@ func TestCandidateProbeGET64KShortBodyIsNotStall(t *testing.T) {
 		}
 		done <- err
 	}()
-	if kind := candidateGET64K(context.Background(), client, candidatePayloadURL); kind != "probe_failed" {
+	if kind := candidateGET64K(context.Background(), client, bufio.NewReader(client), candidatePayloadURL); kind != "probe_failed" {
 		t.Fatalf("short body: %s", kind)
 	}
 	if err := <-done; err != nil {
@@ -134,11 +137,65 @@ func TestCandidateProbeGET64KDetectsStallAfter16K(t *testing.T) {
 		done <- err
 	}()
 	go func() { <-ctx.Done(); _ = client.Close() }()
-	if kind := candidateGET64K(ctx, client, candidatePayloadURL); kind != "data_stalled" {
+	if kind := candidateGET64K(ctx, client, bufio.NewReader(client), candidatePayloadURL); kind != "data_stalled" {
 		t.Fatalf("body stall: %s", kind)
 	}
 	if err := <-done; err != nil && err != io.ErrClosedPipe {
 		t.Fatal(err)
+	}
+}
+
+func TestCandidateProbeReusesVerifiedTLSSessionAndClosesEachAttempt(t *testing.T) {
+	type observedRequest struct {
+		path  string
+		close bool
+	}
+	requests := make(chan observedRequest, 4)
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests <- observedRequest{r.URL.Path, r.Close}
+		w.Header().Set("X-Pokrov-Egress-Probe", candidateProbeMarker)
+		if r.URL.Path == "/probe" {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		w.Header().Set("Content-Length", fmt.Sprint(candidatePayloadBytes))
+		_, _ = io.WriteString(w, strings.Repeat("p", candidatePayloadBytes))
+	}))
+	defer server.Close()
+	roots := x509.NewCertPool()
+	roots.AddCert(server.Certificate())
+	target := candidateProbeTarget{"example.com", "https://example.com/probe", "https://example.com/payload"}
+	dials, handshakes := 0, 0
+	for attempt := 1; attempt <= 2; attempt++ {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		var connection net.Conn
+		kind := candidateHTTPSProbe(ctx, func(ctx context.Context, network string, destination M.Socksaddr) (net.Conn, error) {
+			dials++
+			var err error
+			connection, err = (&net.Dialer{}).DialContext(ctx, network, server.Listener.Addr().String())
+			return connection, err
+		}, target, &tls.Config{
+			ServerName: target.host,
+			MinVersion: tls.VersionTLS12,
+			RootCAs:    roots,
+			VerifyConnection: func(tls.ConnectionState) error {
+				handshakes++
+				return nil
+			},
+		}, func(string) {})
+		cancel()
+		if kind != "" {
+			t.Fatal(kind)
+		}
+		if dials != attempt || handshakes != attempt {
+			t.Fatalf("attempt %d: dials=%d handshakes=%d", attempt, dials, handshakes)
+		}
+		if first, second := <-requests, <-requests; first != (observedRequest{"/probe", false}) || second != (observedRequest{"/payload", true}) {
+			t.Fatalf("unexpected request session: %v %v", first, second)
+		}
+		if _, err := connection.Write([]byte{0}); err == nil {
+			t.Fatal("completed candidate retained its connection")
+		}
 	}
 }
 
