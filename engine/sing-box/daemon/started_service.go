@@ -736,7 +736,7 @@ func (s *StartedService) testSelectedEndpoint(boxService *Instance, endpoint ada
 
 	probeContext, cancelProbe := context.WithTimeout(boxService.ctx, C.TCPTimeout)
 	defer cancelProbe()
-	_, err := urltest.URLTest(probeContext, "", endpoint)
+	_, err := urltest.OwnedURLTest(probeContext, endpoint)
 	if err != nil {
 		s.writeSelectedEndpointProbeFailure(urlTestErrorCategory(err), err)
 		return false

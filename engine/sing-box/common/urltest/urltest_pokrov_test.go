@@ -116,7 +116,7 @@ func TestProtectedStartupSessionReads64KAndRetainsResponseFailures(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	template := &x509.Certificate{SerialNumber: big.NewInt(1), DNSNames: []string{"api.pokrov.space"},
+	template := &x509.Certificate{SerialNumber: big.NewInt(1), DNSNames: []string{"api.pokrov.space", "pokrov.space"},
 		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour),
 		KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}
 	der, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
@@ -129,28 +129,34 @@ func TestProtectedStartupSessionReads64KAndRetainsResponseFailures(t *testing.T)
 	}
 	roots := x509.NewCertPool()
 	roots.AddCert(certificate)
-	for _, mode := range []string{"full", "short16k", "stall16k"} {
+	for _, mode := range []string{"full", "reserveFull", "short16k", "stall16k", "lightReserve", "lightReserveMissingMarker"} {
 		t.Run(mode, func(t *testing.T) {
 			var sessions, requests atomic.Int32
 			server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				requests.Add(1)
-				if r.Method != http.MethodGet || r.Host != "api.pokrov.space" {
+				method := http.MethodGet
+				if strings.HasPrefix(mode, "light") {
+					method = http.MethodHead
+				}
+				if r.Method != method || (r.Host != "api.pokrov.space" && r.Host != "pokrov.space") {
 					t.Error("startup did not issue its owned GET")
 				}
-				w.Header().Set("X-Pokrov-Egress-Probe", ProtectedProbeMarker)
-				if r.URL.Path == "/api/public/authenticated-egress-probe" {
+				if mode != "lightReserveMissingMarker" {
+					w.Header().Set("X-Pokrov-Egress-Probe", ProtectedProbeMarker)
+				}
+				if r.URL.Path == "/api/public/authenticated-egress-probe" || r.URL.Path == "/.well-known/pokrov/egress-probe" {
 					if r.Close {
 						t.Error("204 closed the verified TLS session")
 					}
 					w.WriteHeader(http.StatusNoContent)
 					return
 				}
-				if r.URL.Path != "/api/public/egress-probe-64k" || !r.Close {
+				if (r.URL.Path != "/api/public/egress-probe-64k" && r.URL.Path != "/.well-known/pokrov/egress-probe-64k.bin") || !r.Close {
 					t.Error("startup payload request did not close its session")
 				}
 				w.Header().Set("Content-Length", "65536")
 				count := ProtectedPayloadBytes
-				if mode != "full" {
+				if mode == "short16k" || mode == "stall16k" {
 					count = 16 * 1024
 				}
 				_, _ = io.WriteString(w, strings.Repeat("p", count))
@@ -174,13 +180,28 @@ func TestProtectedStartupSessionReads64KAndRetainsResponseFailures(t *testing.T)
 			}
 			ctx, cancel := context.WithTimeout(ctx, timeout)
 			defer cancel()
-			delay, err := ProtectedURLTest(ctx, localProbeDialer{dial: func(ctx context.Context) (net.Conn, error) {
+			dialer := ownedProbeDialer{dial: func(ctx context.Context, destination M.Socksaddr) (net.Conn, error) {
+				if (mode == "reserveFull" || strings.HasPrefix(mode, "light")) && destination.Fqdn == "api.pokrov.space" {
+					return nil, errors.New("primary unavailable")
+				}
 				return (&net.Dialer{}).DialContext(ctx, "tcp", server.Listener.Addr().String())
-			}})
-			if sessions.Load() != 1 || requests.Load() != 2 {
+			}}
+			probe := ProtectedURLTest
+			if strings.HasPrefix(mode, "light") {
+				probe = OwnedURLTest
+			}
+			delay, err := probe(ctx, dialer)
+			wantSessions, wantRequests := int32(1), int32(2)
+			if mode == "short16k" || mode == "stall16k" {
+				wantSessions, wantRequests = 2, 4
+			}
+			if strings.HasPrefix(mode, "light") {
+				wantRequests = 1
+			}
+			if sessions.Load() != wantSessions || requests.Load() != wantRequests {
 				t.Fatal("GETs did not share one TLS session")
 			}
-			if mode == "full" {
+			if mode == "full" || mode == "reserveFull" || mode == "lightReserve" {
 				if err != nil || delay == 0 {
 					t.Fatalf("full proof failed: %v", err)
 				}
@@ -194,5 +215,52 @@ func TestProtectedStartupSessionReads64KAndRetainsResponseFailures(t *testing.T)
 				}
 			}
 		})
+	}
+}
+
+type ownedProbeDialer struct {
+	N.Dialer
+	dial func(context.Context, M.Socksaddr) (net.Conn, error)
+}
+
+func (d ownedProbeDialer) DialContext(ctx context.Context, _ string, destination M.Socksaddr) (net.Conn, error) {
+	return d.dial(ctx, destination)
+}
+
+func TestOwnedProbeFallbackKeepsBudgetAndCancellation(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	deadline, _ := ctx.Deadline()
+	var targets []string
+	err := ProbeOwnedTargets(ctx, func(probeCtx context.Context, target OwnedProbeTarget) error {
+		targets = append(targets, target.Host)
+		probeDeadline, _ := probeCtx.Deadline()
+		if target.Host == "api.pokrov.space" {
+			if remaining := time.Until(probeDeadline); remaining > 760*time.Millisecond {
+				t.Fatal("primary consumed reserve budget")
+			}
+		} else if probeDeadline != deadline {
+			t.Fatal("reserve received a new deadline")
+		}
+		return errors.New(target.Host)
+	})
+	if err == nil || len(targets) != 2 || targets[1] != "pokrov.space" {
+		t.Fatal("both-failed probe supplied proof")
+	}
+	for _, cancelAt := range []int{1, 2} {
+		ctx, cancel := context.WithCancel(context.Background())
+		calls := 0
+		err = ProbeOwnedTargets(ctx, func(_ context.Context, target OwnedProbeTarget) error {
+			calls++
+			if calls == cancelAt {
+				cancel()
+				return nil // A late successful transport cannot override cancellation.
+			}
+			return errors.New("primary unavailable")
+		})
+		cancel()
+		if !errors.Is(err, context.Canceled) || calls != cancelAt {
+			t.Fatal("cancelled caller supplied proof or opened another target")
+		}
 	}
 }

@@ -213,7 +213,7 @@ func urlTest(ctx context.Context, link string, detour N.Dialer, stage *atomic.Ui
 		return
 	}
 	link = resolveURLTestLink(link)
-	ownedEgressProbe := link == defaultURLTestLink
+	ownedEgressProbe := link == defaultURLTestLink || link == ProtectedReserveProbeURL
 	linkURL, err := url.Parse(link)
 	if err != nil {
 		return

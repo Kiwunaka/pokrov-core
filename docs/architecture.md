@@ -1000,6 +1000,12 @@ exchange: owned GET 204 and marker, then GET 200 with a full uncompressed 64 KiB
 body and marker in one verified TLS session. It retains the 15-second deadline
 and captured instance/leaf checks. Periodic 3-second liveness, latency URL tests,
 Smart Access service readiness and endpoint initialization remain separate.
+The existing owned static responder is also used after startup: candidate,
+startup and light liveness/endpoint checks share the primary/reserve deadline
+split (three quarters for primary, then the original remaining deadline).
+Startup requires a complete 204/64 KiB session on either target; light checks
+still require only 204 and the owned marker. General URLTest/latency selection
+does not acquire this retry, and no target, allowance or deadline is added.
 This Core outbound proof does not measure an OS-TUN browser transfer.
 
 The candidate result retains its last fixed stage and the monotonic

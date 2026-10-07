@@ -76,24 +76,25 @@ type unreadyProbeEndpoint struct{ adapter.Endpoint }
 
 type stalledTLSProbeEndpoint struct {
 	adapter.Endpoint
-	conn net.Conn
 }
 
 func (stalledTLSProbeEndpoint) IsReady() bool { return true }
 
-func (e stalledTLSProbeEndpoint) DialContext(context.Context, string, M.Socksaddr) (net.Conn, error) {
-	return e.conn, nil
+func (stalledTLSProbeEndpoint) DialContext(context.Context, string, M.Socksaddr) (net.Conn, error) {
+	client, server := net.Pipe()
+	go func() {
+		defer server.Close()
+		_, _ = io.Copy(io.Discard, server) // Each target receives ClientHello without replying.
+	}()
+	return client, nil
 }
 
 func TestSelectedEndpointDeadlineRetainsTLSStage(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
-	client, server := net.Pipe()
-	defer server.Close()
-	go io.Copy(io.Discard, server) // Receive ClientHello without replying.
 	s := NewStartedService(ServiceOptions{Context: ctx, LogMaxLines: 4})
 	defer s.Close()
-	if s.testSelectedEndpoint(&Instance{ctx: ctx}, stalledTLSProbeEndpoint{conn: client}) {
+	if s.testSelectedEndpoint(&Instance{ctx: ctx}, stalledTLSProbeEndpoint{}) {
 		t.Fatal("stalled TLS negotiation supplied egress proof")
 	}
 	entry := s.logLines.Back()

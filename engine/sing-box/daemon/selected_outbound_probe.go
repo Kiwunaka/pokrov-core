@@ -51,7 +51,7 @@ func (s *StartedService) ProbeRuntimeEgressResult(tag string, timeout time.Durat
 	healthy, err := probeRuntimeEgress(instance.ctx, timeout, interrupted, tag,
 		instance.instance.Outbound().Outbound,
 		func(ctx context.Context, outbound adapter.Outbound) (uint16, error) {
-			return urltest.URLTest(ctx, "", outbound)
+			return urltest.OwnedURLTest(ctx, outbound)
 		})
 	if !s.serviceAccess.TryRLock() {
 		return false, err

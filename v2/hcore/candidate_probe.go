@@ -24,12 +24,10 @@ import (
 )
 
 const (
-	candidateProbeURL        = urltest.ProtectedProbeURL
-	candidatePayloadURL      = urltest.ProtectedPayloadURL
-	candidateReserveProbeURL = "https://pokrov.space/.well-known/pokrov/egress-probe"
-	candidateReserveDataURL  = "https://pokrov.space/.well-known/pokrov/egress-probe-64k.bin"
-	candidateProbeMarker     = urltest.ProtectedProbeMarker
-	candidatePayloadBytes    = urltest.ProtectedPayloadBytes
+	candidateProbeURL     = urltest.ProtectedProbeURL
+	candidatePayloadURL   = urltest.ProtectedPayloadURL
+	candidateProbeMarker  = urltest.ProtectedProbeMarker
+	candidatePayloadBytes = urltest.ProtectedPayloadBytes
 )
 
 type candidateProbeTarget struct {
@@ -357,20 +355,15 @@ func candidateProtectedLeaf(tag string, lookup func(string) (adapter.Outbound, b
 }
 
 func candidateHTTPProbe(ctx context.Context, dial func(context.Context, string, M.Socksaddr) (net.Conn, error), reportStage func(string)) string {
-	primary := candidateProbeTarget{"api.pokrov.space", candidateProbeURL, candidatePayloadURL}
-	reserve := candidateProbeTarget{"pokrov.space", candidateReserveProbeURL, candidateReserveDataURL}
-	// Leave a quarter of the caller's deadline for the static responder.
-	primaryCtx := ctx
-	cancel := func() {}
-	if deadline, ok := ctx.Deadline(); ok {
-		primaryCtx, cancel = context.WithTimeout(ctx, time.Until(deadline)*3/4)
-	}
-	first := candidateProbeAt(primaryCtx, dial, primary, reportStage)
-	cancel()
-	if first == "" || ctx.Err() != nil {
-		return first
-	}
-	return candidateProbeAt(ctx, dial, reserve, reportStage)
+	var kind string
+	_ = urltest.ProbeOwnedTargets(ctx, func(ctx context.Context, target urltest.OwnedProbeTarget) error {
+		kind = candidateProbeAt(ctx, dial, candidateProbeTarget{target.Host, target.ProbeURL, target.PayloadURL}, reportStage)
+		if kind == "" {
+			return nil
+		}
+		return errors.New(kind)
+	})
+	return kind
 }
 
 func candidateProbeAt(ctx context.Context, dial func(context.Context, string, M.Socksaddr) (net.Conn, error), target candidateProbeTarget, reportStage func(string)) string {
