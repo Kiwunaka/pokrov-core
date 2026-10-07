@@ -3,6 +3,7 @@ package route
 import (
 	"context"
 	"net"
+	"strings"
 	"time"
 
 	"github.com/sagernet/sing-box/adapter"
@@ -13,6 +14,7 @@ import (
 	E "github.com/sagernet/sing/common/exceptions"
 	M "github.com/sagernet/sing/common/metadata"
 	N "github.com/sagernet/sing/common/network"
+	"github.com/sagernet/sing/service"
 
 	mDNS "github.com/miekg/dns"
 )
@@ -60,17 +62,39 @@ func (r *Router) HijackDNSPacket(ctx context.Context, payload []byte, writer N.P
 		r.logger.ErrorContext(ctx, E.Cause(err, "process DNS packet: unpack request"))
 		return
 	}
+	var trace adapter.OwnedDNSProbeTrace
+	if isOwnedDNSProbeQuestion(&message) {
+		trace = service.FromContext[adapter.OwnedDNSProbeTrace](ctx)
+		if trace != nil && !trace(ctx, adapter.OwnedDNSProbeReceive, nil) {
+			trace = nil
+		}
+	}
 	r.searchProcessInfo(ctx, &metadata)
 	destination := metadata.Destination
 	metadata.Destination = M.Socksaddr{}
 	r.dns.ExchangeAsync(adapter.WithContext(ctx, &metadata), &message, adapter.DNSQueryOptions{}, func(response *mDNS.Msg, exchangeErr error) {
+		if trace != nil {
+			trace(ctx, adapter.OwnedDNSProbeExchange, exchangeErr)
+		}
 		if exchangeErr == nil {
 			exchangeErr = r.writeDNSPacketResponse(&message, response, writer, destination)
+			if trace != nil {
+				trace(ctx, adapter.OwnedDNSProbeReply, exchangeErr)
+			}
 		}
 		if exchangeErr != nil && !R.IsRejected(exchangeErr) && !E.IsClosedOrCanceled(exchangeErr) {
 			r.logger.ErrorContext(ctx, E.Cause(exchangeErr, "process DNS packet"))
 		}
 	})
+}
+
+func isOwnedDNSProbeQuestion(message *mDNS.Msg) bool {
+	if message.Response || message.Opcode != mDNS.OpcodeQuery || len(message.Question) != 1 {
+		return false
+	}
+	question := message.Question[0]
+	return question.Qclass == mDNS.ClassINET && question.Qtype == mDNS.TypeA &&
+		(strings.EqualFold(question.Name, "api.pokrov.space.") || strings.EqualFold(question.Name, "pokrov.space."))
 }
 
 func (r *Router) writeDNSPacketResponse(message *mDNS.Msg, response *mDNS.Msg, writer N.PacketWriter, destination M.Socksaddr) error {

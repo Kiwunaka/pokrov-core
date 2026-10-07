@@ -194,9 +194,18 @@ Assert-SameSet -Label "Core event ABI error codes" -Actual @($eventContract.erro
   "TRANSPORT-007",
   "DNS-002"
 )
-if (@($eventContract.events).Count -ne 4 -or
-    (@($eventContract.events.name) -join ',') -ne
-      'core.runtime.initialize,core.runtime.start,core.runtime.stop,core.egress.probe') {
+$eventDefinitions = @($eventContract.events | ForEach-Object {
+  "$($_.name)/$($_.subsystem)/$($_.stage)/$($_.phase)"
+})
+if (($eventDefinitions -join ',') -ne (@(
+    'core.runtime.initialize/core/initialize/initialization',
+    'core.runtime.start/core/start/core_start',
+    'core.runtime.stop/core/stop/stop',
+    'core.egress.probe/egress/verify/egress',
+    'core.dns.probe/dns/receive/dns',
+    'core.dns.probe/dns/exchange/dns',
+    'core.dns.probe/dns/reply/dns'
+  ) -join ',')) {
   throw "Core event ABI event definitions changed without a contract decision."
 }
 

@@ -55,6 +55,9 @@ var (
 		Stage:     "verify",
 		Phase:     "egress",
 	}
+	DNSProbeReceive  = Definition{Name: "core.dns.probe", Subsystem: "dns", Stage: "receive", Phase: "dns"}
+	DNSProbeExchange = Definition{Name: "core.dns.probe", Subsystem: "dns", Stage: "exchange", Phase: "dns"}
+	DNSProbeReply    = Definition{Name: "core.dns.probe", Subsystem: "dns", Stage: "reply", Phase: "dns"}
 )
 
 type Event struct {

@@ -812,6 +812,19 @@ non-blocking. The callback arguments contain primitive safe fields only; raw
 Core log lines, configuration, destinations, URLs, credentials, and upstream
 error text are not part of the ABI.
 
+Windows additionally traces only the first eligible single IN/A question for
+the owned primary or reserve proof hostname in a Core generation. The fixed
+`core.dns.probe` stages are `receive`, `exchange`, and `reply`; failures carry
+only `DNS-002`. The question, DNS transaction ID, address and upstream error
+text are omitted. The captured run/attempt/generation must still match when
+an asynchronous completion emits, and cancelled runtime callbacks are ignored.
+The first-question latch resets only when the configured generation advances;
+later queries and native primary/reserve retries do not replace this trace.
+The Windows scalar `first_owned_dns_state` describes this first owned question,
+which can be background traffic, independently of the final native egress
+probe. A successful reply means the packet writer accepted the response; it
+does not prove Windows received it. Missing events remain unknown.
+
 The Android gomobile surface exposes the same event ABI through
 `OperationalEventHandler`, `SetOperationalEventHandler`, and
 `SetOperationalEventContext`. Windows uses the two C callback exports. Hosts

@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -16,13 +17,166 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Kiwunaka/POKROV-core/internal/observability"
 	coreconfig "github.com/Kiwunaka/POKROV-core/v2/config"
+	mDNS "github.com/miekg/dns"
 	box "github.com/sagernet/sing-box"
+	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/experimental/libbox"
+	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
+	"github.com/sagernet/sing-box/route"
+	"github.com/sagernet/sing/common/buf"
 	M "github.com/sagernet/sing/common/metadata"
+	"github.com/sagernet/sing/service"
 	"github.com/sagernet/sing/service/filemanager"
 )
+
+type ownedDNSProbeRouter struct {
+	adapter.DNSRouter
+	callbacks []func(*mDNS.Msg, error)
+	questions []*mDNS.Msg
+}
+
+func (r *ownedDNSProbeRouter) ExchangeAsync(_ context.Context, message *mDNS.Msg, _ adapter.DNSQueryOptions, callback func(*mDNS.Msg, error)) {
+	r.questions = append(r.questions, message.Copy())
+	r.callbacks = append(r.callbacks, callback)
+}
+
+type ownedDNSProbeWriter struct {
+	writes int
+	err    error
+}
+
+func (w *ownedDNSProbeWriter) WritePacket(buffer *buf.Buffer, _ M.Socksaddr) error {
+	defer buffer.Release()
+	w.writes++
+	return w.err
+}
+
+func ownedDNSProbeFixture(t *testing.T) (context.Context, context.CancelFunc, *route.Router, *ownedDNSProbeRouter, <-chan OperationalEvent) {
+	t.Helper()
+	previous := operationalEventEmitter
+	operationalEventEmitter = observability.NewEmitter(16)
+	t.Cleanup(func() { operationalEventEmitter = previous })
+	events := make(chan OperationalEvent, 16)
+	operationalEventEmitter.SetSink(func(event OperationalEvent) { events <- event })
+	if err := ConfigureOperationalEventContext("018f4f2a-6d58-4c11-8c27-4fb77bd28c15", "57ba1c00-f8a9-4b76-a3dc-d44a6d7cff33", 1); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(libbox.BaseContext(nil))
+	t.Cleanup(cancel)
+	ctx = service.ContextWith[adapter.OwnedDNSProbeTrace](ctx, newOwnedDNSProbeTrace())
+	dnsRouter := &ownedDNSProbeRouter{}
+	ctx = service.ContextWith[adapter.DNSRouter](ctx, dnsRouter)
+	factory, err := log.New(log.Options{Options: option.LogOptions{Disabled: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = factory.Close() })
+	return ctx, cancel, route.NewRouter(ctx, factory, option.RouteOptions{}, option.DNSOptions{}), dnsRouter, events
+}
+
+func sendOwnedDNSProbeQuestion(t *testing.T, ctx context.Context, router *route.Router, writer *ownedDNSProbeWriter, question *mDNS.Msg) {
+	t.Helper()
+	payload, err := question.Pack()
+	if err != nil {
+		t.Fatal(err)
+	}
+	router.HijackDNSPacket(ctx, payload, writer, adapter.InboundContext{})
+}
+
+func readOwnedDNSProbeEvent(t *testing.T, events <-chan OperationalEvent, stage string, outcome observability.Outcome) OperationalEvent {
+	t.Helper()
+	select {
+	case event := <-events:
+		if event.Name != "core.dns.probe" || event.Subsystem != "dns" || event.Phase != "dns" || event.Stage != stage || event.Outcome != outcome {
+			t.Fatal("unexpected owned DNS event tuple")
+		}
+		return event
+	case <-time.After(2 * time.Second):
+		t.Fatal("owned DNS event was not delivered")
+		return OperationalEvent{}
+	}
+}
+
+func TestOwnedDNSProbeKeepsFirstReplyWhenLaterQueryIsPending(t *testing.T) {
+	ctx, _, router, upstream, events := ownedDNSProbeFixture(t)
+	writer := &ownedDNSProbeWriter{}
+	for _, question := range []*mDNS.Msg{
+		new(mDNS.Msg).SetQuestion("api.pokrov.space.other.test.", mDNS.TypeA),
+		new(mDNS.Msg).SetQuestion("api.pokrov.space.", mDNS.TypeAAAA),
+	} {
+		sendOwnedDNSProbeQuestion(t, ctx, router, writer, question)
+	}
+	multiple := new(mDNS.Msg).SetQuestion("api.pokrov.space.", mDNS.TypeA)
+	multiple.Question = append(multiple.Question, mDNS.Question{Name: "pokrov.space.", Qclass: mDNS.ClassINET, Qtype: mDNS.TypeA})
+	sendOwnedDNSProbeQuestion(t, ctx, router, writer, multiple)
+	if operationalEventEmitter.Snapshot().Sequence != 0 {
+		t.Fatal("non-eligible question consumed the first owned trace")
+	}
+	question := new(mDNS.Msg).SetQuestion("API.POKROV.SPACE.", mDNS.TypeA)
+	sendOwnedDNSProbeQuestion(t, ctx, router, writer, question)
+	readOwnedDNSProbeEvent(t, events, "receive", observability.OutcomeStarted)
+	first := len(upstream.callbacks) - 1
+	upstream.callbacks[first](new(mDNS.Msg).SetReply(upstream.questions[first]), nil)
+	readOwnedDNSProbeEvent(t, events, "exchange", observability.OutcomeSucceeded)
+	readOwnedDNSProbeEvent(t, events, "reply", observability.OutcomeSucceeded)
+	if writer.writes != 1 {
+		t.Fatal("first DNS reply was not passed to the packet writer")
+	}
+	sendOwnedDNSProbeQuestion(t, ctx, router, writer, new(mDNS.Msg).SetQuestion("pokrov.space.", mDNS.TypeA))
+	if len(upstream.callbacks) != first+2 || operationalEventEmitter.Snapshot().Sequence != 3 {
+		t.Fatal("later pending owned query replaced the first trace or DNS processing")
+	}
+}
+
+func TestOwnedDNSProbeReportsOnlyClosedExchangeAndReplyFailures(t *testing.T) {
+	for _, failure := range []string{"exchange", "pack", "write"} {
+		t.Run(failure, func(t *testing.T) {
+			ctx, _, router, upstream, events := ownedDNSProbeFixture(t)
+			writer := &ownedDNSProbeWriter{}
+			question := new(mDNS.Msg).SetQuestion("pokrov.space.", mDNS.TypeA)
+			sendOwnedDNSProbeQuestion(t, ctx, router, writer, question)
+			readOwnedDNSProbeEvent(t, events, "receive", observability.OutcomeStarted)
+			response := new(mDNS.Msg).SetReply(question)
+			upstreamErr := error(nil)
+			privateErr := errors.New("synthetic private upstream detail")
+			switch failure {
+			case "exchange":
+				upstreamErr = privateErr
+			case "pack":
+				response.Answer = []mDNS.RR{&mDNS.A{Hdr: mDNS.RR_Header{Name: strings.Repeat("a", 64) + ".", Rrtype: mDNS.TypeA, Class: mDNS.ClassINET}, A: net.IPv4(192, 0, 2, 1).To4()}}
+			case "write":
+				writer.err = privateErr
+			}
+			upstream.callbacks[0](response, upstreamErr)
+			stage := "exchange"
+			if failure != "exchange" {
+				readOwnedDNSProbeEvent(t, events, "exchange", observability.OutcomeSucceeded)
+				stage = "reply"
+			}
+			event := readOwnedDNSProbeEvent(t, events, stage, observability.OutcomeFailed)
+			if event.ErrorCode != "DNS-002" || strings.Contains(fmt.Sprint(event), privateErr.Error()) {
+				t.Fatal("DNS failure lost its fixed code or exposed upstream details")
+			}
+			if failure != "write" && writer.writes != 0 {
+				t.Fatal("exchange/pack failure reached the packet writer")
+			}
+		})
+	}
+}
+
+func TestOwnedDNSProbeCancellationDoesNotBecomeExchangeFailure(t *testing.T) {
+	ctx, cancel, router, upstream, events := ownedDNSProbeFixture(t)
+	sendOwnedDNSProbeQuestion(t, ctx, router, &ownedDNSProbeWriter{}, new(mDNS.Msg).SetQuestion("api.pokrov.space.", mDNS.TypeA))
+	readOwnedDNSProbeEvent(t, events, "receive", observability.OutcomeStarted)
+	cancel()
+	upstream.callbacks[0](nil, context.DeadlineExceeded)
+	if operationalEventEmitter.Snapshot().Sequence != 1 {
+		t.Fatal("cancelled runtime completion became a current DNS failure")
+	}
+}
 
 func TestCandidateProbeGETRequires204AndMarker(t *testing.T) {
 	for _, sample := range []struct {

@@ -28,17 +28,18 @@ type Snapshot struct {
 }
 
 type Emitter struct {
-	lock       sync.RWMutex
-	sink       Sink
-	runID      string
-	attemptID  string
-	generation int64
-	sequence   int64
-	pending    chan Event
-	enqueued   atomic.Uint64
-	dropped    atomic.Uint64
-	delivered  atomic.Uint64
-	panics     atomic.Uint64
+	lock                  sync.RWMutex
+	sink                  Sink
+	runID                 string
+	attemptID             string
+	generation            int64
+	sequence              int64
+	firstOwnedDNSReceived bool
+	pending               chan Event
+	enqueued              atomic.Uint64
+	dropped               atomic.Uint64
+	delivered             atomic.Uint64
+	panics                atomic.Uint64
 }
 
 func NewEmitter(maximumPending int) *Emitter {
@@ -74,6 +75,7 @@ func (e *Emitter) Configure(runID string, attemptID string, generation int64) er
 	}
 	if generation > e.generation {
 		e.sequence = 0
+		e.firstOwnedDNSReceived = false
 	}
 	e.runID = runID
 	e.attemptID = attemptID
@@ -82,6 +84,29 @@ func (e *Emitter) Configure(runID string, attemptID string, generation int64) er
 }
 
 func (e *Emitter) Emit(definition Definition, outcome Outcome, errorCode string) bool {
+	return e.emit(definition, outcome, errorCode, nil)
+}
+
+type eventContext struct {
+	runID, attemptID string
+	generation       int64
+}
+
+// CaptureContext rejects asynchronous completions after their owner changes.
+func (e *Emitter) CaptureContext() func(Definition, Outcome, string) bool {
+	e.lock.RLock()
+	owner := eventContext{e.runID, e.attemptID, e.generation}
+	available := e.sink != nil && e.generation > 0
+	e.lock.RUnlock()
+	if !available {
+		return nil
+	}
+	return func(definition Definition, outcome Outcome, errorCode string) bool {
+		return e.emit(definition, outcome, errorCode, &owner)
+	}
+}
+
+func (e *Emitter) emit(definition Definition, outcome Outcome, errorCode string, owner *eventContext) bool {
 	severity, valid := validateEvent(definition, outcome, errorCode)
 	if !valid {
 		return false
@@ -91,6 +116,17 @@ func (e *Emitter) Emit(definition Definition, outcome Outcome, errorCode string)
 	if e.sink == nil || e.generation < 1 {
 		e.lock.Unlock()
 		return false
+	}
+	if owner != nil && (e.runID != owner.runID || e.attemptID != owner.attemptID || e.generation != owner.generation) {
+		e.lock.Unlock()
+		return false
+	}
+	if definition == DNSProbeReceive {
+		if e.firstOwnedDNSReceived {
+			e.lock.Unlock()
+			return false
+		}
+		e.firstOwnedDNSReceived = true
 	}
 	e.sequence++
 	event := Event{
@@ -158,7 +194,17 @@ func (e *Emitter) deliver() {
 
 func validateEvent(definition Definition, outcome Outcome, errorCode string) (Severity, bool) {
 	if definition != RuntimeInitialize && definition != RuntimeStart &&
-		definition != RuntimeStop && definition != EgressProbe {
+		definition != RuntimeStop && definition != EgressProbe &&
+		definition != DNSProbeReceive && definition != DNSProbeExchange && definition != DNSProbeReply {
+		return "", false
+	}
+	if definition == DNSProbeReceive && outcome != OutcomeStarted ||
+		(definition == DNSProbeExchange || definition == DNSProbeReply) &&
+			(outcome != OutcomeSucceeded && outcome != OutcomeFailed) {
+		return "", false
+	}
+	if (definition == DNSProbeExchange || definition == DNSProbeReply) &&
+		outcome == OutcomeFailed && errorCode != "DNS-002" {
 		return "", false
 	}
 	if outcome != OutcomeStarted && outcome != OutcomeSucceeded && outcome != OutcomeFailed {

@@ -43,6 +43,18 @@ type DNSQueryOptions struct {
 	RemoveClientSubnet     bool
 }
 
+type OwnedDNSProbeStage uint8
+
+const (
+	OwnedDNSProbeReceive OwnedDNSProbeStage = iota
+	OwnedDNSProbeExchange
+	OwnedDNSProbeReply
+)
+
+// OwnedDNSProbeTrace admits one request when its receive callback returns true.
+// It carries no question, address or DNS transaction identifier.
+type OwnedDNSProbeTrace func(context.Context, OwnedDNSProbeStage, error) bool
+
 type RDRCStore interface {
 	LoadRDRC(transportName string, qName string, qType uint16) (rejected bool)
 	SaveRDRC(transportName string, qName string, qType uint16) error

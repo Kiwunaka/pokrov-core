@@ -9,14 +9,21 @@ import (
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/common/trafficcontrol"
 	"github.com/sagernet/sing-box/common/urltest"
+	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/daemon"
 	"github.com/sagernet/sing-box/experimental/libbox"
 	"github.com/sagernet/sing-box/option"
+	"github.com/sagernet/sing/service"
 )
 
 func NewService(ctx context.Context, options option.Options) (*daemon.StartedService, error) {
 	if err := config.ValidateProxyInbounds(&options); err != nil {
 		return nil, err
+	}
+	if C.IsWindows {
+		if trace := newOwnedDNSProbeTrace(); trace != nil {
+			ctx = service.ContextWith[adapter.OwnedDNSProbeTrace](service.ExtendContext(ctx), trace)
+		}
 	}
 
 	// ctx = filemanager.WithDefault(ctx, sWorkingPath, sTempPath, sUserID, sGroupID)

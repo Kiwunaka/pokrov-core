@@ -45,6 +45,24 @@
       "subsystem": "egress",
       "stage": "verify",
       "phase": "egress"
+    },
+    {
+      "name": "core.dns.probe",
+      "subsystem": "dns",
+      "stage": "receive",
+      "phase": "dns"
+    },
+    {
+      "name": "core.dns.probe",
+      "subsystem": "dns",
+      "stage": "exchange",
+      "phase": "dns"
+    },
+    {
+      "name": "core.dns.probe",
+      "subsystem": "dns",
+      "stage": "reply",
+      "phase": "dns"
     }
   ],
   "severities": [
