@@ -290,6 +290,12 @@ transport details. The caller releases every string with `freeString` and owns
 the profile/generation fence. Missing older-library support fails closed for
 Smart Access without changing ordinary VPN verification.
 
+Desktop probe results retain the typed DNS/connect/TLS stage when an inner
+transport deadline completes while the outer probe remains current. This lets
+the client recognize the completed Smart Access failure and apply its existing
+scoped VPN recovery, matching Android. Caller cancellation, an outer probe
+deadline and late results retain their existing lifecycle outcomes.
+
 A provider DoH transport error retires that selected member for the remaining
 profile lifetime, then reevaluates the domain from the first rule. Subsequent DNS
 and TCP choose the same available standby or the scoped VPN/block fallback.
@@ -665,12 +671,13 @@ TUN ownership. AWG2 rejects every AWG 3.1-only field instead of silently
 upgrading a profile. On Android, the AWG endpoint requests platform protection
 only for its outer socket, so `VpnService.protect(fd)` can bypass recapture
 without enabling global interface auto-detection for ordinary transports. For
-an inner FQDN, the endpoint also honors the profile's
-`route.default_domain_resolver` and its strategy instead of silently falling
-back to the DNS graph's final transport. This keeps Android endpoint probes and
-ordinary dialers on the same explicit bootstrap-resolution contract without
-changing TLS verification or replacing the authenticated egress hostname with
-a pinned provider address.
+an inner FQDN, an explicit endpoint `domain_resolver` selects that resolver and
+its strategy, allowing managed AWG to use the profile's protected DNS transport.
+Without that field, the endpoint retains the profile's
+`route.default_domain_resolver` and its strategy, including the existing
+bootstrap behavior for DNS graphs with FakeIP. AWG peers remain IP literals;
+their outer socket and bootstrap handling are unchanged, as are TLS verification
+and the authenticated egress hostname.
 
 Cross-field validation also requires disjoint H1-H4 ranges. S1/S2/S3 plus
 their pinned handshake/cookie sizes, S4 plus MTU and the 32-byte transport

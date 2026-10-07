@@ -598,12 +598,12 @@ func protectedProbeResult(healthy bool, err error) *C.char {
 	if errors.Is(err, context.Canceled) {
 		return C.CString("context canceled")
 	}
-	if errors.Is(err, context.DeadlineExceeded) {
-		return C.CString("context deadline exceeded")
-	}
 	var probeError *urltest.ProbeError
 	if errors.As(err, &probeError) {
 		return C.CString(probeError.Error())
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return C.CString("context deadline exceeded")
 	}
 	return C.CString("selected route probe unavailable")
 }

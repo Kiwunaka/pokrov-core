@@ -84,7 +84,7 @@ func NewEndpoint(ctx context.Context, router adapter.Router, logger log.ContextL
 	if err != nil {
 		return nil, err
 	}
-	dnsQueryOptions, err := defaultDomainDNSQueryOptions(ctx)
+	dnsQueryOptions, err := defaultDomainDNSQueryOptions(ctx, options.DomainResolver)
 	if err != nil {
 		return nil, err
 	}
@@ -112,7 +112,10 @@ func NewEndpoint(ctx context.Context, router adapter.Router, logger log.ContextL
 	}, nil
 }
 
-func defaultDomainDNSQueryOptions(ctx context.Context) (adapter.DNSQueryOptions, error) {
+func defaultDomainDNSQueryOptions(ctx context.Context, resolver *option.DomainResolveOptions) (adapter.DNSQueryOptions, error) {
+	if resolver != nil && resolver.Server != "" {
+		return dialer.NewDNSQueryOptions(ctx, resolver, false)
+	}
 	networkManager := service.FromContext[adapter.NetworkManager](ctx)
 	if networkManager == nil {
 		return adapter.DNSQueryOptions{}, nil
