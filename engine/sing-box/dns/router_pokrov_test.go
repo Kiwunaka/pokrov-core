@@ -10,6 +10,7 @@ import (
 
 	mDNS "github.com/miekg/dns"
 	"github.com/sagernet/sing-box/adapter"
+	"github.com/sagernet/sing-box/common/urltest"
 	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
@@ -133,6 +134,20 @@ func TestPokrovSmartDNSRefusalRetiresDNSAndTLSSelection(t *testing.T) {
 			if !query() || matchesGateway() {
 				t.Fatal("REFUSED did not select VPN DNS and retire the matching TLS relay")
 			}
+			assertDNSFailure := func() {
+				t.Helper()
+				delay, probeErr := member.(*smartaccess.Outbound).ProbeServiceReadiness(ctx)
+				var failure *urltest.ProbeError
+				if delay != 0 || !errors.As(probeErr, &failure) || failure.Stage != urltest.ProbeStageDNS {
+					t.Fatal("actual DNS refusal became generic unavailable before host VPN recovery")
+				}
+			}
+			assertDNSFailure()
+			if ok, err := member.(*smartaccess.Outbound).RenewLease(leaseID, "1123456789abcdef0123456789abcdef", now.Format(time.RFC3339),
+				now.Add(2*time.Minute).Format(time.RFC3339), now.Add(3*time.Minute).Format(time.RFC3339), func(time.Time) error { return nil }); !ok || err != nil {
+				t.Fatal("same-provider grant renewal fixture failed")
+			}
+			assertDNSFailure()
 			smartCalls := smart.calls.Load()
 			if !query() || smart.calls.Load() != smartCalls {
 				t.Fatal("subsequent DNS retried the refused service provider")

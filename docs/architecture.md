@@ -310,6 +310,16 @@ available standby or the scoped VPN/block fallback. Caller cancellation and vali
 negative DNS answers such as NXDOMAIN do not retire a member. In-flight
 queries and already established connections keep their original owner.
 
+Actual selected-service DNS refusal and native ClientHello ECH rejection retain
+a fixed DNS/TLS probe failure on the current grant. Once no approved member is
+available, readiness reports that observed failure through the existing native
+probe mapping, so the host can apply its scoped VPN recovery. ECH still closes
+before a relay dial. A fresh verified generation does not inherit a previous
+TLS flow's failure; the same resolver's existing profile-wide retirement retains
+its DNS reason after renewal. Revoked/closed grants and invalid catalog or clock
+windows never become recoverable provider failures. Ordinary unavailable states
+remain distinct.
+
 Selection affects subsequent DNS/connection evaluation, never moves/replays an
 already admitted or failed connection, and does not cancel old DNS cache entries
 or in-flight queries. Each outbound remains separately addressable for renewal,

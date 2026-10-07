@@ -3,11 +3,13 @@ package smartaccess
 import (
 	"bytes"
 	"context"
+	"crypto/ecdh"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/binary"
 	"errors"
 	"io"
 	"math/big"
@@ -341,4 +343,80 @@ func TestServiceReadinessDistinguishesGrantExpiryFromWithdrawal(t *testing.T) {
 	if probeExpiry() {
 		t.Fatal("revoked access became recoverable grant expiry")
 	}
+}
+
+func TestActualECHFlowRetainsTypedTLSFailureForCurrentGrant(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	leaseID := "0123456789abcdef0123456789abcdef"
+	lease, err := newLeaseAuthorization(leaseID, now.Format(timeLayout),
+		now.Add(2*time.Minute).Format(timeLayout), now.Add(10*time.Minute).Format(timeLayout))
+	if err != nil {
+		t.Fatal(err)
+	}
+	transport := &readinessTransport{tag: "pokrov-smart-access-dns-" + leaseID}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	ctx = service.ContextWith[adapter.DNSTransportManager](ctx, &readinessTransports{transport: transport})
+	relay := &readinessDialer{}
+	member := &Outbound{ctx: ctx, lease: lease, leases: map[string]*leaseAuthorization{leaseID: lease}, dialer: relay,
+		domains: []option.PokrovSmartAccessDomain{{Name: "service.test", Match: "exact"}},
+		maxNew:  10, maxConcurrent: 2, flows: make(map[*leaseFlow]struct{})}
+	defer member.Close()
+	group, err := member.ServiceLeaseGroup("ai", []*Outbound{member})
+	if err != nil {
+		t.Fatal(err)
+	}
+	closeDNS := group.BindProbeWindow(member, true, transport, func() bool { return true }, func(string) bool { return true })
+	defer closeDNS()
+	closeRoute := group.BindProbeWindow(member, false, nil, func() bool { return true }, func(string) bool { return true })
+	defer closeRoute()
+	key, err := ecdh.X25519().GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Real ECH with an allowed outer name and an unapproved hidden inner name.
+	contents := []byte{0, 0, 0x20, 0, 32}
+	contents = append(contents, key.PublicKey().Bytes()...)
+	contents = append(contents, 0, 4, 0, 1, 0, 1, 0, byte(len("service.test")))
+	contents = append(contents, []byte("service.test")...)
+	contents = append(contents, 0, 0)
+	config := binary.BigEndian.AppendUint16(nil, 0xfe0d)
+	config = binary.BigEndian.AppendUint16(config, uint16(len(contents)))
+	config = append(config, contents...)
+	configList := binary.BigEndian.AppendUint16(nil, uint16(len(config)))
+	configList = append(configList, config...)
+	client, incoming := net.Pipe()
+	defer client.Close()
+	finished := make(chan error, 1)
+	go member.NewConnection(ctx, incoming, adapter.InboundContext{
+		Network: "tcp", Destination: M.Socksaddr{Fqdn: "service.test", Port: 443},
+	}, func(err error) { finished <- err })
+	tlsClient := tls.Client(client, &tls.Config{ServerName: "hidden.example", MinVersion: tls.VersionTLS13,
+		EncryptedClientHelloConfigList: configList})
+	if err = tlsClient.HandshakeContext(ctx); err == nil {
+		t.Fatal("ECH flow was admitted")
+	}
+	if err = <-finished; !errors.Is(err, errScope) || relay.calls != 0 || len(member.flows) != 0 {
+		t.Fatal("ECH reached a relay or retained its flow")
+	}
+	assertTLSFailure := func(want bool) {
+		t.Helper()
+		delay, err := member.ProbeServiceReadiness(ctx)
+		var failure *urltest.ProbeError
+		observed := delay == 0 && errors.As(err, &failure) && failure.Stage == urltest.ProbeStageTLS
+		if observed != want {
+			t.Fatal("real ECH rejection lost its current-grant probe boundary")
+		}
+	}
+	assertTLSFailure(true)
+	closeRoute()
+	assertTLSFailure(false)
+	closeRoute = group.BindProbeWindow(member, false, nil, func() bool { return true }, func(string) bool { return true })
+	defer closeRoute()
+	if ok, err := member.RenewLease(leaseID, "1123456789abcdef0123456789abcdef", now.Format(timeLayout),
+		now.Add(3*time.Minute).Format(timeLayout), now.Add(11*time.Minute).Format(timeLayout), func(time.Time) error { return nil }); !ok || err != nil {
+		t.Fatal("fresh verified grant could not replace failed generation")
+	}
+	member.recordProbeFailure(lease, urltest.ProbeStageTLS)
+	assertTLSFailure(false)
 }

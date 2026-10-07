@@ -33,9 +33,8 @@ func (h *Outbound) ProbeServiceReadiness(ctx context.Context) (uint16, error) {
 	}
 	member := group.Selected()
 	if member == nil {
-		if group.probeGrantsExpired(service.FromContext[adapter.DNSTransportManager](h.ctx)) &&
-			ctx.Err() == nil && h.ctx.Err() == nil {
-			return 0, &urltest.ProbeError{Stage: urltest.ProbeStageLeaseExpired, Err: errLease}
+		if err := group.probeUnavailableError(service.FromContext[adapter.DNSTransportManager](h.ctx)); err != nil && ctx.Err() == nil && h.ctx.Err() == nil {
+			return 0, err
 		}
 		return 0, errLease
 	}
@@ -53,8 +52,16 @@ func (h *Outbound) ProbeServiceReadiness(ctx context.Context) (uint16, error) {
 		return ctx.Err() == nil && h.ctx.Err() == nil && member.LeaseID() == leaseID &&
 			ok && bound == transport && scoped && active == transport
 	}
+	unavailable := func() error {
+		if ctx.Err() == nil && h.ctx.Err() == nil && member.LeaseID() == leaseID {
+			if err := group.probeUnavailableError(manager); err != nil {
+				return err
+			}
+		}
+		return errLease
+	}
 	if !current(true) {
-		return 0, errLease
+		return 0, unavailable()
 	}
 	started := time.Now()
 	addresses, err := resolver.Lookup(ctx, domain, adapter.DNSQueryOptions{
@@ -62,13 +69,13 @@ func (h *Outbound) ProbeServiceReadiness(ctx context.Context) (uint16, error) {
 		DisableCache: true, DisableOptimisticCache: true,
 	})
 	if !current(false) {
-		return 0, errLease
+		return 0, unavailable()
 	}
 	if err != nil {
 		return 0, &urltest.ProbeError{Stage: urltest.ProbeStageDNS, Err: err}
 	}
 	if !current(true) {
-		return 0, errLease
+		return 0, unavailable()
 	}
 	if len(addresses) == 0 {
 		return 0, &urltest.ProbeError{Stage: urltest.ProbeStageDNS, Err: errScope}
@@ -109,7 +116,7 @@ func (h *Outbound) ProbeServiceReadiness(ctx context.Context) (uint16, error) {
 		if ctx.Err() != nil {
 			return 0, context.Cause(ctx)
 		}
-		return 0, errLease
+		return 0, unavailable()
 	}
 	if observation.connectError != nil {
 		return 0, &urltest.ProbeError{Stage: urltest.ProbeStageConnect, Err: observation.connectError}
@@ -124,7 +131,7 @@ func (h *Outbound) ProbeServiceReadiness(ctx context.Context) (uint16, error) {
 		return 0, &urltest.ProbeError{Stage: urltest.ProbeStageTLS, Err: err}
 	}
 	if !current(true) {
-		return 0, errLease
+		return 0, unavailable()
 	}
 	delay := time.Since(started).Milliseconds()
 	if delay < 1 {

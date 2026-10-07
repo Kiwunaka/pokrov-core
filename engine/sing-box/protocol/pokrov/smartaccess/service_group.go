@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/sagernet/sing-box/adapter"
+	"github.com/sagernet/sing-box/common/urltest"
 	"github.com/sagernet/sing-box/option"
 )
 
@@ -64,12 +65,12 @@ func (group *ServiceLeaseGroup) probeScope(member *Outbound, domain string, sele
 	return transport, route && transport != nil && (!selected || group.Selected() == member)
 }
 
-// Expiry is a recoverable grant outcome only while the actual compiled catalog
-// windows remain current. Revocation, withdrawn scope and resolver retirement
-// must keep their distinct authority/lifecycle outcome.
-func (group *ServiceLeaseGroup) probeGrantsExpired(manager adapter.DNSTransportManager) bool {
+// Retain a real current-grant failure or admission expiry only while the actual
+// compiled catalog windows remain current. Missing authority is never converted
+// into provider failure or a recoverable grant expiry.
+func (group *ServiceLeaseGroup) probeUnavailableError(manager adapter.DNSTransportManager) error {
 	if manager == nil {
-		return false
+		return nil
 	}
 	group.mu.Lock()
 	defer group.mu.Unlock()
@@ -82,11 +83,24 @@ func (group *ServiceLeaseGroup) probeGrantsExpired(manager adapter.DNSTransportM
 		defer member.mu.Unlock()
 	}
 	now := time.Now()
+	var failure *urltest.ProbeError
 	for _, member := range group.members {
 		lease := member.lease
-		if member.closed || member.revoked || lease.revoked || group.dnsFailed[member] || now.Before(lease.issued) ||
-			(now.Before(lease.newUntil) && now.Before(lease.newDeadline)) {
-			return false
+		if member.closed || member.revoked || lease.revoked || now.Before(lease.issued) {
+			return nil
+		}
+		expired := !now.Before(lease.newUntil) || !now.Before(lease.newDeadline)
+		if expired {
+			if group.dnsFailed[member] { return nil }
+		} else {
+			if lease.admissionExpired || (lease.probeFailure == nil && !group.dnsFailed[member]) { return nil }
+			if failure == nil {
+				if group.dnsFailed[member] {
+					// The same resolver stays retired for this profile even when a
+					// signed renewal replaces only the grant identity/deadlines.
+					failure = &urltest.ProbeError{Stage: urltest.ProbeStageDNS, Err: errScope}
+				} else { failure = lease.probeFailure }
+			}
 		}
 		var dns, route bool
 		for _, window := range group.probeWindows {
@@ -101,10 +115,11 @@ func (group *ServiceLeaseGroup) probeGrantsExpired(manager adapter.DNSTransportM
 			}
 		}
 		if !dns || !route {
-			return false
+			return nil
 		}
 	}
-	return true
+	if failure != nil { return failure }
+	return &urltest.ProbeError{Stage: urltest.ProbeStageLeaseExpired, Err: errLease}
 }
 
 func (h *Outbound) ServiceLeaseGroup(serviceID string, members []*Outbound) (*ServiceLeaseGroup, error) {
@@ -147,6 +162,11 @@ func (group *ServiceLeaseGroup) Selected() *Outbound {
 func (group *ServiceLeaseGroup) DNSFailed(member *Outbound) {
 	group.mu.Lock()
 	defer group.mu.Unlock()
+	member.mu.Lock()
+	if member.admitsLocked(time.Now()) {
+		member.lease.probeFailure = &urltest.ProbeError{Stage: urltest.ProbeStageDNS, Err: errScope}
+	}
+	member.mu.Unlock()
 	if group.dnsFailed == nil { group.dnsFailed = make(map[*Outbound]bool) }
 	group.dnsFailed[member] = true
 	if group.selected >= 0 && group.members[group.selected] == member { group.selected = -1 }

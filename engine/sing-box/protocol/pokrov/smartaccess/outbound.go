@@ -14,6 +14,7 @@ import (
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/adapter/outbound"
 	"github.com/sagernet/sing-box/common/dialer"
+	"github.com/sagernet/sing-box/common/urltest"
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing/common/buf"
@@ -63,6 +64,7 @@ type leaseAuthorization struct {
 	issued, newUntil, activeUntil time.Time
 	newDeadline, activeDeadline time.Time
 	admissionExpired bool
+	probeFailure *urltest.ProbeError
 	revoked bool
 	terminateActive bool
 }
@@ -260,7 +262,17 @@ func (h *Outbound) admitsLeaseLocked(lease *leaseAuthorization, now time.Time) b
 	if now.Before(lease.issued) || !now.Before(lease.newUntil) || !now.Before(lease.newDeadline) {
 		lease.admissionExpired = true
 	}
-	return !h.closed && !h.revoked && !lease.revoked && !lease.admissionExpired
+	return !h.closed && !h.revoked && !lease.revoked && !lease.admissionExpired && lease.probeFailure == nil
+}
+
+// A real flow failure belongs only to the current, still-admitted generation.
+// Historical connections cannot retire a freshly verified replacement grant.
+func (h *Outbound) recordProbeFailure(lease *leaseAuthorization, stage urltest.ProbeStage) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.lease == lease && h.admitsLeaseLocked(lease, time.Now()) {
+		lease.probeFailure = &urltest.ProbeError{Stage: stage, Err: errScope}
+	}
 }
 
 func (h *Outbound) allows(name string) bool {
@@ -314,6 +326,9 @@ func (h *Outbound) newConnection(ctx context.Context, conn net.Conn, metadata ad
 	}
 	raw, serverName, err := readClientHello(flow)
 	if err != nil || !h.allows(serverName) {
+		if errors.Is(err, errECHUnsupported) {
+			h.recordProbeFailure(flow.authorization, urltest.ProbeStageTLS)
+		}
 		N.CloseOnHandshakeFailure(flow, finish, errScope)
 		return
 	}

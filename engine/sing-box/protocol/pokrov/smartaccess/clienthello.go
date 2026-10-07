@@ -9,6 +9,7 @@ import (
 )
 
 var errInvalidClientHello = errors.New("invalid TLS ClientHello")
+var errECHUnsupported = fmt.Errorf("%w: ech_unsupported", errInvalidClientHello)
 
 // Parser adapted from the platform owned-smart-dns ClientHello boundary.
 // Reads and replays the exact TLS records; never terminates or rewrites TLS.
@@ -104,7 +105,7 @@ func parseClientHelloSNI(handshake []byte) (string, error) {
 		// ECH hides the destination in ClientHelloInner; an allowed outer SNI
 		// cannot authorize this selective relay (including ECH GREASE).
 		if extensionType == 0xfe0d {
-			return "", errInvalidClientHello
+			return "", errECHUnsupported
 		}
 		if extensionType == 0 {
 			if serverName != "" || extensionLength < 5 {
