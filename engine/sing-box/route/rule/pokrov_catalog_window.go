@@ -131,7 +131,7 @@ func (w *catalogRuleWindow) start() error {
 		if w.probeCurrent != nil {
 			var transport adapter.DNSTransport
 			if w.probeDNS {
-				if w.dnsTransports != nil && w.probeServer == "pokrov-smart-access-dns-" + w.leaseID {
+				if w.dnsTransports != nil && w.probeServer == "pokrov-smart-access-dns-"+w.leaseID {
 					if bound, ok := w.dnsTransports.Transport(w.probeServer); ok && bound.Type() == C.DNSTypeHTTPS {
 						transport = bound
 					}
@@ -173,6 +173,17 @@ func (w *catalogRuleWindow) catalogCurrent() bool {
 
 func (w *catalogRuleWindow) selected() bool {
 	return w.leaseGroup == nil || w.leaseGroup.Selected() == w.lease
+}
+
+func (w *catalogRuleWindow) observeScopedBypass(metadata *adapter.InboundContext) {
+	if w.leaseGroup == nil || w.lease == nil {
+		return
+	}
+	domain := metadata.Domain
+	if domain == "" {
+		domain = metadata.Destination.Fqdn
+	}
+	w.leaseGroup.ObserveScopedRuleBypass(w.lease, domain)
 }
 
 func (w *catalogRuleWindow) smartAccessDNSFailed() bool {

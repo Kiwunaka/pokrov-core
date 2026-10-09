@@ -1,7 +1,9 @@
 package smartaccess
 
 import (
+	"context"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -20,6 +22,163 @@ type ServiceLeaseGroup struct {
 	evaluated bool
 	dnsFailed map[*Outbound]bool
 	probeWindows []*serviceProbeWindow
+	probeID uint64
+	readiness *serviceReadinessProbe
+	fallbackGuardClosed bool
+}
+
+type ServiceReadinessStage struct {
+	Stage        string `json:"stage"`
+	Result       string `json:"result"`
+	ObservedAtMS int64  `json:"observed_at_ms"`
+	DurationMS   int64  `json:"duration_ms"`
+	Reason       string `json:"reason,omitempty"`
+}
+
+type ServiceReadiness struct {
+	ProbeID             uint64                  `json:"probe_id"`
+	LeaseID             string                  `json:"lease_id"`
+	StartedAtMS         int64                   `json:"started_at_ms"`
+	CompletedAtMS       *int64                  `json:"completed_at_ms"`
+	Status              string                  `json:"status"`
+	Stages              []ServiceReadinessStage `json:"stages"`
+	FallbackGuardClosed bool                    `json:"fallback_guard_closed"`
+}
+
+type serviceReadinessProbe struct {
+	ServiceReadiness
+	member            *Outbound
+	ctx, ownerContext context.Context
+	transport         adapter.DNSTransport
+	manager           adapter.DNSTransportManager
+}
+
+// A new probe replaces every stage from the previous attempt. The closed guard
+// survives later probes until this compiled service group is replaced.
+func (group *ServiceLeaseGroup) beginReadiness(ctx, ownerContext context.Context) *serviceReadinessProbe {
+	group.mu.Lock()
+	defer group.mu.Unlock()
+	previous := group.readiness
+	if previous != nil && previous.member != nil && !group.readinessCurrentLocked(previous) {
+		group.closeReadinessLocked()
+	}
+	group.probeID++
+	probe := &serviceReadinessProbe{ServiceReadiness: ServiceReadiness{
+		ProbeID: group.probeID, StartedAtMS: time.Now().UnixMilli(), Status: "pending",
+		Stages: []ServiceReadinessStage{}, FallbackGuardClosed: group.fallbackGuardClosed,
+	}, ctx: ctx, ownerContext: ownerContext}
+	// Keep the guard bound while the new probe captures its current member.
+	// Stages and completion always belong only to this new probe.
+	if previous != nil {
+		probe.member, probe.LeaseID, probe.transport, probe.manager = previous.member, previous.LeaseID, previous.transport, previous.manager
+	}
+	group.readiness = probe
+	return probe
+}
+
+func (group *ServiceLeaseGroup) bindReadiness(probe *serviceReadinessProbe, member *Outbound, leaseID string, transport adapter.DNSTransport, manager adapter.DNSTransportManager) {
+	group.mu.Lock()
+	defer group.mu.Unlock()
+	if group.readiness != probe {
+		return
+	}
+	probe.member, probe.LeaseID, probe.transport, probe.manager = member, leaseID, transport, manager
+}
+
+// Unlike probeScope, this only peeks. Reading receipts never selects a provider
+// or extends catalog/lease authority.
+func (group *ServiceLeaseGroup) readinessCurrentLocked(probe *serviceReadinessProbe) bool {
+	if (probe.Status == "pending" && probe.ctx.Err() != nil) || probe.ownerContext.Err() != nil ||
+		probe.member == nil || group.selected < 0 || group.members[group.selected] != probe.member ||
+		probe.manager == nil || probe.transport == nil {
+		return false
+	}
+	probe.member.mu.Lock()
+	currentLease := probe.member.lease.id == probe.LeaseID && probe.member.admitsLocked(time.Now())
+	probe.member.mu.Unlock()
+	if !currentLease {
+		return false
+	}
+	bound, ok := probe.manager.Transport(probe.transport.Tag())
+	if !ok || bound != probe.transport {
+		return false
+	}
+	var dns, route bool
+	for _, window := range group.probeWindows {
+		if window.member != probe.member || !window.active() {
+			continue
+		}
+		if window.dns {
+			dns = dns || window.transport == probe.transport
+		} else {
+			route = true
+		}
+	}
+	return dns && route
+}
+
+func (group *ServiceLeaseGroup) closeReadinessLocked() {
+	if group.readiness == nil {
+		return
+	}
+	group.fallbackGuardClosed = true
+	probe := group.readiness
+	probe.FallbackGuardClosed = true
+	if probe.Status != "failure" {
+		observedAt := time.Now().UnixMilli()
+		probe.CompletedAtMS, probe.Status = &observedAt, "failure"
+	}
+}
+
+func (group *ServiceLeaseGroup) observeReadiness(probe *serviceReadinessProbe, stage string, observedAt time.Time, duration time.Duration, err error) {
+	group.mu.Lock()
+	defer group.mu.Unlock()
+	if group.readiness != probe {
+		return
+	}
+	if probe.ctx.Err() != nil || !group.readinessCurrentLocked(probe) {
+		group.closeReadinessLocked()
+		return
+	}
+	result := "pass"
+	if err != nil {
+		result = "failure"
+	}
+	probe.Stages = append(probe.Stages, ServiceReadinessStage{
+		Stage: stage, Result: result, ObservedAtMS: observedAt.UnixMilli(), DurationMS: duration.Milliseconds(),
+		Reason: urltest.ObservedFailure(err),
+	})
+	if err != nil {
+		group.closeReadinessLocked()
+	}
+}
+
+func (group *ServiceLeaseGroup) finishReadiness(probe *serviceReadinessProbe, err error) {
+	group.mu.Lock()
+	defer group.mu.Unlock()
+	if group.readiness != probe {
+		return
+	}
+	if err != nil || probe.ctx.Err() != nil || group.fallbackGuardClosed || !group.readinessCurrentLocked(probe) || len(probe.Stages) != 3 ||
+		probe.Stages[0].Stage != "resolver" || probe.Stages[1].Stage != "dns" || probe.Stages[2].Stage != "tls" ||
+		probe.Stages[0].Result != "pass" || probe.Stages[1].Result != "pass" || probe.Stages[2].Result != "pass" {
+		group.closeReadinessLocked()
+		return
+	}
+	completedAt := time.Now().UnixMilli()
+	probe.CompletedAtMS, probe.Status = &completedAt, "pass"
+}
+
+// A real rule walk skipped the captured provider for one of its service
+// domains. Close the QA guard even if normal routing later chooses that member
+// again. This does not change the rule result or record traffic contents.
+func (group *ServiceLeaseGroup) ObserveScopedRuleBypass(member *Outbound, domain string) {
+	group.mu.Lock()
+	defer group.mu.Unlock()
+	if group.readiness != nil && group.readiness.member == member &&
+		member.allows(strings.ToLower(strings.TrimSuffix(domain, "."))) {
+		group.closeReadinessLocked()
+	}
 }
 
 type serviceProbeWindow struct {
@@ -43,6 +202,7 @@ func (group *ServiceLeaseGroup) BindProbeWindow(member *Outbound, dns bool, tran
 		defer group.mu.Unlock()
 		for index, bound := range group.probeWindows {
 			if bound == window {
+				if group.readiness != nil && group.readiness.member == member { group.closeReadinessLocked() }
 				group.probeWindows = append(group.probeWindows[:index], group.probeWindows[index+1:]...)
 				return
 			}
@@ -148,6 +308,10 @@ func (group *ServiceLeaseGroup) Selected() *Outbound {
 	group.mu.Lock()
 	defer group.mu.Unlock()
 	group.evaluated = true
+	defer func() {
+		if probe := group.readiness; probe != nil && probe.member != nil &&
+			(group.selected < 0 || group.members[group.selected] != probe.member) { group.closeReadinessLocked() }
+	}()
 	if group.selected >= 0 && !group.dnsFailed[group.members[group.selected]] && group.members[group.selected].availableForNewFlows() { return group.members[group.selected] }
 	for index, member := range group.members {
 		if !group.dnsFailed[member] && member.availableForNewFlows() { group.selected = index; return member }
@@ -162,6 +326,7 @@ func (group *ServiceLeaseGroup) Selected() *Outbound {
 func (group *ServiceLeaseGroup) DNSFailed(member *Outbound) {
 	group.mu.Lock()
 	defer group.mu.Unlock()
+	if group.readiness != nil && group.readiness.member == member { group.closeReadinessLocked() }
 	member.mu.Lock()
 	if member.admitsLocked(time.Now()) {
 		member.lease.probeFailure = &urltest.ProbeError{Stage: urltest.ProbeStageDNS, Err: errScope}
@@ -178,6 +343,7 @@ type ServiceLeaseSelection struct {
 	SelectionIndex int `json:"selection_index"`
 	State string `json:"state"`
 	Available bool `json:"available"`
+	Readiness *ServiceReadiness `json:"readiness"`
 }
 
 // Only the anchor exports a row. Readback never selects another provider.
@@ -189,6 +355,18 @@ func (h *Outbound) ReadServiceLeaseSelection() *ServiceLeaseSelection {
 	group.mu.Lock()
 	defer group.mu.Unlock()
 	result := &ServiceLeaseSelection{ServiceID: group.serviceID, SelectionIndex: group.selected, State: "pending"}
+	if probe := group.readiness; probe != nil {
+		if probe.member != nil && !group.readinessCurrentLocked(probe) {
+			group.closeReadinessLocked()
+		}
+		snapshot := probe.ServiceReadiness
+		snapshot.Stages = append([]ServiceReadinessStage{}, probe.Stages...)
+		if probe.CompletedAtMS != nil {
+			completedAt := *probe.CompletedAtMS
+			snapshot.CompletedAtMS = &completedAt
+		}
+		result.Readiness = &snapshot
+	}
 	if group.selected < 0 {
 		result.State = "unavailable"
 		return result

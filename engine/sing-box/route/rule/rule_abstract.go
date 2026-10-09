@@ -85,13 +85,18 @@ func (r *abstractDefaultRule) Close() error {
 func (r *abstractDefaultRule) Match(metadata *adapter.InboundContext) bool {
 	// Lifetime is an admission gate, never a condition that invert can reverse.
 	if r.catalogWindow != nil && !r.catalogWindow.active() {
+		r.catalogWindow.observeScopedBypass(metadata)
 		return false
 	}
 	if len(r.allItems) == 0 {
 		return true
 	}
 	matched := r.matchInner(metadata)
+	if !matched && r.catalogWindow != nil {
+		r.catalogWindow.observeScopedBypass(metadata)
+	}
 	if matched && r.catalogWindow != nil && !r.catalogWindow.selected() {
+		r.catalogWindow.observeScopedBypass(metadata)
 		return false
 	}
 	if r.invert {

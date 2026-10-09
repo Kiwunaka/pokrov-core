@@ -212,15 +212,25 @@ func (t *HTTPSTransport) exchange(ctx context.Context, message *mDNS.Msg) (*mDNS
 	t.transportAccess.Lock()
 	currentTransport := t.transport
 	t.transportAccess.Unlock()
+	resolverStarted := time.Now()
 	response, err := currentTransport.RoundTrip(request)
 	requestBuffer.Release()
+	observe := func(err error) {
+		if t.destination.Scheme == "https" {
+			adapter.ObserveDNSReadiness(ctx, t, time.Now(), time.Since(resolverStarted), err)
+		}
+	}
 	if err != nil {
+		observe(err)
 		return nil, err
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		return nil, E.New("unexpected status: ", response.Status)
+		err = E.New("unexpected status: ", response.Status)
+		observe(err)
+		return nil, err
 	}
+	observe(nil)
 	var responseMessage mDNS.Msg
 	if response.ContentLength > 0 {
 		responseBuffer := buf.NewSize(int(response.ContentLength))

@@ -24,11 +24,16 @@ type serviceProbeState struct {
 // ProbeServiceReadiness tests only the current service's bound DoH and visible
 // SNI TLS relay. It neither proves an HTTP feature nor supplies a raw dialer.
 // The explicit DoH transport does not assert an ordinary DNS rule walk.
-func (h *Outbound) ProbeServiceReadiness(ctx context.Context) (uint16, error) {
+func (h *Outbound) ProbeServiceReadiness(ctx context.Context) (delayResult uint16, probeError error) {
 	h.mu.Lock()
 	group := h.serviceGroup
 	h.mu.Unlock()
-	if group == nil || ctx.Err() != nil || h.ctx.Err() != nil {
+	if group == nil {
+		return 0, errLease
+	}
+	probe := group.beginReadiness(ctx, h.ctx)
+	defer func() { group.finishReadiness(probe, probeError) }()
+	if ctx.Err() != nil || h.ctx.Err() != nil {
 		return 0, errLease
 	}
 	member := group.Selected()
@@ -43,6 +48,7 @@ func (h *Outbound) ProbeServiceReadiness(ctx context.Context) (uint16, error) {
 	transport, scoped := group.probeScope(member, domain, true)
 	manager := service.FromContext[adapter.DNSTransportManager](h.ctx)
 	resolver := service.FromContext[adapter.DNSRouter](h.ctx)
+	group.bindReadiness(probe, member, leaseID, transport, manager)
 	if !scoped || manager == nil || resolver == nil {
 		return 0, errScope
 	}
@@ -64,7 +70,13 @@ func (h *Outbound) ProbeServiceReadiness(ctx context.Context) (uint16, error) {
 		return 0, unavailable()
 	}
 	started := time.Now()
-	addresses, err := resolver.Lookup(ctx, domain, adapter.DNSQueryOptions{
+	dnsContext := adapter.ContextWithDNSReadinessObserver(ctx, func(observedTransport adapter.DNSTransport, observedAt time.Time, duration time.Duration, err error) {
+		if observedTransport != transport {
+			return
+		}
+		group.observeReadiness(probe, "resolver", observedAt, duration, err)
+	})
+	addresses, err := resolver.Lookup(dnsContext, domain, adapter.DNSQueryOptions{
 		Transport: transport, Strategy: C.DomainStrategyIPv4Only,
 		DisableCache: true, DisableOptimisticCache: true,
 	})
@@ -72,13 +84,17 @@ func (h *Outbound) ProbeServiceReadiness(ctx context.Context) (uint16, error) {
 		return 0, unavailable()
 	}
 	if err != nil {
-		return 0, &urltest.ProbeError{Stage: urltest.ProbeStageDNS, Err: err}
+		failure := &urltest.ProbeError{Stage: urltest.ProbeStageDNS, Err: err}
+		group.observeReadiness(probe, "dns", time.Now(), time.Since(started), failure)
+		return 0, failure
 	}
 	if !current(true) {
 		return 0, unavailable()
 	}
 	if len(addresses) == 0 {
-		return 0, &urltest.ProbeError{Stage: urltest.ProbeStageDNS, Err: errScope}
+		failure := &urltest.ProbeError{Stage: urltest.ProbeStageDNS, Err: errScope}
+		group.observeReadiness(probe, "dns", time.Now(), time.Since(started), failure)
+		return 0, failure
 	}
 	for _, address := range addresses {
 		owned := false
@@ -89,9 +105,12 @@ func (h *Outbound) ProbeServiceReadiness(ctx context.Context) (uint16, error) {
 			}
 		}
 		if !owned {
-			return 0, &urltest.ProbeError{Stage: urltest.ProbeStageDNS, Err: errScope}
+			failure := &urltest.ProbeError{Stage: urltest.ProbeStageDNS, Err: errScope}
+			group.observeReadiness(probe, "dns", time.Now(), time.Since(started), failure)
+			return 0, failure
 		}
 	}
+	group.observeReadiness(probe, "dns", time.Now(), time.Since(started), nil)
 	client, incoming := net.Pipe()
 	stopClose := context.AfterFunc(ctx, func() { _ = client.Close(); _ = incoming.Close() })
 	done := make(chan error, 1)
@@ -103,7 +122,9 @@ func (h *Outbound) ProbeServiceReadiness(ctx context.Context) (uint16, error) {
 		ServerName: domain, RootCAs: adapter.RootPoolFromContext(h.ctx),
 		Time: ntp.TimeFuncFromContext(h.ctx), MinVersion: tls.VersionTLS12,
 	})
+	tlsStarted := time.Now()
 	err = tlsClient.HandshakeContext(ctx)
+	tlsObservedAt, tlsDuration := time.Now(), time.Since(tlsStarted)
 	// Closing the raw pipe avoids an extra TLS close-notify budget. The actual
 	// relay flow and its connection workers settle before the observation read.
 	_ = client.Close()
@@ -119,9 +140,11 @@ func (h *Outbound) ProbeServiceReadiness(ctx context.Context) (uint16, error) {
 		return 0, unavailable()
 	}
 	if observation.connectError != nil {
+		group.observeReadiness(probe, "tls", tlsObservedAt, tlsDuration, &urltest.ProbeError{Stage: urltest.ProbeStageConnect, Err: observation.connectError})
 		return 0, &urltest.ProbeError{Stage: urltest.ProbeStageConnect, Err: observation.connectError}
 	}
 	if err != nil {
+		group.observeReadiness(probe, "tls", tlsObservedAt, tlsDuration, &urltest.ProbeError{Stage: urltest.ProbeStageTLS, Err: err})
 		if !observation.connected {
 			if flowError != nil {
 				return 0, flowError
@@ -133,6 +156,7 @@ func (h *Outbound) ProbeServiceReadiness(ctx context.Context) (uint16, error) {
 	if !current(true) {
 		return 0, unavailable()
 	}
+	group.observeReadiness(probe, "tls", tlsObservedAt, tlsDuration, nil)
 	delay := time.Since(started).Milliseconds()
 	if delay < 1 {
 		delay = 1

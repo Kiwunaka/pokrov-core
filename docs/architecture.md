@@ -550,6 +550,15 @@ the last selection found none (empty lease ID, index -1, available=false), not
 proof that VPN fallback or a service request succeeded. Group selection occurs
 after domain/port/family matching, so unrelated traffic cannot create an observation.
 Readback peeks without choosing another provider or probing. IDs include standbys.
+Each row now has nullable `readiness`: a fresh probe ID, captured lease ID, actual
+resolver/DNS/TLS stage times and results, completion status, and a conservative
+`fallback_guard_closed` flag; unobserved stages stay absent and the host joins
+receipts to its verified grant and exact running profile. New probes replace
+all old stages, while lease/member/catalog/context loss or a scoped service rule
+bypass closes the guard for the remaining compiled group lifetime. Completed
+probe timeout cleanup preserves observations, but only three current completed
+stage passes with an open guard can accompany the separate browser feature
+proof; Core does not prove a feature request or count fallback traffic.
 This unreleased object replaces the earlier source-only array; no built artifact
 compatibility is claimed. Android/Windows/Dart use the same 64 KiB response bound.
 

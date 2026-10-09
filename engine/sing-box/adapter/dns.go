@@ -55,6 +55,22 @@ const (
 // It carries no question, address or DNS transaction identifier.
 type OwnedDNSProbeTrace func(context.Context, OwnedDNSProbeStage, error) bool
 
+// DNSReadinessObserver is attached only to an uncached service readiness
+// lookup. It observes the HTTPS response boundary without DNS payloads.
+type DNSReadinessObserver func(DNSTransport, time.Time, time.Duration, error)
+
+type dnsReadinessObserverKey struct{}
+
+func ContextWithDNSReadinessObserver(ctx context.Context, observer DNSReadinessObserver) context.Context {
+	return context.WithValue(ctx, dnsReadinessObserverKey{}, observer)
+}
+
+func ObserveDNSReadiness(ctx context.Context, transport DNSTransport, observedAt time.Time, duration time.Duration, err error) {
+	if observer, ok := ctx.Value(dnsReadinessObserverKey{}).(DNSReadinessObserver); ok {
+		observer(transport, observedAt, duration, err)
+	}
+}
+
 type RDRCStore interface {
 	LoadRDRC(transportName string, qName string, qType uint16) (rejected bool)
 	SaveRDRC(transportName string, qName string, qType uint16) error
