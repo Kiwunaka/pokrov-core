@@ -31,6 +31,7 @@ const smartAccessRuntimeControlInterval = 30 * time.Second
 
 var smartAccessRuntimeDigest = regexp.MustCompile(`^[a-f0-9]{64}$`)
 var smartAccessRuntimeCapability = regexp.MustCompile(`^pkr_src1\.[A-Za-z0-9_-]+\.[a-f0-9]{64}$`)
+var smartAccessFirstProviderQACapability = regexp.MustCompile(`^saqa1\.[A-Za-z0-9_-]+\.[a-f0-9]{64}$`)
 
 // This command is supplied by the authenticated native host, never from a
 // profile or downloaded policy. The host fences the exact running profile and
@@ -111,7 +112,9 @@ func parseSmartAccessRuntimeControl(raw string, now time.Time) (*smartAccessRunt
 		(config.Platform != "android" && config.Platform != "windows") ||
 		(config.Audience != "lab" && config.Audience != "production") ||
 		!routingCatalogServiceID.MatchString(config.DNSResolver) ||
-		len(config.Capability) > 4096 || !smartAccessRuntimeCapability.MatchString(config.Capability) { return nil, invalid }
+		len(config.Capability) > 4096 ||
+		(!smartAccessRuntimeCapability.MatchString(config.Capability) &&
+			!(config.Platform == "windows" && smartAccessFirstProviderQACapability.MatchString(config.Capability))) { return nil, invalid }
 	base, err := url.Parse(config.APIBaseURL)
 	if err != nil || base.Scheme != "https" || base.Hostname() == "" || base.User != nil ||
 		base.RawQuery != "" || base.ForceQuery || base.Fragment != "" || base.RawFragment != "" ||

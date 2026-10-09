@@ -451,6 +451,11 @@ The exact eleven-field JSON object uses schema
 `api_base_url`, `dns_resolver`, `capability`, `issued_at`, `expires_at` and
 `lease_keys_by_id`. The host forwards its local public lease pins and a backend
 restriction-only delegation; it supplies no account access/refresh token.
+Windows first-provider QA uses a distinct bounded `saqa1.` capability; ordinary
+`pkr_src1.` capabilities retain their existing Android/Windows scope. The shared
+runtime-control endpoint dispatches QA authority on the backend, while Core
+retains the same host-supplied lease pins, signed response, nonce/token/profile
+binding, HTTPS origin and expiry checks.
 Config/response bodies are bounded to 16 KiB, capabilities to 4096 bytes. The
 worker makes one POST to `/api/client/smart-access/runtime-control`, optionally
 performs one due renewal after a fresh signed `current` decision, then waits
