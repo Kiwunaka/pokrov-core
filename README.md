@@ -14,7 +14,7 @@ The repository contains:
 - WARP/WireGuard support;
 - disabled-by-default, typed AWG2 and AWG 3.1 owner-lab endpoints behind
   separate digest-bound contracts;
-- reproducible build and verification scripts.
+- build and test scripts.
 
 The server remains a separate Xray-based system. This repository builds client outbounds only.
 
@@ -79,23 +79,10 @@ Tests:
 
 Artifacts are written under `dist/` and are not committed.
 
-## Release CI and evidence ceiling
+## CI
 
-The release workflow runs the complete Go module tests plus focused vet, race,
-reachable-vulnerability, bounded Staticcheck and parser-fuzz gates on Linux. It
-also generates deterministic CycloneDX source SBOMs, then builds Android,
-Windows and Apple outputs twice in separate jobs. Android verifies all four
-required ABIs; Windows verifies the desktop export contract and runs the active
-client's 100-cycle proxy backtest.
-
-`scripts/new-release-artifact-evidence.ps1` rejects dirty source and differing
-build trees and records source, contract, SBOM and artifact hashes. CI retains
-only bounded build evidence JSON and source SBOMs; it does not
-upload release binaries, sign, attest, tag, publish or promote them. A passing
-workflow is source/build proof for that revision, not physical-device, signed
-candidate, public-release or RU-origin proof. CycloneDX license detection is
-advisory: unresolved license warnings must remain visible and require separate
-license/notice review before release approval.
+CI runs `scripts/test.ps1` on Linux. It does not build, sign or publish
+libraries; release builds are made locally with the scripts above.
 
 ## Layout
 
@@ -104,10 +91,10 @@ license/notice review before release approval.
 - `engine/sing-box/` — embedded transport engine.
 - `ray2sing/` — profile-to-sing-box conversion.
 - `config/awg2-capability.json`, `config/awg31-capability.json`, and
-  `config/hy2-capability.json` — pinned AWG/Hysteria2 lab schemas, official
-  dependencies, build tags and evidence ceilings.
+  `config/hy2-capability.json` — AWG/Hysteria2 capability schemas read by the
+  portal.
 - `third_party/warp-plus/` — pinned WARP helper.
-- `scripts/` — deterministic builds and focused checks.
+- `scripts/` — builds and tests.
 - `docs/` — architecture and release policy.
 
 ## Versioning

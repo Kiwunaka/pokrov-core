@@ -91,67 +91,11 @@ integrity check without Flutter. This prerelease does not
 change app `1.4.0`'s Core `1.1.2` pin or latest stable; these checks do not assert
 localDPI, Windows TUN or Apple acceptance.
 
-For the REALITY version gate, build the current `engine/sing-box` CLI with
-`with_utls` and run `scripts/test-reality-xray-matrix.py` with each official
-Xray binary via repeated `--xray` arguments. It creates loopback VLESS/REALITY
-servers with disposable credentials and requires HTTPS 204 through the client.
-`--url` and `--check-pokrov-marker` exercise the owned authenticated-egress
-endpoint. If the local resolver supplies a fake or reserved address, pass the
-verified public destination via `--egress-ip`; `--server-ip` separately pins the
-REALITY handshake destination while `--server-name` retains its SNI. These apply
-only to the local fixture. Use `--transport xhttp` for native REALITY-XHTTP
-`stream-one` over HTTP/2 with an empty VLESS flow. This check does not replace
-production-node or installed-app checks.
-
-`scripts/test.ps1` also checks `config/abi-contract.json` against
-`config/release.json`, every desktop `//export` declaration and the exact
-capability descriptor embedded in the library. Adding, removing or renaming an
-export or event identifier requires an explicit compatibility decision; it
-cannot be hidden in an artifact rebuild.
-
-The same gate verifies both AWG machine owners and schemas, the exact official
-`amneziawg-go/v3 v3.1.20260814` module sum and MIT notice, both release build
-tags, typed endpoint tests and the fail-closed legacy-converter tests. Passing
-these checks proves source and build-command consistency only. AWG2 remains
-`prototype_disabled_by_default` and AWG 3.1 remains
-`lab_disabled_by_default`; exact AAR/DLL and owned-server interop,
-physical-device behavior, battery/thermal measurements and mobile/RU-origin
-results require retained evidence for the exact candidate and cannot be
-inferred from this gate.
-
-The operator-only `TestOwnedAWGLabAuthenticatedEgress` exercises client MTU
-1280, 1400 and 1408 sequentially against the supplied owned endpoint. Each
-case validates the pinned contract and completes TLS plus the authenticated
-HTTP egress marker using a request with 4096 bytes of inert header padding.
-It records only MTU, outer packet counts/maxima and elapsed milliseconds. This
-is client-MTU interop evidence, not a change to server MTU, a sustained-throughput
-benchmark, a whole-device routing proof or a preset recommendation. Missing
-endpoint material still skips this operator gate; local unit tests do not
-replace the three live results.
-
-On Linux, the operator-only `TestOwnedAWGPresetBenchmark` compares the AWG3.1
-control Jc 6 with client Jc 1 and 12 at MTU 1280. The supplied owned fixture
-serves 5 MiB of synthetic data paced at 2 Mibit/s, then echoes 100 bounded UDP
-datagrams. The test records process CPU during the stream, TCP/verified-egress
-readiness, UDP loss/duplicates, server TCP retransmissions and outer UDP payload
-counts/bytes. TCP readiness includes AWG startup; it is not an isolated
-cryptographic-handshake measurement. The byte counts exclude outer IP/UDP
-headers, and the paced stream is not maximum throughput. Battery is explicitly
-unmeasured. This fixture gate skips without operator-supplied material; it does
-not run on ordinary connects or change the managed preset. Compare repeated
-results within each origin and retain fixture cleanup evidence before making a
-preset decision.
-
-The same test records the monotonic interval from the safe initiation event
-(before message construction) to the safe authenticated Noise response event.
-This includes network and packet processing and ends before symmetric-session
-derivation; subsequent verified HTTPS proves usable session establishment.
-It is not isolated cryptographic CPU time. Diagnostic occurrence counts are
-capped at four per category. Operator input `handshake_only=true` runs just
-that handshake/TCP/HTTPS measurement without the synthetic stream or UDP echo;
-it requires no private fixture port and supplies no new CPU, loss or battery
-evidence. This instrumentation is test-only and does not change runtime logging
-or ordinary connection behavior.
+`scripts/test.ps1` checks the desktop `//export` declarations, ABI version and
+capability descriptor against `config/abi-contract.json`, runs gofmt, the root
+module tests and focused engine tests (AWG, REALITY/uTLS, XHTTP, Hysteria2
+reload, DNS, selector groups, daemon and libbox). It takes about 30 seconds with
+a warm build cache. CI runs the same script on Linux and builds no artifacts.
 
 Both module graphs pin Psiphon uTLS to
 `v1.1.1-0.20260729134728-7a1fc711853d`, the upstream
@@ -168,43 +112,9 @@ adapter does. Full Core validation and newly bound product binaries/notices are
 still required before release; older binaries continue to retain their original
 dependency and licensing evidence.
 
-Core CI runs the complete root-module test graph, focused `go vet`, race and
-pinned `govulncheck v1.7.0` reachable-code scans for supported runtime packages
-and the Android event bridge. Pinned Staticcheck `v0.7.0` runs the `SA2*`,
-`SA5*` and `SA6*` correctness/security families over the release-owned package
-surface. This bounded set is deliberate: wider inherited style, deprecation and
-dead-code cleanup is not a 1.2.0 release gate. The config/profile parser also
-runs a 30-second no-panic fuzz target.
-
-The same workflow generates deterministic CycloneDX `v1.10.0` source SBOMs for
-the root and embedded sing-box modules. Automatic license detection may emit
-warnings for local forks, the Go standard library or dependencies whose module
-metadata does not expose a license. A successful SBOM command proves inventory
-generation, not complete legal clearance; warnings and the maintained notices
-remain inputs to the separate release license review.
-
-Three platform jobs build from a clean revision twice and require byte-identical
-file trees before writing bounded provenance:
-
-- Ubuntu builds the Android AAR and verifies `armeabi-v7a`, `arm64-v8a`, `x86`
-  and `x86_64`;
-- Windows uses pinned MinGW-w64, verifies every desktop export and runs the
-  active client's current-source 100-cycle proxy backtest;
-- macOS builds and compares the Apple XCFramework as source-build evidence,
-  suppresses random Mach-O UUID/archive timestamps and logs bounded plist/UUID
-  diagnostics before the byte comparison.
-
-`scripts/new-release-artifact-evidence.ps1` records source, release-contract,
-SBOM and artifact hashes and rejects dirty source or mismatched build trees.
-The jobs upload only SBOM/evidence JSON with `candidate_proven=false`; they do
-not publish binaries, sign, attest, tag or
-promote a release. Hosted workflow results, exact-candidate reproduction,
-physical-device proof and public/RU-origin evidence remain separate gates.
-
 `scripts/build-windows.ps1` inspects the completed DLL with the MinGW toolchain
-and fails when any contract export is absent. These gates do not claim signing
-or candidate evidence until the exact candidate artifact is actually executed
-and retained.
+and fails when any contract export is absent; `scripts/build-android.ps1` fails
+when an Android ABI is missing.
 
 Post-`1.0.3` working source requires Go `1.26.8` and the remediated dependency
 floor recorded in both Go modules: gRPC `1.83.2`, CIRCL `1.6.3`,
@@ -250,12 +160,6 @@ corresponding gomobile handler/context methods in the Android AAR. A successful
 source test or development AAR build does not replace exact candidate hashes,
 reproducibility, signing, client manifest synchronization, or retained build
 evidence.
-
-Every Core pull request and push to `main` also runs the cross-repository
-release contract against the active client `main` and platform `master`. That
-job must fail when client/Core identity or the strict release-handoff v2
-contract diverges. It creates no candidate artifact and does not replace the
-reproducible-build, signing, device, tag, or publish steps above.
 
 Release `1.0.0` has reproducible local Android and Windows builds. Their exact sizes and SHA-256 values are retained in `config/release.json`. Host integration and the Windows 100-cycle test must use those exact artifacts; Apple remains `MANUAL_OWNER_TEST`.
 
