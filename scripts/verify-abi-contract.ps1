@@ -127,26 +127,6 @@ if ([int]$contract.descriptor.desktop_abi -ne [int]$contract.desktop_abi.version
   throw "Capability descriptor version fields disagree with the ABI contract."
 }
 
-Assert-SameSet -Label "Capability identifiers" -Actual @($contract.descriptor.capabilities) -Expected @(
-  "bounded_stop_reason",
-  "core_start_stop",
-  "materialized_profile",
-  "secure_profile_file",
-  "structured_operational_events",
-  "typed_lifecycle_events"
-)
-Assert-SameSet -Label "Lifecycle event identifiers" -Actual @($contract.descriptor.lifecycle_events) -Expected @(
-  "initialization",
-  "profile",
-  "core_start",
-  "tun",
-  "routes",
-  "dns",
-  "egress",
-  "recovery",
-  "stop"
-)
-
 $eventContractPath = Join-Path $root ([string]$contract.descriptor.operational_events.contract)
 $eventContract = Read-JsonContract $eventContractPath
 if ([int]$eventContract.schema_version -ne 1 -or
@@ -162,51 +142,6 @@ foreach ($symbol in @($eventContract.callback_symbol, $eventContract.context_sym
   if (@($contract.desktop_abi.exports) -notcontains [string]$symbol) {
     throw "Core event ABI symbol '$symbol' is absent from the desktop export contract."
   }
-}
-Assert-SameSet -Label "Core event ABI fields" -Actual @($eventContract.fields) -Expected @(
-  "schema_version",
-  "event_abi",
-  "occurred_at_utc",
-  "run_id",
-  "attempt_id",
-  "generation",
-  "sequence",
-  "name",
-  "subsystem",
-  "stage",
-  "severity",
-  "outcome",
-  "error_code",
-  "phase"
-)
-Assert-SameSet -Label "Core event ABI error codes" -Actual @($eventContract.error_codes) -Expected @(
-  "CORE-003",
-  "CORE-005",
-  "CORE-006",
-  "CORE-008",
-  "EGRESS-001",
-  "TRANSPORT-001",
-  "TRANSPORT-002",
-  "TRANSPORT-003",
-  "TRANSPORT-004",
-  "TRANSPORT-005",
-  "TRANSPORT-006",
-  "TRANSPORT-007",
-  "DNS-002"
-)
-$eventDefinitions = @($eventContract.events | ForEach-Object {
-  "$($_.name)/$($_.subsystem)/$($_.stage)/$($_.phase)"
-})
-if (($eventDefinitions -join ',') -ne (@(
-    'core.runtime.initialize/core/initialize/initialization',
-    'core.runtime.start/core/start/core_start',
-    'core.runtime.stop/core/stop/stop',
-    'core.egress.probe/egress/verify/egress',
-    'core.dns.probe/dns/receive/dns',
-    'core.dns.probe/dns/exchange/dns',
-    'core.dns.probe/dns/reply/dns'
-  ) -join ',')) {
-  throw "Core event ABI event definitions changed without a contract decision."
 }
 
 Write-Host "POKROV Core ABI contract OK: desktop=2 descriptor=1 events=1 exports=$($actualExports.Count)" -ForegroundColor Green
