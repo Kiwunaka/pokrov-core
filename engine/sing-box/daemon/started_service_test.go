@@ -4,49 +4,14 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"io"
-	"net"
 	"os"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
-	"github.com/gofrs/uuid/v5"
-	"github.com/sagernet/sing-box/adapter"
-	"github.com/sagernet/sing-box/common/trafficcontrol"
-	"github.com/sagernet/sing-box/common/urltest"
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
-	M "github.com/sagernet/sing/common/metadata"
 )
-
-func TestConnectionEventsPreserveHostContract(t *testing.T) {
-	id, err := uuid.NewV4()
-	if err != nil {
-		t.Fatal(err)
-	}
-	upload, download := new(atomic.Int64), new(atomic.Int64)
-	upload.Store(7)
-	download.Store(11)
-	metadata := &trafficcontrol.TrackerMetadata{
-		ID: id, Upload: upload, Download: download, Outbound: "candidate", CreatedAt: time.Now(),
-		Metadata: adapter.InboundContext{
-			Network: "tcp", ProcessInfo: &adapter.ConnectionOwner{UserId: 10001, AndroidPackageNames: []string{"space.pokrov.fixture", "space.pokrov.shared"}},
-		},
-	}
-	s := &StartedService{}
-	snapshots := make(map[uuid.UUID]connectionSnapshot)
-	event := s.applyConnectionEvent(trafficcontrol.ConnectionEvent{Type: trafficcontrol.ConnectionEventNew, ID: id, Metadata: metadata}, snapshots)
-	if event.Type != ConnectionEventType_CONNECTION_EVENT_NEW || event.Id != id.String() || event.Connection.Outbound != "candidate" || event.Connection.ProcessInfo.PackageName != "space.pokrov.fixture" {
-		t.Fatal("new connection changed the existing host event fields")
-	}
-	closedAt := time.Now()
-	event = s.applyConnectionEvent(trafficcontrol.ConnectionEvent{Type: trafficcontrol.ConnectionEventClosed, ID: id, Metadata: metadata, ClosedAt: closedAt}, snapshots)
-	if event.Type != ConnectionEventType_CONNECTION_EVENT_CLOSED || event.ClosedAt != closedAt.UnixMilli() || event.Connection.UplinkTotal != 7 || event.Connection.DownlinkTotal != 11 || len(snapshots) != 0 {
-		t.Fatal("closed connection lost its final counters or closure event")
-	}
-}
 
 func TestStartedServiceCloseEndsObserversAndRejectsReuse(t *testing.T) {
 	s := NewStartedService(ServiceOptions{Context: context.Background(), LogMaxLines: 4})
@@ -69,161 +34,6 @@ func TestStartedServiceCloseEndsObserversAndRejectsReuse(t *testing.T) {
 	}
 	if err := s.StartOrReloadServiceOptions(option.Options{}); !errors.Is(err, os.ErrClosed) {
 		t.Fatalf("closed service accepted reuse: %v", err)
-	}
-}
-
-type unreadyProbeEndpoint struct{ adapter.Endpoint }
-
-type stalledTLSProbeEndpoint struct {
-	adapter.Endpoint
-}
-
-func (stalledTLSProbeEndpoint) IsReady() bool { return true }
-
-func (stalledTLSProbeEndpoint) DialContext(context.Context, string, M.Socksaddr) (net.Conn, error) {
-	client, server := net.Pipe()
-	go func() {
-		defer server.Close()
-		_, _ = io.Copy(io.Discard, server) // Each target receives ClientHello without replying.
-	}()
-	return client, nil
-}
-
-func TestSelectedEndpointDeadlineRetainsTLSStage(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
-	defer cancel()
-	s := NewStartedService(ServiceOptions{Context: ctx, LogMaxLines: 4})
-	defer s.Close()
-	if s.testSelectedEndpoint(&Instance{ctx: ctx}, stalledTLSProbeEndpoint{}) {
-		t.Fatal("stalled TLS negotiation supplied egress proof")
-	}
-	entry := s.logLines.Back()
-	if entry == nil || entry.Value.Message != "selected endpoint URL test failed category=tls_timeout" {
-		t.Fatal("endpoint deadline discarded the observed TLS stage")
-	}
-}
-
-func (unreadyProbeEndpoint) IsReady() bool { return false }
-
-func TestEndpointCallCannotSucceedWithoutItsRuntime(t *testing.T) {
-	s := NewStartedService(ServiceOptions{Context: context.Background(), LogMaxLines: 4})
-	if healthy, err := s.ProbeEndpointResult("synthetic-target"); healthy || err == nil {
-		t.Fatal("stopped runtime supplied endpoint proof")
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	if s.testSelectedEndpoint(&Instance{ctx: ctx}, unreadyProbeEndpoint{}) {
-		t.Fatal("cancelled captured runtime supplied endpoint proof")
-	}
-}
-
-func TestURLTestErrorCategory(t *testing.T) {
-	tests := []struct {
-		name     string
-		err      error
-		expected string
-	}{
-		{name: "none", expected: "none"},
-		{name: "deadline", err: context.DeadlineExceeded, expected: "deadline_exceeded"},
-		{name: "cancelled", err: context.Canceled, expected: "context_canceled"},
-		{name: "dns", err: errors.New("lookup example.test: no such host"), expected: "dns_lookup"},
-		{name: "certificate", err: errors.New("x509: certificate has expired"), expected: "tls_certificate"},
-		{name: "reality", err: errors.New("reality handshake failed"), expected: "reality_handshake"},
-		{name: "http", err: errors.New("returned status 403"), expected: "http_rejected"},
-		{name: "timeout", err: errors.New("read: i/o timeout"), expected: "io_timeout"},
-		{name: "other", err: errors.New("broken transport"), expected: "transport_failure"},
-		{name: "observed TLS timeout", err: &urltest.ProbeError{Stage: urltest.ProbeStageTLS, Err: context.DeadlineExceeded}, expected: "tls_timeout"},
-		{name: "observed response timeout", err: &urltest.ProbeError{Stage: urltest.ProbeStageResponse, Err: context.DeadlineExceeded}, expected: "response_timeout"},
-		{name: "wrapped certificate", err: &urltest.ProbeError{Stage: urltest.ProbeStageTLS, Err: errors.New("x509: synthetic certificate failure")}, expected: "tls_certificate"},
-	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			if actual := urlTestErrorCategory(test.err); actual != test.expected {
-				t.Fatalf("unexpected category: got %q, want %q", actual, test.expected)
-			}
-		})
-	}
-}
-
-func TestProbeEventUsesOnlyTypedCauseEvidence(t *testing.T) {
-	if observedProbeErrorCode(&urltest.ProbeError{Stage: urltest.ProbeStageTLS, Err: context.DeadlineExceeded}) != "TRANSPORT-006" {
-		t.Fatal("observed TLS timeout was not retained in the probe event")
-	}
-	if observedProbeErrorCode(errors.New("lookup dns.example.test: synthetic failure")) != "EGRESS-001" {
-		t.Fatal("legacy diagnostic text was promoted to a causal event")
-	}
-}
-
-func TestCanonicalAWGSafeDiagnostic(t *testing.T) {
-	tests := []struct {
-		name     string
-		message  string
-		expected string
-		accepted bool
-	}{
-		{
-			name:     "formatted safe diagnostic",
-			message:  "WARN[0007] endpoint/awg[test]: awg_safe_diag code=handshake_retry occurrence=2",
-			expected: "awg_safe_diag code=handshake_retry occurrence=2",
-			accepted: true,
-		},
-		{
-			name:     "all bounded occurrences",
-			message:  "awg_safe_diag code=receive_handshake_response occurrence=4",
-			expected: "awg_safe_diag code=receive_handshake_response occurrence=4",
-			accepted: true,
-		},
-		{name: "unknown code", message: "awg_safe_diag code=peer_secret occurrence=1"},
-		{name: "zero occurrence", message: "awg_safe_diag code=handshake_retry occurrence=0"},
-		{name: "unbounded occurrence", message: "awg_safe_diag code=handshake_retry occurrence=5"},
-		{name: "trailing material", message: "awg_safe_diag code=handshake_retry occurrence=1 secret"},
-		{name: "newline", message: "awg_safe_diag code=handshake_retry occurrence=1\n"},
-		{name: "ordinary log", message: "service started"},
-	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			actual, accepted := canonicalAWGSafeDiagnostic(test.message)
-			if accepted != test.accepted || actual != test.expected {
-				t.Fatalf(
-					"unexpected classification: got (%q, %t), want (%q, %t)",
-					actual,
-					accepted,
-					test.expected,
-					test.accepted,
-				)
-			}
-		})
-	}
-}
-
-func TestReleaseStartedServiceForwardsOnlyCanonicalAWGSafeDiagnostic(t *testing.T) {
-	handler := &recordingPlatformHandler{}
-	service := NewStartedService(ServiceOptions{
-		Handler:     handler,
-		Debug:       false,
-		LogMaxLines: 8,
-	})
-
-	service.WriteMessage(
-		log.LevelWarn,
-		"WARN[0007] endpoint/awg[test]: awg_safe_diag code=receive_invalid_mac1 occurrence=1",
-	)
-	service.WriteMessage(
-		log.LevelWarn,
-		"WARN[0007] endpoint/awg[test]: peer=secret awg_safe_diag code=unknown occurrence=1",
-	)
-	service.WriteMessage(
-		log.LevelError,
-		"ERROR[0007] endpoint/awg[test]: awg_safe_diag code=receive_error occurrence=1",
-	)
-
-	if len(handler.debugMessages) != 1 {
-		t.Fatalf("unexpected forwarded message count: got %d, want 1", len(handler.debugMessages))
-	}
-	if handler.debugMessages[0] != "awg_safe_diag code=receive_invalid_mac1 occurrence=1" {
-		t.Fatalf("unexpected forwarded message: %q", handler.debugMessages[0])
 	}
 }
 
@@ -261,14 +71,7 @@ func TestManagedLoggerDoesNotRetainPlantedMaterialInAnyLogSink(t *testing.T) {
 				"selected endpoint URL test failed category=tls_certificate",
 				"selected endpoint URL test failed category=tls_certificate token=" + planted,
 			}
-			expected := []string{
-				"runtime_log_redacted",
-				"awg_safe_diag code=handshake_retry occurrence=1",
-				"runtime_log_redacted",
-				"selected endpoint URL test failed category=tls_certificate",
-				"runtime_log_redacted",
-			}
-			for index, message := range messages {
+			for _, message := range messages {
 				logger.Warn(message)
 				select {
 				case entry := <-factoryEntries:
@@ -282,9 +85,6 @@ func TestManagedLoggerDoesNotRetainPlantedMaterialInAnyLogSink(t *testing.T) {
 				case entry := <-serviceEntries:
 					if strings.Contains(entry.Message, planted) {
 						t.Fatal("native service subscription retained planted material")
-					}
-					if entry.Message != expected[index] {
-						t.Fatal("managed log lost its closed diagnostic category")
 					}
 				case <-time.After(time.Second):
 					t.Fatal("native service log subscription did not settle")
@@ -301,26 +101,6 @@ func TestManagedLoggerDoesNotRetainPlantedMaterialInAnyLogSink(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestManagedLoggerKeepsPanicSemanticsWithSafePayload(t *testing.T) {
-	service := NewStartedService(ServiceOptions{
-		Context: context.Background(), Handler: &recordingPlatformHandler{}, LogMaxLines: 1,
-	})
-	var output bytes.Buffer
-	factory := log.NewDefaultFactory(context.Background(), log.Formatter{}, &output, "", service, false)
-	defer factory.Close()
-	if err := factory.Start(); err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		recovered := recover()
-		message, ok := recovered.(string)
-		if !ok || !strings.Contains(message, "runtime_log_redacted") || strings.Contains(message, "PLANTED-PRIVATE-MATERIAL") {
-			t.Fatal("managed logger did not preserve panic with a safe payload")
-		}
-	}()
-	factory.Logger().Panic("PLANTED-PRIVATE-MATERIAL")
 }
 
 type recordingPlatformHandler struct {

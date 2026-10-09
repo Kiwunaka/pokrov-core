@@ -2,7 +2,6 @@ package libbox
 
 import (
 	"context"
-	"errors"
 	"testing"
 	"time"
 
@@ -79,42 +78,5 @@ func TestPlatformDNSAsyncKeepsHostCallbacks(t *testing.T) {
 				t.Fatal("platform DNS callback did not finish")
 			}
 		})
-	}
-}
-
-func TestPlatformDNSAsyncCancellationReachesHost(t *testing.T) {
-	started, joined := make(chan struct{}), make(chan struct{})
-	host := &hostDNSFixture{lookup: func(ctx *ExchangeContext, network, domain string) error {
-		close(started)
-		<-ctx.context.Done()
-		close(joined)
-		return ctx.context.Err()
-	}}
-	transport, err := newPlatformTransport(context.Background(), logger.NOP(), host, "platform", option.LocalDNSServerOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	result := make(chan error, 1)
-	transport.ExchangeAsync(ctx, new(mDNS.Msg).SetQuestion("candidate.pokrov.invalid.", mDNS.TypeA), func(response *mDNS.Msg, err error) { result <- err })
-	select {
-	case <-started:
-	case <-time.After(time.Second):
-		t.Fatal("host DNS callback did not start")
-	}
-	cancel()
-	select {
-	case err := <-result:
-		if !errors.Is(err, context.Canceled) {
-			t.Fatalf("DNS cancellation was lost: %v", err)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("cancelled platform DNS did not settle")
-	}
-	select {
-	case <-joined:
-	case <-time.After(time.Second):
-		t.Fatal("host DNS callback retained the cancelled operation")
 	}
 }

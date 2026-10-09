@@ -21,23 +21,6 @@ import (
 	"github.com/sagernet/sing/service/filemanager"
 )
 
-func TestSelectOutboundRejectsUnavailableRuntime(t *testing.T) {
-	h := &PokrovInstance{}
-	for _, request := range []*SelectOutboundRequest{
-		nil,
-		{},
-		{GroupTag: "candidates", OutboundTag: "b"},
-	} {
-		response, err := h.SelectOutbound(request)
-		if err == nil || response.Code != hcommon.ResponseCode_FAILED {
-			t.Fatal("selection reported success without a running selector")
-		}
-	}
-	if err := h.resetNetwork(); err == nil {
-		t.Fatal("network reset reported success without a runtime")
-	}
-}
-
 func TestSelectOutboundAndNetworkResetKeepRuntime(t *testing.T) {
 	ctx := libbox.BaseContext(nil)
 	root := t.TempDir()

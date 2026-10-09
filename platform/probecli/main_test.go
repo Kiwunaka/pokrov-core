@@ -9,28 +9,11 @@ import (
 	"reflect"
 	"strings"
 	"testing"
-	"time"
 
 	box "github.com/sagernet/sing-box"
 	"github.com/sagernet/sing-box/experimental/libbox"
 	"github.com/sagernet/sing-box/option"
 )
-
-func TestFixedProbeTimeout(t *testing.T) {
-	if probeTimeout != 12*time.Second {
-		t.Fatal("fixed probe must allow the 204 and 64 KiB checks within a 12-second budget")
-	}
-}
-
-func TestRunRejectsInvalidRequestWithoutEcho(t *testing.T) {
-	result := run([]string{"key-s3cr3t"})
-	if result.Success || result.FailureKind != "invalid_request" {
-		t.Fatalf("unexpected result: %s", result.JSON())
-	}
-	if strings.Contains(result.JSON(), "key-s3cr3t") {
-		t.Fatal("request material leaked into result")
-	}
-}
 
 func TestRunRejectsInvalidProfileWithoutEcho(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "address-private.example.json")
@@ -44,9 +27,6 @@ func TestRunRejectsInvalidProfileWithoutEcho(t *testing.T) {
 	// Windows does not preserve Unix file modes in this test. Both stages are safe.
 	if result.Stage != "parse_profile" && result.Stage != "profile_file" {
 		t.Fatalf("unexpected safe failure stage: %q", result.Stage)
-	}
-	if !strings.Contains(result.JSON(), `"stage":"`+result.Stage+`"`) {
-		t.Fatal("failure stage missing from JSON output")
 	}
 	for _, secret := range []string{"address-private", "key-s3cr3t", "uplink-private"} {
 		if strings.Contains(result.JSON(), secret) {

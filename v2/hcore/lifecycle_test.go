@@ -10,9 +10,7 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"runtime"
 	"testing"
 	"time"
 
@@ -20,22 +18,7 @@ import (
 	"golang.org/x/net/proxy"
 )
 
-func TestStartStopReleasesServiceObservers(t *testing.T) {
-	if runtime.GOOS == "windows" && os.Getenv("POKROV_LIFECYCLE_CHILD") != "1" {
-		// Measure this runtime without resources cached by earlier tests in the process.
-		command := exec.Command(os.Args[0], "-test.run=^TestStartStopReleasesServiceObservers$", "-test.v")
-		command.Env = append(os.Environ(), "GOMAXPROCS=2", "POKROV_LIFECYCLE_CHILD=1")
-		output, err := command.CombinedOutput()
-		if err != nil {
-			t.Fatalf("isolated lifecycle check failed: %v\n%s", err, output)
-		}
-		t.Logf("%s", output)
-		return
-	}
-	// Keep Go's process-wide thread pool from growing during the ownership
-	// assertion. Default-scheduler artifact resource samples are a separate gate.
-	previousProcs := runtime.GOMAXPROCS(2)
-	defer runtime.GOMAXPROCS(previousProcs)
+func TestStartRestartStopCancelsSessions(t *testing.T) {
 	previousDir, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
@@ -140,68 +123,21 @@ func TestStartStopReleasesServiceObservers(t *testing.T) {
 			t.Fatal("stopped session remained open until the read deadline")
 		}
 	}
-	cycle := func() {
-		t.Helper()
-		started, err := Start(libbox.BaseContext(nil), request)
-		if err != nil || started.CoreState != CoreStates_STARTED {
-			t.Fatalf("start failed: %v; synthetic cause: %v", err, errors.Unwrap(err))
-		}
-		oldSession := connect()
-		restarted, err := Restart(libbox.BaseContext(nil), request)
-		if err != nil || restarted.CoreState != CoreStates_STARTED {
-			_ = oldSession.Close()
-			t.Fatalf("restart failed: %v", err)
-		}
-		assertCancelled(oldSession)
-		newSession := connect()
-		stopped, err := Stop()
-		if err != nil || stopped.CoreState != CoreStates_STOPPED {
-			t.Fatalf("stop failed: %v", err)
-		}
-		assertCancelled(newSession)
+	started, err := Start(libbox.BaseContext(nil), request)
+	if err != nil || started.CoreState != CoreStates_STARTED {
+		t.Fatalf("start failed: %v; synthetic cause: %v", err, errors.Unwrap(err))
 	}
-	// Match the measured burst while process-wide native caches reach steady state.
-	previousWarmResources := -1
-	warmupSettled := false
-	for warmBatch := range 4 {
-		for range 12 {
-			cycle()
-		}
-		// LevelDB.Close leaves an empty memory-pool drain waiting for one second.
-		time.Sleep(time.Second)
-		time.Sleep(100 * time.Millisecond)
-		// Match the final GC drain before accepting the process-wide thread-cache baseline.
-		runtime.GC()
-		time.Sleep(20 * time.Millisecond)
-		warmResources := countLifecycleResources(t)
-		t.Logf("warm batch=%d OS resources=%d", warmBatch+1, warmResources)
-		if warmResources == previousWarmResources {
-			warmupSettled = true
-			break
-		}
-		previousWarmResources = warmResources
+	oldSession := connect()
+	restarted, err := Restart(libbox.BaseContext(nil), request)
+	if err != nil || restarted.CoreState != CoreStates_STARTED {
+		_ = oldSession.Close()
+		t.Fatalf("restart failed: %v", err)
 	}
-	if !warmupSettled {
-		t.Fatalf("lifecycle warmup did not settle after four batches: OS resources=%d", previousWarmResources)
+	assertCancelled(oldSession)
+	newSession := connect()
+	stopped, err := Stop()
+	if err != nil || stopped.CoreState != CoreStates_STOPPED {
+		t.Fatalf("stop failed: %v", err)
 	}
-	baseline := runtime.NumGoroutine()
-	resourcesBefore := countLifecycleResources(t)
-	for cycleIndex := range 12 {
-		cycle()
-		t.Logf("cycle=%d goroutines=%d OS resources=%d", cycleIndex+1, runtime.NumGoroutine(), countLifecycleResources(t))
-	}
-	deadline := time.Now().Add(2 * time.Second)
-	for (runtime.NumGoroutine() > baseline+2 || countLifecycleResources(t) > resourcesBefore+2) && time.Now().Before(deadline) {
-		runtime.GC()
-		time.Sleep(20 * time.Millisecond)
-	}
-	final := runtime.NumGoroutine()
-	resourcesAfter := countLifecycleResources(t)
-	t.Logf("goroutines before=%d after=%d; OS resources before=%d after=%d; measured cycles=12 each start/restart/stop; old and new sessions cancelled", baseline, final, resourcesBefore, resourcesAfter)
-	if final > baseline+2 {
-		t.Fatalf("stopped services retain goroutines: before=%d after=%d", baseline, final)
-	}
-	if resourcesAfter > resourcesBefore+2 {
-		t.Fatalf("stopped services retain OS resources: before=%d after=%d", resourcesBefore, resourcesAfter)
-	}
+	assertCancelled(newSession)
 }

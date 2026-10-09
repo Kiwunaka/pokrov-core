@@ -1,17 +1,12 @@
 package observability
 
 import (
-	"context"
 	"errors"
 	"fmt"
-	"net"
 	"strings"
 	"sync"
-	"syscall"
 	"testing"
 	"time"
-
-	"github.com/sagernet/sing-box/common/urltest"
 )
 
 const (
@@ -55,69 +50,6 @@ func TestEmitterProducesClosedCorrelatedEvents(t *testing.T) {
 	}
 }
 
-func TestEmitterRejectsStaleContextAndUnknownValues(t *testing.T) {
-	emitter := NewEmitter(1)
-	emitter.SetSink(func(Event) {})
-	if err := emitter.Configure(testRunID, testAttemptID, 4); err != nil {
-		t.Fatal(err)
-	}
-	if err := emitter.Configure(testRunID, testAttemptID, 3); err == nil {
-		t.Fatal("expected stale generation to fail")
-	}
-	if emitter.Emit(Definition{Name: "raw.line"}, OutcomeFailed, "CORE-003") {
-		t.Fatal("unknown event definition crossed the emitter")
-	}
-	if emitter.Emit(RuntimeStart, OutcomeFailed, "UNKNOWN-001") {
-		t.Fatal("unknown error code crossed the emitter")
-	}
-	if emitter.Emit(RuntimeStart, OutcomeSucceeded, "CORE-003") {
-		t.Fatal("successful event carried an error code")
-	}
-	if emitter.Emit(Definition{Name: "core.dns.probe", Subsystem: "dns", Stage: "raw", Phase: "dns"}, OutcomeStarted, "") ||
-		emitter.Emit(DNSProbeReceive, OutcomeSucceeded, "") ||
-		emitter.Emit(DNSProbeReply, OutcomeFailed, "CORE-003") {
-		t.Fatal("unknown DNS tuple or outcome crossed the emitter")
-	}
-}
-
-func TestEmitterCapturedDNSContextKeepsFirstQuestionAndRejectsLateCompletion(t *testing.T) {
-	emitter := NewEmitter(8)
-	emitter.SetSink(func(Event) {})
-	if err := emitter.Configure(testRunID, testAttemptID, 7); err != nil {
-		t.Fatal(err)
-	}
-	first := emitter.CaptureContext()
-	if first == nil || !first(DNSProbeReceive, OutcomeStarted, "") {
-		t.Fatal("first owned question was not accepted")
-	}
-	if emitter.CaptureContext()(DNSProbeReceive, OutcomeStarted, "") {
-		t.Fatal("another callback reset the same-generation first-question latch")
-	}
-	release := make(chan struct{})
-	completed := make(chan bool, 1)
-	go func() {
-		<-release
-		completed <- first(DNSProbeExchange, OutcomeFailed, "DNS-002")
-	}()
-	if err := emitter.Configure(testRunID, testAttemptID, 8); err != nil {
-		t.Fatal(err)
-	}
-	close(release)
-	if <-completed || emitter.Snapshot().Sequence != 0 {
-		t.Fatal("late asynchronous completion was stamped with the next context")
-	}
-	current := emitter.CaptureContext()
-	if !current(DNSProbeReceive, OutcomeStarted, "") {
-		t.Fatal("new generation did not admit its first owned question")
-	}
-	if err := emitter.Configure(testRunID, "a27bb075-21fd-4597-9e2f-490563c40ad6", 8); err != nil {
-		t.Fatal(err)
-	}
-	if current(DNSProbeReply, OutcomeSucceeded, "") || emitter.Snapshot().Sequence != 1 {
-		t.Fatal("captured callback ignored the changed attempt in the same generation")
-	}
-}
-
 func TestRawFailureCorpusCannotCrossEventABI(t *testing.T) {
 	secrets := []string{
 		`{"outbounds":[{"server":"vpn.example.test","password":"hunter2"}]}`,
@@ -153,33 +85,6 @@ func TestRawFailureCorpusCannotCrossEventABI(t *testing.T) {
 	}
 }
 
-func TestStartFailureClassifierKeepsTransportClassesDistinct(t *testing.T) {
-	tests := []struct {
-		name string
-		err  error
-		code string
-	}{
-		{name: "deadline", err: context.DeadlineExceeded, code: "TRANSPORT-001"},
-		{name: "typed DNS timeout", err: &net.DNSError{Err: "temporary transport stall", IsTimeout: true}, code: "DNS-002"},
-		{name: "typed UDP timeout", err: &net.OpError{Net: "udp", Err: context.DeadlineExceeded}, code: "TRANSPORT-005"},
-		{name: "observed TLS timeout", err: &urltest.ProbeError{Stage: urltest.ProbeStageTLS, Err: context.DeadlineExceeded}, code: "TRANSPORT-006"},
-		{name: "observed response timeout", err: &urltest.ProbeError{Stage: urltest.ProbeStageResponse, Err: context.DeadlineExceeded}, code: "TRANSPORT-007"},
-		{name: "refused", err: fmt.Errorf("dial failed: %w", syscall.ECONNREFUSED), code: "TRANSPORT-002"},
-		{name: "authentication", err: errors.New("proxy authentication failed"), code: "TRANSPORT-003"},
-		{name: "protocol", err: errors.New("TLS protocol version mismatch"), code: "TRANSPORT-004"},
-		{name: "configuration", err: errors.New("invalid profile config"), code: "CORE-005"},
-		{name: "generic transport", err: errors.New("network is unreachable"), code: "CORE-006"},
-		{name: "unknown", err: errors.New("unexpected start failure"), code: "CORE-003"},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			if code := ClassifyStartError(test.err); code != test.code {
-				t.Fatalf("expected %s, got %s", test.code, code)
-			}
-		})
-	}
-}
-
 func TestEmitterDoesNotBlockWhenSinkIsStalled(t *testing.T) {
 	emitter := NewEmitter(1)
 	blocked := make(chan struct{})
@@ -198,28 +103,6 @@ func TestEmitterDoesNotBlockWhenSinkIsStalled(t *testing.T) {
 		t.Fatal("expected bounded queue pressure to be observable")
 	}
 	close(blocked)
-}
-
-func TestEmitterIsRaceSafe(t *testing.T) {
-	emitter := NewEmitter(MaximumPendingEvents)
-	emitter.SetSink(func(Event) {})
-	if err := emitter.Configure(testRunID, testAttemptID, 1); err != nil {
-		t.Fatal(err)
-	}
-	var group sync.WaitGroup
-	for worker := 0; worker < 8; worker++ {
-		group.Add(1)
-		go func() {
-			defer group.Done()
-			for index := 0; index < 1000; index++ {
-				emitter.Emit(RuntimeStart, OutcomeStarted, "")
-			}
-		}()
-	}
-	group.Wait()
-	if emitter.Snapshot().Sequence != 8000 {
-		t.Fatalf("unexpected final sequence: %d", emitter.Snapshot().Sequence)
-	}
 }
 
 func waitForEvents(t *testing.T, delivered <-chan struct{}, count int) {

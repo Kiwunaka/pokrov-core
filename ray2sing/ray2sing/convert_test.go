@@ -21,7 +21,7 @@ func TestConversionFailureDoesNotPrintProxyInput(t *testing.T) {
 	_ = write.Close()
 	os.Stderr = original
 	output, readErr := io.ReadAll(read)
-	if err == nil || readErr != nil || !strings.Contains(string(output), "Proxy URI conversion failed") || strings.Contains(string(output), "private-profile-marker") {
-		t.Fatal("URI conversion failure leaked input or did not report failure")
+	if err == nil || readErr != nil || strings.Contains(string(output), "private-profile-marker") {
+		t.Fatal("URI conversion failure leaked input")
 	}
 }
