@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"encoding/json"
 	"errors"
 	"regexp"
 
@@ -23,6 +24,23 @@ func (s *StartedService) ReadLocalDpiAdmissionID(outboundTag string) (string, er
 		}
 	}
 	return "", errors.New("local_dpi_admission_unavailable")
+}
+
+// Observation is scoped to the current captured holder, including after its
+// withdrawal. A same-profile successor has a new ID and cannot supply this read.
+func (s *StartedService) ReadLocalDpiObservation(admissionID string) (string, error) {
+	s.serviceAccess.RLock()
+	defer s.serviceAccess.RUnlock()
+	if s.closed || s.serviceStatus.Status != ServiceStatus_STARTED || s.instance == nil {
+		return "", errors.New("local_dpi_runtime_unavailable")
+	}
+	for _, outbound := range s.instance.instance.Outbound().Outbounds() {
+		if local, ok := outbound.(*localdpi.Outbound); ok && local.AdmissionID() == admissionID {
+			encoded, err := json.Marshal(local.ReadObservation())
+			return string(encoded), err
+		}
+	}
+	return "", nil
 }
 
 // A native proof can admit only the exact holder it read from this runtime.

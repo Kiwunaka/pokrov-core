@@ -4,6 +4,7 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -146,7 +147,7 @@ func localDpiFixtureOutbound(t *testing.T, s *StartedService, tag string) *local
 }
 
 func TestLocalDpiWithdrawalPreservesOtherAdmissionAndCatalog(t *testing.T) {
-	s, _ := localDpiCatalogFixture(t)
+	s, options := localDpiCatalogFixture(t)
 	a, b := localDpiFixtureOutbound(t, s, "local-a"), localDpiFixtureOutbound(t, s, "local-b")
 	idA, err := s.ReadLocalDpiAdmissionID("local-a")
 	if err != nil || idA == "" || idA != a.AdmissionID() || idA == b.AdmissionID() || a.IsReady() || b.IsReady() {
@@ -154,6 +155,11 @@ func TestLocalDpiWithdrawalPreservesOtherAdmissionAndCatalog(t *testing.T) {
 	}
 	if id, err := s.ReadLocalDpiAdmissionID("vpn"); id != "" || err == nil || err.Error() != "local_dpi_admission_unavailable" {
 		t.Fatal("non-local outbound supplied admission identity")
+	}
+	encoded, err := s.ReadLocalDpiObservation(idA)
+	var observation localdpi.Observation
+	if err != nil || json.Unmarshal([]byte(encoded), &observation) != nil || observation != (localdpi.Observation{State: "unpublished"}) {
+		t.Fatal("fresh holder observation unavailable")
 	}
 	for _, id := range []string{idA, b.AdmissionID()} {
 		if admitted, err := s.AdmitLocalDpiAdmission(id); err != nil || !admitted {
@@ -167,6 +173,10 @@ func TestLocalDpiWithdrawalPreservesOtherAdmissionAndCatalog(t *testing.T) {
 	if admitted, err := s.AdmitLocalDpiAdmission(idA); err != nil || admitted {
 		t.Fatal("withdrawn admission reopened")
 	}
+	encoded, err = s.ReadLocalDpiObservation(idA)
+	if err != nil || json.Unmarshal([]byte(encoded), &observation) != nil || observation != (localdpi.Observation{State: "withdrawn", WithdrawCompleted: true}) {
+		t.Fatal("current withdrawn holder observation unavailable")
+	}
 	if current, found := s.instance.instance.Outbound().Outbound("vpn"); !found || current != vpn {
 		t.Fatal("withdrawal changed VPN outbound")
 	}
@@ -179,5 +189,29 @@ func TestLocalDpiWithdrawalPreservesOtherAdmissionAndCatalog(t *testing.T) {
 		if !rule.Match(&adapter.InboundContext{Domain: domain}) {
 			t.Fatal("local withdrawal revoked catalog window")
 		}
+	}
+	// Construct the same profile in another current instance. Neither tag nor
+	// unchanged profile bytes let the old captured ID observe its successor.
+	old := s.instance
+	next, err := s.newInstanceOptions(options, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.instance = next
+	defer func() { _ = old.Close() }()
+	if encoded, err := s.ReadLocalDpiObservation(idA); err != nil || encoded != "" {
+		t.Fatal("stale ID observed a same-profile successor")
+	}
+	nextID, err := s.ReadLocalDpiAdmissionID("local-a")
+	if err != nil || nextID == idA {
+		t.Fatal("same-profile successor reused its admission ID")
+	}
+	encoded, err = s.ReadLocalDpiObservation(nextID)
+	if err != nil || json.Unmarshal([]byte(encoded), &observation) != nil || observation != (localdpi.Observation{State: "unpublished"}) {
+		t.Fatal("successor inherited old holder observation")
+	}
+	s.serviceStatus.Status = ServiceStatus_IDLE
+	if encoded, err := s.ReadLocalDpiObservation(nextID); encoded != "" || err == nil {
+		t.Fatal("stopped runtime supplied a holder observation")
 	}
 }

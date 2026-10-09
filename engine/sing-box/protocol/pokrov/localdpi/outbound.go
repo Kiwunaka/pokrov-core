@@ -46,19 +46,29 @@ var _ adapter.ConnectionHandler = (*Outbound)(nil)
 
 type Outbound struct {
 	outbound.Adapter
-	manager        adapter.OutboundManager
-	connection     adapter.ConnectionManager
-	proxy          N.Dialer
-	vpnTag         string
-	vpn            adapter.Outbound
-	serviceID      string
-	admissionID    string
-	admission      atomic.Uint32
-	withdrawCtx    context.Context
-	withdrawCancel context.CancelFunc
-	mu             sync.Mutex
-	closed         bool
-	flows          map[*flow]struct{}
+	manager           adapter.OutboundManager
+	connection        adapter.ConnectionManager
+	proxy             N.Dialer
+	vpnTag            string
+	vpn               adapter.Outbound
+	serviceID         string
+	admissionID       string
+	admission         atomic.Uint32
+	withdrawCtx       context.Context
+	withdrawCancel    context.CancelFunc
+	mu                sync.Mutex
+	closed            bool
+	flows             map[*flow]struct{}
+	withdrawCompleted bool
+	localHandoffs     uint64
+	vpnHandoffs       uint64
+}
+
+type Observation struct {
+	State             string `json:"state"`
+	WithdrawCompleted bool   `json:"withdraw_completed"`
+	LocalHandoffs     uint64 `json:"local_handoffs"`
+	VPNHandoffs       uint64 `json:"vpn_handoffs"`
 }
 
 func NewOutbound(ctx context.Context, _ adapter.Router, _ log.ContextLogger, tag string,
@@ -112,6 +122,16 @@ func (h *Outbound) AdmissionID() string { return h.admissionID }
 func (h *Outbound) ServiceID() string   { return h.serviceID }
 func (h *Outbound) IsReady() bool       { return h.admission.Load() == admissionReady }
 
+func (h *Outbound) ReadObservation() Observation {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	states := [...]string{"unpublished", "ready", "failed", "withdrawn"}
+	return Observation{
+		State: states[h.admission.Load()], WithdrawCompleted: h.withdrawCompleted,
+		LocalHandoffs: h.localHandoffs, VPNHandoffs: h.vpnHandoffs,
+	}
+}
+
 // Only the trusted native publisher may admit the freshly constructed runtime
 // after its proof. A failed or withdrawn admission cannot be reopened.
 func (h *Outbound) AdmitAdmission(expectedID string) bool {
@@ -141,6 +161,9 @@ func (h *Outbound) WithdrawAdmission(expectedID string) bool {
 		}
 		h.mu.Unlock()
 	}
+	h.mu.Lock()
+	h.withdrawCompleted = true
+	h.mu.Unlock()
 	return true
 }
 
@@ -267,6 +290,9 @@ func (h *Outbound) NewConnection(ctx context.Context, conn net.Conn, metadata ad
 	observed := &observedConn{Conn: remote, ctx: flowCtx, admission: &h.admission}
 	h.mu.Lock()
 	attached := !h.closed && h.IsReady() && flowCtx.Err() == nil && f.attach(observed)
+	if attached {
+		h.localHandoffs++
+	}
 	h.mu.Unlock()
 	if !attached {
 		_ = observed.Close()
@@ -295,6 +321,9 @@ func (h *Outbound) connectVPN(ctx context.Context, f *flow, metadata adapter.Inb
 		N.CloseOnHandshakeFailure(f.client, finish, errUnavailable)
 		return
 	}
+	h.mu.Lock()
+	h.vpnHandoffs++
+	h.mu.Unlock()
 	metadata.DestinationAddresses = nil
 	h.connection.NewConnection(ctx, &connectedDialer{remote}, f.client, metadata, finish)
 }

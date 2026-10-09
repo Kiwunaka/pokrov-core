@@ -134,7 +134,7 @@ func emptyOrErrorC(err error) *C.char {
 
 const pokrovDesktopABIVersion = 2
 const pokrovCoreCapabilitiesJSON = `{"schema_version":1,"desktop_abi":2,"event_abi":1,"routing_catalog_window_version":1,"smart_access_lease_version":1,"smart_access_runtime_control_version":1,"routing_catalog_control_version":4,"smart_access_probe_version":1,"local_dpi_admission_version":1,"capabilities":["bounded_stop_reason","core_start_stop","materialized_profile","secure_profile_file","structured_operational_events","typed_lifecycle_events"],"lifecycle_events":["initialization","profile","core_start","tun","routes","dns","egress","recovery","stop"],"operational_events":{"contract":"config/core-event-abi.json","schema_version":1,"event_abi":1,"callback_symbol":"pokrovCoreSetEventCallback","context_symbol":"pokrovCoreSetEventContext","maximum_pending_events":128}}`
-const pokrovCoreWindowsCapabilitiesJSON = `{"schema_version":1,"desktop_abi":2,"event_abi":1,"routing_catalog_window_version":1,"smart_access_lease_version":1,"smart_access_runtime_control_version":1,"routing_catalog_control_version":4,"smart_access_probe_version":1,"local_dpi_admission_version":1,"windows_local_dpi_admission_version":1,"telegram_ws_admission_version":1,"capabilities":["bounded_stop_reason","core_start_stop","materialized_profile","secure_profile_file","structured_operational_events","typed_lifecycle_events"],"lifecycle_events":["initialization","profile","core_start","tun","routes","dns","egress","recovery","stop"],"operational_events":{"contract":"config/core-event-abi.json","schema_version":1,"event_abi":1,"callback_symbol":"pokrovCoreSetEventCallback","context_symbol":"pokrovCoreSetEventContext","maximum_pending_events":128}}`
+const pokrovCoreWindowsCapabilitiesJSON = `{"schema_version":1,"desktop_abi":2,"event_abi":1,"routing_catalog_window_version":1,"smart_access_lease_version":1,"smart_access_runtime_control_version":1,"routing_catalog_control_version":4,"smart_access_probe_version":1,"local_dpi_admission_version":1,"windows_local_dpi_admission_version":1,"windows_local_dpi_observation_version":1,"telegram_ws_admission_version":1,"capabilities":["bounded_stop_reason","core_start_stop","materialized_profile","secure_profile_file","structured_operational_events","typed_lifecycle_events"],"lifecycle_events":["initialization","profile","core_start","tun","routes","dns","egress","recovery","stop"],"operational_events":{"contract":"config/core-event-abi.json","schema_version":1,"event_abi":1,"callback_symbol":"pokrovCoreSetEventCallback","context_symbol":"pokrovCoreSetEventContext","maximum_pending_events":128}}`
 
 //export pokrovCoreAbiVersion
 func pokrovCoreAbiVersion() C.int {
@@ -191,6 +191,18 @@ func pokrovCoreReadLocalDpiAdmissionID(outboundTag *C.char) *C.char {
 		return C.CString("")
 	}
 	return C.CString(id)
+}
+
+//export pokrovCoreReadLocalDpiObservation
+func pokrovCoreReadLocalDpiObservation(admissionID *C.char) *C.char {
+	if admissionID == nil {
+		return C.CString("")
+	}
+	encoded, err := hcore.ReadLocalDpiObservation(C.GoString(admissionID))
+	if err != nil {
+		return C.CString("")
+	}
+	return C.CString(encoded)
 }
 
 //export pokrovCoreAdmitLocalDpiAdmission

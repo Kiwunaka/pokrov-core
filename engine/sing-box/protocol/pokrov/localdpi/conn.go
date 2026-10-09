@@ -52,12 +52,13 @@ func (c *observedConn) Close() error {
 }
 
 type flow struct {
-	client net.Conn
-	cancel context.CancelFunc
-	mu     sync.Mutex
-	remote net.Conn
-	closed bool
-	local  bool // guarded by Outbound.mu; excludes ordinary VPN streams
+	client    net.Conn
+	cancel    context.CancelFunc
+	mu        sync.Mutex
+	remote    net.Conn
+	closed    bool
+	local     bool // guarded by Outbound.mu; excludes ordinary VPN streams
+	closeOnce sync.Once
 }
 
 func (f *flow) attach(remote net.Conn) bool {
@@ -73,16 +74,15 @@ func (f *flow) attach(remote net.Conn) bool {
 
 func (f *flow) close() {
 	f.mu.Lock()
-	if f.closed {
-		f.mu.Unlock()
-		return
-	}
 	f.closed = true
 	remote := f.remote
 	f.mu.Unlock()
-	f.cancel()
-	if remote != nil {
-		_ = remote.Close()
-	}
-	_ = f.client.Close()
+	// Competing cancellation/withdrawal callers join the same completed close.
+	f.closeOnce.Do(func() {
+		f.cancel()
+		if remote != nil {
+			_ = remote.Close()
+		}
+		_ = f.client.Close()
+	})
 }

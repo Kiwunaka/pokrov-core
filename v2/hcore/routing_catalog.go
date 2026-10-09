@@ -11,6 +11,15 @@ func ReadLocalDpiAdmissionID(outboundTag string) (string, error) {
 	return static.StartedService.ReadLocalDpiAdmissionID(outboundTag)
 }
 
+func ReadLocalDpiObservation(admissionID string) (string, error) {
+	static.lock.Lock()
+	defer static.lock.Unlock()
+	if static.StartedService == nil {
+		return "", errors.New("local_dpi_runtime_unavailable")
+	}
+	return static.StartedService.ReadLocalDpiObservation(admissionID)
+}
+
 func AdmitLocalDpiAdmission(admissionID string) (bool, error) {
 	static.lock.Lock()
 	defer static.lock.Unlock()

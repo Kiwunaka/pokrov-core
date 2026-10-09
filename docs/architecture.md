@@ -92,6 +92,15 @@ assets, current profile/network proof and captured-holder lifetime ownership
 remain required, so this source capability does not enable the feature or
 change retained releases.
 
+The optional Windows descriptor `windows_local_dpi_observation_version:1` and
+caller-owned `pokrovCoreReadLocalDpiObservation(captured_admission_id)` expose
+only the current holder's latch state, completed withdrawal and successful
+local/VPN TCP handoff counts. Stale IDs and stopped runtimes return empty;
+same-profile reloads start fresh counters. Withdrawal completion follows closure
+of old local streams, while a VPN handoff after withdrawal requires a fresh
+request. Raw dialers, UDP and native probes do not count; the snapshot contains
+no routing identities or connection material and does not prove TLS/HTTP success.
+
 The device-local WARP path registers on the device and caches its material by
 `install_unique_id`; a caller must use its own authenticated installation ID
 and cannot reuse another installation's material. First TCP and UDP operations

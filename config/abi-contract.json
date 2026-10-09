@@ -31,6 +31,7 @@
       "pokrovCoreWindowsLocalDpiAdmissionVersion",
       "pokrovCorePrepareWindowsLocalDpiProfile",
       "pokrovCoreReadLocalDpiAdmissionID",
+      "pokrovCoreReadLocalDpiObservation",
       "pokrovCoreAdmitLocalDpiAdmission",
       "pokrovCoreWithdrawLocalDpiAdmission",
       "pokrovCoreTelegramWSAdmissionVersion",
@@ -184,6 +185,14 @@
     "arguments": "Prepare: UTF-8 private config with _meta.local_dpi, compiled native pinned-key map JSON, compiled audience and captured physical interface name. Keys/audience never come from IPC metadata.",
     "returns": "Version is 1 on Windows, 0 elsewhere. Prepare returns caller-owned private JSON {profile,expires_at,services:[{service_id,outbound_tag,control_host,domains:[{name,match,shared}]}]} or empty on invalid scope; release with freeString. It does not start a child, prove TLS or admit a holder.",
     "scope": "Windows-only physically bound TCP443 local path with existing encrypted VPN fallback and exact-ID admission. Signed Windows Selective rules and nonshared exact control host are required. Windows service executor/assets and current profile/network proof are separate requirements; feature default remains OFF. Other desktop platforms retain the existing descriptor."
+  },
+  "windows_local_dpi_observation": {
+    "read_symbol": "pokrovCoreReadLocalDpiObservation",
+    "descriptor_field": "windows_local_dpi_observation_version",
+    "version": 1,
+    "arguments": "Captured Core-generated local DPI admission ID; read only the exact current holder under the running service lock.",
+    "returns": "Caller-owned UTF-8 JSON {state:unpublished|ready|failed|withdrawn,withdraw_completed:bool,local_handoffs:uint64,vpn_handoffs:uint64}; empty for null input, stale ID or unavailable runtime. Release every returned string with freeString. No IDs, tags, service IDs, domains, endpoints or configuration are returned.",
+    "scope": "Optional additive desktop ABI 2 export and Windows descriptor field; required admission version 1 is unchanged. State comes from the admission latch. Completion becomes true only after successful exact-holder withdrawal finishes closing old local flows. Counters record successful TCP connection-manager handoffs after local/protected VPN dial and attach, and reset with each holder. Raw dialers, UDP and native probes do not count. No replay, mutation or proof of TLS/HTTP readiness."
   },
   "telegram_ws_admission": {
     "version_symbol": "pokrovCoreTelegramWSAdmissionVersion",

@@ -112,10 +112,11 @@ $windowsDescriptorConstant = [regex]::Match(
   '(?m)^const pokrovCoreWindowsCapabilitiesJSON = `([^`]+)`\s*$'
 )
 $windowsDpi = $contract.windows_local_dpi_admission
+$windowsDpiObservation = $contract.windows_local_dpi_observation
 $telegramWS = $contract.telegram_ws_admission
 $expectedWindowsDescriptor = $expectedDescriptor.Replace(
   '"local_dpi_admission_version":1,',
-  '"local_dpi_admission_version":1,"' + $windowsDpi.descriptor_field + '":' + $windowsDpi.version + ',"' + $telegramWS.descriptor_field + '":' + $telegramWS.version + ','
+  '"local_dpi_admission_version":1,"' + $windowsDpi.descriptor_field + '":' + $windowsDpi.version + ',"' + $windowsDpiObservation.descriptor_field + '":' + $windowsDpiObservation.version + ',"' + $telegramWS.descriptor_field + '":' + $telegramWS.version + ','
 )
 if (-not $windowsDescriptorConstant.Success -or
     $windowsDescriptorConstant.Groups[1].Value -ne $expectedWindowsDescriptor) {
