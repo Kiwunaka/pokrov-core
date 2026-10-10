@@ -1053,6 +1053,12 @@ encoding remains `unexpected_status`. Original IO causes and caller cancellation
 deadline overrides, strict body size and primary/reserve budgets are retained.
 GET 204 keeps its existing IO failure mapping.
 
+Candidate ACKs optionally carry `http_64k_failure` for generic GET 64 KiB IO
+failures: `write_error`, `header_error`, `body_short` (typed EOF), or
+`body_read_error`. The normal client diagnostics retain this closed detail in
+the owning attempt. Existing failure kinds and context overrides remain intact;
+the detail carries no transport messages, response data or endpoint information.
+
 The candidate result retains its last fixed stage and the monotonic
 `stage_started_ms` offset from probe entry. TLS stages distinguish blocking reads
 and writes from processing and completion of the default CA/hostname check;

@@ -3,6 +3,7 @@ package hcore
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -86,6 +87,36 @@ func TestCandidateProbeGET64KReadsFullBody(t *testing.T) {
 }
 
 func TestCandidateProbeGET64KDetectsStallAfter16K(t *testing.T) {
+	t.Run("short_body", func(t *testing.T) {
+		client, server := net.Pipe()
+		defer client.Close()
+		done := make(chan error, 1)
+		go func() {
+			defer server.Close()
+			if _, err := http.ReadRequest(bufio.NewReader(server)); err != nil {
+				done <- err
+				return
+			}
+			if _, err := fmt.Fprintf(server, "HTTP/1.1 200 OK\r\nX-Pokrov-Egress-Probe: %s\r\nContent-Length: %d\r\n\r\n", candidateProbeMarker, candidatePayloadBytes); err != nil {
+				done <- err
+				return
+			}
+			_, err := server.Write(make([]byte, 16*1024))
+			done <- err
+		}()
+		result := CandidateProbeResult{Stage: "http_64k"}
+		result.FailureKind = candidateGET64K(context.Background(), client, bufio.NewReader(client), candidatePayloadURL, &result.HTTP64KFailure)
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+		var ack map[string]any
+		if err := json.Unmarshal([]byte(result.JSON()), &ack); err != nil {
+			t.Fatal(err)
+		}
+		if result.FailureKind != "probe_failed" || ack["http_64k_failure"] != "body_short" {
+			t.Fatalf("16 KiB EOF lost its closed detail: kind=%s detail=%v", result.FailureKind, ack["http_64k_failure"])
+		}
+	})
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 	client, server := net.Pipe()

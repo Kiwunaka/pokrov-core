@@ -134,15 +134,29 @@ func ProbeGET204(ctx context.Context, conn net.Conn, reader *bufio.Reader, endpo
 	return "", nil
 }
 
-func ProbeGET64K(ctx context.Context, conn net.Conn, reader *bufio.Reader, endpoint string) (string, error) {
+func ProbeGET64K(ctx context.Context, conn net.Conn, reader *bufio.Reader, endpoint string, failureDetail ...*string) (string, error) {
+	recordFailure := func(reason string) {
+		if len(failureDetail) > 0 && failureDetail[0] != nil {
+			*failureDetail[0] = reason
+		}
+	}
+	recordFailure("")
 	request, _ := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	request.Close = true
 	if err := request.Write(conn); err != nil {
-		return probeIOFailureKind(err), err
+		kind := probeIOFailureKind(err)
+		if kind == "probe_failed" {
+			recordFailure("write_error")
+		}
+		return kind, err
 	}
 	response, err := http.ReadResponse(reader, request)
 	if err != nil {
-		return probeIOFailureKind(err), err
+		kind := probeIOFailureKind(err)
+		if kind == "probe_failed" {
+			recordFailure("header_error")
+		}
+		return kind, err
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK || response.Header.Get("X-Pokrov-Egress-Probe") != ProtectedProbeMarker ||
@@ -155,6 +169,11 @@ func ProbeGET64K(ctx context.Context, conn net.Conn, reader *bufio.Reader, endpo
 		}
 		if probeIOFailureKind(err) == "timeout" {
 			return "data_stalled", err
+		}
+		if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+			recordFailure("body_short")
+		} else {
+			recordFailure("body_read_error")
 		}
 		return "probe_failed", err
 	}

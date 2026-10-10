@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.2.13 — unreleased
+
+- Report a closed HTTP 64 KiB failure detail for request writing, response headers,
+  short bodies and body reads through the existing candidate probe result.
+
 ## 1.2.7 — 2026-10-03 (prerelease)
 
 - Classify a successful selected-route HTTPS check whose selected leaf changed as

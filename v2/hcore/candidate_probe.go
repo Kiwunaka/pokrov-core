@@ -37,6 +37,7 @@ type candidateProbeTarget struct {
 type CandidateProbeResult struct {
 	Success               bool   `json:"success"`
 	FailureKind           string `json:"failure_kind"`
+	HTTP64KFailure        string `json:"http_64k_failure,omitempty"`
 	DurationMS            int64  `json:"duration_ms"`
 	Stage                 string `json:"stage,omitempty"`
 	StageStartedMS        int64  `json:"stage_started_ms"`
@@ -146,6 +147,9 @@ func ProbeCandidate(config, id string, timeout time.Duration, bindInterface stri
 			result.Success = false
 			result.FailureKind = "cancelled"
 		}
+		if result.FailureKind != "probe_failed" || result.Stage != "http_64k" {
+			result.HTTP64KFailure = ""
+		}
 	}()
 	if ctx.Err() != nil {
 		return
@@ -203,7 +207,7 @@ func ProbeCandidate(config, id string, timeout time.Duration, bindInterface stri
 		}
 		return conn, err
 	}
-	result.FailureKind = candidateHTTPProbe(ctx, probeDial, reportStage)
+	result.FailureKind = candidateHTTPProbe(ctx, probeDial, reportStage, &result.HTTP64KFailure)
 	result.Success = result.FailureKind == ""
 	return
 }
@@ -354,10 +358,10 @@ func candidateProtectedLeaf(tag string, lookup func(string) (adapter.Outbound, b
 	return nil
 }
 
-func candidateHTTPProbe(ctx context.Context, dial func(context.Context, string, M.Socksaddr) (net.Conn, error), reportStage func(string)) string {
+func candidateHTTPProbe(ctx context.Context, dial func(context.Context, string, M.Socksaddr) (net.Conn, error), reportStage func(string), failureDetail *string) string {
 	var kind string
 	_ = urltest.ProbeOwnedTargets(ctx, func(ctx context.Context, target urltest.OwnedProbeTarget) error {
-		kind = candidateProbeAt(ctx, dial, candidateProbeTarget{target.Host, target.ProbeURL, target.PayloadURL}, reportStage)
+		kind = candidateProbeAt(ctx, dial, candidateProbeTarget{target.Host, target.ProbeURL, target.PayloadURL}, reportStage, failureDetail)
 		if kind == "" {
 			return nil
 		}
@@ -366,7 +370,7 @@ func candidateHTTPProbe(ctx context.Context, dial func(context.Context, string, 
 	return kind
 }
 
-func candidateProbeAt(ctx context.Context, dial func(context.Context, string, M.Socksaddr) (net.Conn, error), target candidateProbeTarget, reportStage func(string)) string {
+func candidateProbeAt(ctx context.Context, dial func(context.Context, string, M.Socksaddr) (net.Conn, error), target candidateProbeTarget, reportStage func(string), failureDetail *string) string {
 	return candidateHTTPSProbe(ctx, dial, target, &tls.Config{
 		ServerName: target.host,
 		MinVersion: tls.VersionTLS12,
@@ -375,10 +379,10 @@ func candidateProbeAt(ctx context.Context, dial func(context.Context, string, M.
 			reportStage("tls_certificate_verified")
 			return nil
 		},
-	}, reportStage)
+	}, reportStage, failureDetail)
 }
 
-func candidateHTTPSProbe(ctx context.Context, dial func(context.Context, string, M.Socksaddr) (net.Conn, error), target candidateProbeTarget, tlsConfig *tls.Config, reportStage func(string)) string {
+func candidateHTTPSProbe(ctx context.Context, dial func(context.Context, string, M.Socksaddr) (net.Conn, error), target candidateProbeTarget, tlsConfig *tls.Config, reportStage func(string), failureDetail *string) string {
 	// Keep dial, TLS and HTTP synchronous so no transport worker outlives cancel.
 	conn, err := dial(ctx, "tcp", M.ParseSocksaddr(target.host+":443"))
 	if err != nil {
@@ -410,7 +414,7 @@ func candidateHTTPSProbe(ctx context.Context, dial func(context.Context, string,
 		return kind
 	}
 	reportStage("http_64k")
-	return candidateGET64K(ctx, secured, reader, target.payloadURL)
+	return candidateGET64K(ctx, secured, reader, target.payloadURL, failureDetail)
 }
 
 // Observe only synchronous TLS IO; Close and deadlines still belong to the
@@ -449,7 +453,7 @@ func candidateGET204(ctx context.Context, conn net.Conn, reader *bufio.Reader, e
 	return kind
 }
 
-func candidateGET64K(ctx context.Context, conn net.Conn, reader *bufio.Reader, endpoint string) string {
-	kind, _ := urltest.ProbeGET64K(ctx, conn, reader, endpoint)
+func candidateGET64K(ctx context.Context, conn net.Conn, reader *bufio.Reader, endpoint string, failureDetail ...*string) string {
+	kind, _ := urltest.ProbeGET64K(ctx, conn, reader, endpoint, failureDetail...)
 	return kind
 }
