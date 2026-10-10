@@ -1057,7 +1057,12 @@ Candidate ACKs optionally carry `http_64k_failure` for generic GET 64 KiB IO
 failures: `write_error`, `header_error`, `body_short` (typed EOF), or
 `body_read_error`. The normal client diagnostics retain this closed detail in
 the owning attempt. Existing failure kinds and context overrides remain intact;
-the detail carries no transport messages, response data or endpoint information.
+the detail carries no transport messages or response data. Generic body failures
+may also carry `http_64k_observation`: the fixed `owned_api` or `owned_reserve`
+target, actual HTTP status and body bytes read, and expected 65536 bytes. This
+tuple comes only from the attempted body read; success, unperformed reads and
+caller cancellation/deadline overrides omit it. It describes the incomplete
+response, without identifying its underlying cause or exposing URLs/headers/body.
 
 The candidate result retains its last fixed stage and the monotonic
 `stage_started_ms` offset from probe entry. TLS stages distinguish blocking reads

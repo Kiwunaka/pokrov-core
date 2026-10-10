@@ -15,6 +15,7 @@ import (
 
 	coreconfig "github.com/Kiwunaka/POKROV-core/v2/config"
 	box "github.com/sagernet/sing-box"
+	"github.com/sagernet/sing-box/common/urltest"
 	"github.com/sagernet/sing-box/experimental/libbox"
 	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing/service/filemanager"
@@ -78,8 +79,12 @@ func TestCandidateProbeGET64KReadsFullBody(t *testing.T) {
 		}
 		done <- err
 	}()
-	if kind := candidateGET64K(context.Background(), client, bufio.NewReader(client), candidatePayloadURL); kind != "" {
+	var detail urltest.HTTP64KDiagnostic
+	if kind := candidateGET64K(context.Background(), client, bufio.NewReader(client), candidatePayloadURL, &detail); kind != "" {
 		t.Fatal(kind)
+	}
+	if detail.Failure != "" || detail.Observation != nil {
+		t.Fatal("full body retained a failure observation")
 	}
 	if err := <-done; err != nil {
 		t.Fatal(err)
@@ -88,33 +93,46 @@ func TestCandidateProbeGET64KReadsFullBody(t *testing.T) {
 
 func TestCandidateProbeGET64KDetectsStallAfter16K(t *testing.T) {
 	t.Run("short_body", func(t *testing.T) {
-		client, server := net.Pipe()
-		defer client.Close()
-		done := make(chan error, 1)
-		go func() {
-			defer server.Close()
-			if _, err := http.ReadRequest(bufio.NewReader(server)); err != nil {
-				done <- err
-				return
-			}
-			if _, err := fmt.Fprintf(server, "HTTP/1.1 200 OK\r\nX-Pokrov-Egress-Probe: %s\r\nContent-Length: %d\r\n\r\n", candidateProbeMarker, candidatePayloadBytes); err != nil {
-				done <- err
-				return
-			}
-			_, err := server.Write(make([]byte, 16*1024))
-			done <- err
-		}()
-		result := CandidateProbeResult{Stage: "http_64k"}
-		result.FailureKind = candidateGET64K(context.Background(), client, bufio.NewReader(client), candidatePayloadURL, &result.HTTP64KFailure)
-		if err := <-done; err != nil {
-			t.Fatal(err)
-		}
-		var ack map[string]any
-		if err := json.Unmarshal([]byte(result.JSON()), &ack); err != nil {
-			t.Fatal(err)
-		}
-		if result.FailureKind != "probe_failed" || ack["http_64k_failure"] != "body_short" {
-			t.Fatalf("16 KiB EOF lost its closed detail: kind=%s detail=%v", result.FailureKind, ack["http_64k_failure"])
+		for _, target := range []struct{ endpoint, name string }{
+			{candidatePayloadURL, "owned_api"}, {urltest.ProtectedReservePayloadURL, "owned_reserve"},
+		} {
+			t.Run(target.name, func(t *testing.T) {
+				client, server := net.Pipe()
+				defer client.Close()
+				done := make(chan error, 1)
+				go func() {
+					defer server.Close()
+					if _, err := http.ReadRequest(bufio.NewReader(server)); err != nil {
+						done <- err
+						return
+					}
+					if _, err := fmt.Fprintf(server, "HTTP/1.1 200 OK\r\nX-Pokrov-Egress-Probe: %s\r\nContent-Length: %d\r\n\r\n", candidateProbeMarker, candidatePayloadBytes); err != nil {
+						done <- err
+						return
+					}
+					_, err := server.Write(make([]byte, 16*1024))
+					done <- err
+				}()
+				var detail urltest.HTTP64KDiagnostic
+				result := CandidateProbeResult{Stage: "http_64k"}
+				result.FailureKind = candidateGET64K(context.Background(), client, bufio.NewReader(client), target.endpoint, &detail)
+				result.HTTP64KFailure, result.HTTP64KObservation = detail.Failure, detail.Observation
+				if err := <-done; err != nil {
+					t.Fatal(err)
+				}
+				var ack map[string]any
+				if err := json.Unmarshal([]byte(result.JSON()), &ack); err != nil {
+					t.Fatal(err)
+				}
+				if result.FailureKind != "probe_failed" || ack["http_64k_failure"] != "body_short" {
+					t.Fatalf("16 KiB EOF lost its closed detail: kind=%s detail=%v", result.FailureKind, ack["http_64k_failure"])
+				}
+				observation, ok := ack["http_64k_observation"].(map[string]any)
+				if !ok || len(observation) != 4 || observation["target"] != target.name || observation["status"] != float64(200) ||
+					observation["received_bytes"] != float64(16*1024) || observation["expected_bytes"] != float64(candidatePayloadBytes) {
+					t.Fatalf("short body lost its actual read observation: %v", observation)
+				}
+			})
 		}
 	})
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
@@ -139,8 +157,12 @@ func TestCandidateProbeGET64KDetectsStallAfter16K(t *testing.T) {
 		done <- err
 	}()
 	go func() { <-ctx.Done(); _ = client.Close() }()
-	if kind := candidateGET64K(ctx, client, bufio.NewReader(client), candidatePayloadURL); kind != "data_stalled" {
+	var detail urltest.HTTP64KDiagnostic
+	if kind := candidateGET64K(ctx, client, bufio.NewReader(client), candidatePayloadURL, &detail); kind != "data_stalled" {
 		t.Fatalf("body stall: %s", kind)
+	}
+	if detail.Failure != "" || detail.Observation != nil {
+		t.Fatal("body timeout retained a generic IO observation")
 	}
 	if err := <-done; err != nil && err != io.ErrClosedPipe {
 		t.Fatal(err)
@@ -194,6 +216,9 @@ func TestCandidateProbeDoesNotExposeProfile(t *testing.T) {
 	value := result.JSON()
 	if strings.Contains(value, "address-private") || strings.Contains(value, "key-s3cr3t") {
 		t.Fatal("connection material leaked into the probe result")
+	}
+	if strings.Contains(value, "http_64k_observation") {
+		t.Fatal("unperformed body read acquired an observation")
 	}
 }
 

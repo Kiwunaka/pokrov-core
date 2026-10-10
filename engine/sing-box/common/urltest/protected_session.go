@@ -27,6 +27,19 @@ const (
 
 type OwnedProbeTarget struct{ Host, ProbeURL, PayloadURL string }
 
+// HTTP64KObservation describes an attempted body read from an owned responder.
+type HTTP64KObservation struct {
+	Target        string `json:"target"`
+	Status        int    `json:"status"`
+	ReceivedBytes int64  `json:"received_bytes"`
+	ExpectedBytes int64  `json:"expected_bytes"`
+}
+
+type HTTP64KDiagnostic struct {
+	Failure     string
+	Observation *HTTP64KObservation
+}
+
 // ProbeOwnedTargets retains the candidate probe's primary/reserve policy inside
 // the caller's deadline. A cancelled caller never opens the reserve session.
 func ProbeOwnedTargets(ctx context.Context, probe func(context.Context, OwnedProbeTarget) error) error {
@@ -134,13 +147,19 @@ func ProbeGET204(ctx context.Context, conn net.Conn, reader *bufio.Reader, endpo
 	return "", nil
 }
 
-func ProbeGET64K(ctx context.Context, conn net.Conn, reader *bufio.Reader, endpoint string, failureDetail ...*string) (string, error) {
+func ProbeGET64K(ctx context.Context, conn net.Conn, reader *bufio.Reader, endpoint string, detail ...*HTTP64KDiagnostic) (string, error) {
+	var diagnostic *HTTP64KDiagnostic
+	if len(detail) > 0 {
+		diagnostic = detail[0]
+	}
+	if diagnostic != nil {
+		*diagnostic = HTTP64KDiagnostic{}
+	}
 	recordFailure := func(reason string) {
-		if len(failureDetail) > 0 && failureDetail[0] != nil {
-			*failureDetail[0] = reason
+		if diagnostic != nil {
+			diagnostic.Failure = reason
 		}
 	}
-	recordFailure("")
 	request, _ := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	request.Close = true
 	if err := request.Write(conn); err != nil {
@@ -163,7 +182,7 @@ func ProbeGET64K(ctx context.Context, conn net.Conn, reader *bufio.Reader, endpo
 		response.ContentLength != ProtectedPayloadBytes || response.Header.Get("Content-Encoding") != "" {
 		return "unexpected_status", errors.New("authenticated egress response invalid")
 	}
-	if _, err := io.CopyN(io.Discard, response.Body, ProtectedPayloadBytes); err != nil {
+	if n, err := io.CopyN(io.Discard, response.Body, ProtectedPayloadBytes); err != nil {
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			return "data_stalled", ctx.Err()
 		}
@@ -174,6 +193,19 @@ func ProbeGET64K(ctx context.Context, conn net.Conn, reader *bufio.Reader, endpo
 			recordFailure("body_short")
 		} else {
 			recordFailure("body_read_error")
+		}
+		if diagnostic != nil {
+			var target string
+			switch endpoint {
+			case ProtectedPayloadURL:
+				target = "owned_api"
+			case ProtectedReservePayloadURL:
+				target = "owned_reserve"
+			}
+			if target != "" {
+				diagnostic.Observation = &HTTP64KObservation{Target: target, Status: response.StatusCode,
+					ReceivedBytes: n, ExpectedBytes: ProtectedPayloadBytes}
+			}
 		}
 		return "probe_failed", err
 	}
