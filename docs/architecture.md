@@ -1064,6 +1064,12 @@ tuple comes only from the attempted body read; success, unperformed reads and
 caller cancellation/deadline overrides omit it. It describes the incomplete
 response, without identifying its underlying cause or exposing URLs/headers/body.
 
+The QUIC IO adapter preserves literal `io.EOF`, including a final read with
+data and EOF. Wrapping that sentinel can stop Go's TLS record reader before it
+processes an already received complete record, leaving the strict body read
+short. Local stream cancellation code 0 and other typed errors keep their
+existing wrapping; TLS verification, body size and probe budgets are unchanged.
+
 The candidate result retains its last fixed stage and the monotonic
 `stage_started_ms` offset from probe entry. TLS stages distinguish blocking reads
 and writes from processing and completion of the default CA/hostname check;

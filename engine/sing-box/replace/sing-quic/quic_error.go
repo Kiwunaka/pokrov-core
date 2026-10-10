@@ -14,8 +14,10 @@ type quicError struct {
 }
 
 func WrapError(err error) error {
-	if err == nil {
-		return nil
+	// Go's TLS record reader requires the literal Reader EOF sentinel, including
+	// a final Read that returns both data and EOF.
+	if err == nil || err == io.EOF {
+		return err
 	}
 	return &quicError{err: err}
 }
