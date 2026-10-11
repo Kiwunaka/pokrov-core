@@ -564,6 +564,12 @@ bypass closes the guard for the remaining compiled group lifetime. Completed
 probe timeout cleanup preserves observations, but only three current completed
 stage passes with an open guard can accompany the separate browser feature
 proof; Core does not prove a feature request or count fallback traffic.
+The bypass observer uses each compiled window's own exact-domain/suffix matcher:
+walking past a sibling domain rule in the same lease does not close readiness,
+including during internal probe window checks. A mismatch of that window's own
+service traffic still closes the guard. IPv4 service DNS windows may route A,
+AAAA, HTTPS and SVCB to the same owned DoH; its NOERROR/NODATA replies do not
+grant IPv6 TCP or QUIC authority and do not retire the member.
 This unreleased object replaces the earlier source-only array; no built artifact
 compatibility is claimed. Android/Windows/Dart use the same 64 KiB response bound.
 

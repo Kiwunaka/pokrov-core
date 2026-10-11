@@ -187,6 +187,9 @@ func NewDefaultDNSRule(ctx context.Context, logger log.ContextLogger, options op
 		if err != nil {
 			return nil, err
 		}
+		if window != nil {
+			window.domainMatch = item
+		}
 		rule.destinationAddressItems = append(rule.destinationAddressItems, item)
 		rule.allItems = append(rule.allItems, item)
 	}

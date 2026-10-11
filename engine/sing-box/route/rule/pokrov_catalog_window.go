@@ -31,6 +31,7 @@ type catalogRuleWindow struct {
 	lease         *smartaccess.Outbound
 	leaseGroupIDs []string
 	leaseGroup    *smartaccess.ServiceLeaseGroup
+	domainMatch   *DomainItem
 	probeCurrent  func(string) bool
 	probeDNS      bool
 	probeServer   string
@@ -176,7 +177,9 @@ func (w *catalogRuleWindow) selected() bool {
 }
 
 func (w *catalogRuleWindow) observeScopedBypass(metadata *adapter.InboundContext) {
-	if w.leaseGroup == nil || w.lease == nil {
+	// A service has a separate compiled window for each domain. Skipping a
+	// sibling domain's rule is normal in both route walks and readiness probes.
+	if w.leaseGroup == nil || w.lease == nil || !w.domainMatch.Match(metadata) {
 		return
 	}
 	domain := metadata.Domain
