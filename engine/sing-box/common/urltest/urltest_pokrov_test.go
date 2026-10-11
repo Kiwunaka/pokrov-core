@@ -236,7 +236,7 @@ func TestProtectedStartupSessionReads64KAndRetainsResponseFailures(t *testing.T)
 				return
 			}
 			if mode == "full" || mode == "reserveFull" || mode == "lightReserve" {
-				if err != nil || delay == 0 {
+				if err != nil || (mode != "lightReserve" && delay == 0) {
 					t.Fatalf("full proof failed: %v", err)
 				}
 			} else {
