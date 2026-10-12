@@ -237,7 +237,7 @@ func genIpcConfig(opts option.AwgEndpointOptions) (string, error) {
 			s += "\npreshared_key=" + hex.EncodeToString(presharedKeyBytes)
 		}
 		if peer.Address != "" && peer.Port != 0 {
-			s += "\nendpoint=" + peer.Address + ":" + format.ToString(peer.Port)
+			s += "\nendpoint=" + net.JoinHostPort(peer.Address, format.ToString(peer.Port))
 		}
 		if peer.PersistentKeepaliveIntervalRange != "" {
 			s += "\npersistent_keepalive_interval=" + peer.PersistentKeepaliveIntervalRange

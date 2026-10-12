@@ -2,6 +2,7 @@ package awg
 
 import (
 	"encoding/json"
+	"net/netip"
 	"os"
 	"strings"
 	"testing"
@@ -90,6 +91,31 @@ func TestSyntheticAWG31FixtureAndIPC(t *testing.T) {
 	if strings.Contains(ipc, fixture.Endpoint.HeaderProtectionKey) || strings.Contains(ipc, fixture.Endpoint.PrivateKey) {
 		t.Fatal("AWG 3.1 IPC config retained base64 key material instead of the engine encoding")
 	}
+}
+
+func TestIPv6PeerEndpointIPCRoundTrip(t *testing.T) {
+	options := loadAWG31Fixture(t).Endpoint
+	options.Peers[0].Address = "2001:db8::1"
+	if err := validateEndpointOptions(options); err != nil {
+		t.Fatalf("IPv6 peer rejected: %v", err)
+	}
+	ipc, err := genIpcConfig(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range strings.Split(ipc, "\n") {
+		if value, ok := strings.CutPrefix(line, "endpoint="); ok {
+			endpoint, err := netip.ParseAddrPort(value)
+			if err != nil {
+				t.Fatalf("generated IPv6 endpoint cannot be parsed by AWG bind: %v", err)
+			}
+			if endpoint.Addr().String() != options.Peers[0].Address || endpoint.Port() != options.Peers[0].Port {
+				t.Fatal("generated endpoint changed the peer address or port")
+			}
+			return
+		}
+	}
+	t.Fatal("generated IPC omitted the peer endpoint")
 }
 
 func TestAWG31SubsetFailsClosedBeforeDeviceCreation(t *testing.T) {

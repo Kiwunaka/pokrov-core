@@ -734,6 +734,10 @@ AWG's separate wildcard sockets therefore receive the matching Windows interface
 control instead of leaving IPv4 traffic on an IPv6-only interface binding through
 a dual-stack socket. Unspecified destination family retains the generic UDP path.
 
+AWG IPC serialization brackets IPv6 peer literals when adding the UDP port,
+so the upstream endpoint parser receives a valid address and port. The focused
+synthetic IPv6 round-trip check covers this boundary without opening a socket.
+
 Cross-field validation also requires disjoint H1-H4 ranges. S1/S2/S3 plus
 their pinned handshake/cookie sizes, S4 plus MTU and the 32-byte transport
 overhead, and junk packet size must fit 2016 bytes: the smallest message buffer
