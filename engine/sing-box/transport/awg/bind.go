@@ -120,11 +120,17 @@ func (b *bind_adapter) Close() error {
 
 	if b.conn4 != nil {
 		err4 = b.conn4.Close()
+		if errors.Is(err4, net.ErrClosed) {
+			err4 = nil
+		}
 		b.conn4 = nil
 	}
 
 	if b.conn6 != nil {
 		err6 = b.conn6.Close()
+		if errors.Is(err6, net.ErrClosed) {
+			err6 = nil
+		}
 		b.conn6 = nil
 	}
 

@@ -8,8 +8,17 @@ import (
 	"testing"
 	"time"
 
+	box "github.com/sagernet/sing-box"
 	"github.com/sagernet/sing-box/adapter"
+	"github.com/sagernet/sing-box/adapter/certificate"
+	"github.com/sagernet/sing-box/adapter/endpoint"
+	"github.com/sagernet/sing-box/adapter/inbound"
+	"github.com/sagernet/sing-box/adapter/outbound"
+	boxservice "github.com/sagernet/sing-box/adapter/service"
+	"github.com/sagernet/sing-box/common/conntrack"
 	"github.com/sagernet/sing-box/common/dialer"
+	"github.com/sagernet/sing-box/dns"
+	"github.com/sagernet/sing-box/dns/transport/local"
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
 	awgtransport "github.com/sagernet/sing-box/transport/awg"
@@ -113,5 +122,68 @@ func TestSyntheticAWGRuntimeDeviceLifecycle(t *testing.T) {
 				t.Fatalf("close runtime device: %v", err)
 			}
 		})
+	}
+}
+
+func TestSyntheticAWGRuntimeReopensOuterSocketsAfterNetworkReset(t *testing.T) {
+	listener, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+
+	options := loadAWG31Fixture(t).Endpoint
+	options.Peers[0].Address = "127.0.0.1"
+	options.Peers[0].Port = uint16(listener.LocalAddr().(*net.UDPAddr).Port)
+	options.RekeyTimeout = "1"
+	endpoints, transports := endpoint.NewRegistry(), dns.NewTransportRegistry()
+	RegisterEndpoint(endpoints)
+	local.RegisterTransport(transports)
+	ctx := box.Context(context.Background(), inbound.NewRegistry(), outbound.NewRegistry(), endpoints,
+		transports, boxservice.NewRegistry(), certificate.NewRegistry())
+	instance, err := box.New(box.Options{Context: ctx, Options: option.Options{
+		Log:       &option.LogOptions{Disabled: true},
+		Endpoints: []option.Endpoint{{Type: "awg", Tag: "synthetic-awg", Options: &options}},
+		Route:     &option.RouteOptions{Final: "synthetic-awg"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer instance.Close()
+	if err := instance.Start(); err != nil {
+		t.Fatal(err)
+	}
+	selected, found := instance.Endpoint().Get("synthetic-awg")
+	if !found {
+		t.Fatal("synthetic AWG endpoint missing")
+	}
+	packet, err := selected.DialContext(ctx, "udp", M.Socksaddr{Addr: netip.MustParseAddr("198.18.0.53"), Port: 53})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer packet.Close()
+	if _, err := packet.Write([]byte("synthetic-before-reset")); err != nil {
+		t.Fatal(err)
+	}
+	outer := make([]byte, 4096)
+	listener.SetReadDeadline(time.Now().Add(3 * time.Second))
+	if _, _, err := listener.ReadFromUDP(outer); err != nil {
+		t.Fatal("AWG emitted no outer packet before reset")
+	}
+	trackedBefore := conntrack.Count()
+	instance.Network().ResetNetwork(ctx)
+	// Discard the pre-reset handshake/junk packets already queued on localhost.
+	listener.SetReadDeadline(time.Now().Add(20 * time.Millisecond))
+	for {
+		if _, _, err := listener.ReadFromUDP(outer); err != nil {
+			break
+		}
+	}
+	if _, err := packet.Write([]byte("synthetic-after-reset")); err != nil {
+		t.Fatal(err)
+	}
+	listener.SetReadDeadline(time.Now().Add(3 * time.Second))
+	if _, _, err := listener.ReadFromUDP(outer); err != nil {
+		t.Fatalf("AWG outer IO did not resume after ResetNetwork (tracked sockets before=%d after=%d)", trackedBefore, conntrack.Count())
 	}
 }

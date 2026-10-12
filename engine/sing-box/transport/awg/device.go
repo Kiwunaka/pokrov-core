@@ -4,6 +4,7 @@ import (
 	"context"
 	"net"
 	"net/netip"
+	"sync"
 
 	"github.com/amnezia-vpn/amneziawg-go/v3/conn"
 	"github.com/amnezia-vpn/amneziawg-go/v3/device"
@@ -25,11 +26,12 @@ type DeviceOpts struct {
 }
 
 type Device struct {
-	awgDevice *device.Device
-	tun       tunAdapter
-	bind      conn.Bind
-	logger    *device.Logger
-	ipcConfig string
+	bindAccess sync.Mutex
+	awgDevice  *device.Device
+	tun        tunAdapter
+	bind       conn.Bind
+	logger     *device.Logger
+	ipcConfig  string
 }
 
 func NewDevice(ctx context.Context, logger logger.ContextLogger, dial network.Dialer, ipcConfig string, opts DeviceOpts) (*Device, error) {
@@ -62,6 +64,8 @@ func (d *Device) Start(stage adapter.StartStage) error {
 	if stage != adapter.StartStateStart {
 		return nil
 	}
+	d.bindAccess.Lock()
+	defer d.bindAccess.Unlock()
 
 	d.awgDevice = device.NewDevice(d.tun, d.bind, d.logger)
 	if err := d.awgDevice.IpcSet(d.ipcConfig); err != nil {
@@ -85,12 +89,27 @@ func (d *Device) Start(stage adapter.StartStage) error {
 }
 
 func (d *Device) Close() error {
+	d.bindAccess.Lock()
+	defer d.bindAccess.Unlock()
 	if d.awgDevice == nil {
 		return nil
 	}
 	d.awgDevice.Close()
 	d.awgDevice = nil
 	return nil
+}
+
+func (d *Device) InterfaceUpdated(ctx context.Context) {
+	go func() {
+		d.bindAccess.Lock()
+		defer d.bindAccess.Unlock()
+		if ctx.Err() != nil || d.awgDevice == nil {
+			return
+		}
+		if err := d.awgDevice.BindUpdate(); err != nil {
+			d.logger.Errorf("Failed to update AWG bind")
+		}
+	}()
 }
 
 func (d *Device) DialContext(ctx context.Context, network string, destination metadata.Socksaddr) (net.Conn, error) {
