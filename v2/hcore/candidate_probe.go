@@ -34,10 +34,15 @@ type candidateProbeTarget struct {
 	host, probeURL, payloadURL string
 }
 
+type CandidateProbeError struct {
+	urltest.ProbeFailure
+	PrimaryError *urltest.ProbeFailure `json:"primary_error,omitempty"`
+}
+
 type CandidateProbeResult struct {
 	Success               bool                        `json:"success"`
 	FailureKind           string                      `json:"failure_kind"`
-	ProbeError            *urltest.ProbeFailure       `json:"probe_error,omitempty"`
+	ProbeError            *CandidateProbeError        `json:"probe_error,omitempty"`
 	HTTP64KFailure        string                      `json:"http_64k_failure,omitempty"`
 	HTTP64KObservation    *urltest.HTTP64KObservation `json:"http_64k_observation,omitempty"`
 	DurationMS            int64                       `json:"duration_ms"`
@@ -217,8 +222,8 @@ func ProbeCandidate(config, id string, timeout time.Duration, bindInterface stri
 		return conn, err
 	}
 	var http64kDiagnostic urltest.HTTP64KDiagnostic
-	var probeError urltest.ProbeFailure
-	result.FailureKind = candidateHTTPProbe(ctx, probeDial, reportStage, &http64kDiagnostic, &probeError)
+	var probeError CandidateProbeError
+	result.FailureKind = candidateHTTPProbe(ctx, started, probeDial, reportStage, &http64kDiagnostic, &probeError)
 	if probeError.Cause != "" {
 		result.ProbeError = &probeError
 	}
@@ -374,13 +379,28 @@ func candidateProtectedLeaf(tag string, lookup func(string) (adapter.Outbound, b
 	return nil
 }
 
-func candidateHTTPProbe(ctx context.Context, dial func(context.Context, string, M.Socksaddr) (net.Conn, error), reportStage func(string), detail *urltest.HTTP64KDiagnostic, failure ...*urltest.ProbeFailure) string {
+func candidateHTTPProbe(ctx context.Context, started time.Time, dial func(context.Context, string, M.Socksaddr) (net.Conn, error), reportStage func(string), detail *urltest.HTTP64KDiagnostic, failure *CandidateProbeError) string {
 	var kind string
 	_ = urltest.ProbeOwnedTargets(ctx, func(ctx context.Context, target urltest.OwnedProbeTarget) error {
-		kind = candidateProbeAt(ctx, dial, candidateProbeTarget{target.Host, target.ProbeURL, target.PayloadURL}, reportStage, detail, failure...)
+		var current urltest.ProbeFailure
+		stageStarted := time.Since(started).Milliseconds()
+		kind = candidateProbeAt(ctx, dial, candidateProbeTarget{target.Host, target.ProbeURL, target.PayloadURL}, func(stage string) {
+			stageStarted = time.Since(started).Milliseconds()
+			reportStage(stage)
+		}, detail, &current)
 		if kind == "" {
+			*failure = CandidateProbeError{}
 			return nil
 		}
+		// Snapshot this target before the reserve resets its own IO diagnostic.
+		current.StageStartedMS = stageStarted
+		current.DurationMS = time.Since(started).Milliseconds()
+		var primary *urltest.ProbeFailure
+		if failure.Target == "owned_api" && failure.Cause != "" {
+			copied := failure.ProbeFailure
+			primary = &copied
+		}
+		*failure = CandidateProbeError{ProbeFailure: current, PrimaryError: primary}
 		return errors.New(kind)
 	})
 	return kind

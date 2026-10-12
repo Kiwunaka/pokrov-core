@@ -18,8 +18,39 @@ import (
 	"github.com/sagernet/sing-box/common/urltest"
 	"github.com/sagernet/sing-box/experimental/libbox"
 	"github.com/sagernet/sing-box/option"
+	M "github.com/sagernet/sing/common/metadata"
 	"github.com/sagernet/sing/service/filemanager"
 )
+
+func TestCandidateProbeRetainsPrimaryBeforeReserveCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var failure CandidateProbeError
+	calls := 0
+	kind := candidateHTTPProbe(ctx, time.Now(), func(ctx context.Context, _ string, _ M.Socksaddr) (net.Conn, error) {
+		calls++
+		time.Sleep(5 * time.Millisecond)
+		if calls == 1 {
+			return nil, io.EOF
+		}
+		cancel()
+		return nil, ctx.Err()
+	}, func(string) {}, nil, &failure)
+	result := CandidateProbeResult{FailureKind: kind, ProbeError: &failure}
+	var wire map[string]any
+	if err := json.Unmarshal([]byte(result.JSON()), &wire); err != nil {
+		t.Fatal(err)
+	}
+	detail := wire["probe_error"].(map[string]any)
+	primary, ok := detail["primary_error"].(map[string]any)
+	if !ok || calls != 2 || primary["cause"] != "eof" || primary["target"] != "owned_api" ||
+		detail["cause"] != "cancelled" || detail["target"] != "owned_reserve" {
+		t.Fatalf("reserve cancellation replaced primary diagnostic: %v", detail)
+	}
+	if primary["duration_ms"].(float64) <= 0 || primary["duration_ms"].(float64) >= detail["duration_ms"].(float64) {
+		t.Fatal("primary completion time was replaced by reserve completion")
+	}
+}
 
 func TestCandidateProbeGETRequires204AndMarker(t *testing.T) {
 	for _, sample := range []struct {

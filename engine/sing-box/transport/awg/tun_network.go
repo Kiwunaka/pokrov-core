@@ -4,6 +4,7 @@ import (
 	"context"
 	"net"
 	"net/netip"
+	"sync"
 
 	"github.com/amnezia-vpn/amneziawg-go/v3/tun"
 	"github.com/amnezia-vpn/amneziawg-go/v3/tun/netstack"
@@ -12,7 +13,10 @@ import (
 
 type networkTun struct {
 	tun.Device
-	conn *netstack.Net
+	conn        *netstack.Net
+	startReady  chan struct{}
+	startOnce   sync.Once
+	readStarted bool
 }
 
 func newNetworkTun(address []netip.Prefix, mtu uint32) (tunAdapter, error) {
@@ -27,13 +31,32 @@ func newNetworkTun(address []netip.Prefix, mtu uint32) (tunAdapter, error) {
 	}
 
 	return &networkTun{
-		Device: tun,
-		conn:   conn,
+		Device:     tun,
+		conn:       conn,
+		startReady: make(chan struct{}),
 	}, nil
 }
 
 func (t *networkTun) Start() error {
+	t.startOnce.Do(func() { close(t.startReady) })
 	return nil
+}
+
+func (t *networkTun) Read(packets [][]byte, sizes []int, offset int) (int, error) {
+	if !t.readStarted {
+		t.readStarted = true
+		<-t.startReady
+		// The pinned engine snapshots S4 before Read, even before IpcSet.
+		// Return no packet once so its sole TUN reader reloads configured S4.
+		return 0, nil
+	}
+	return t.Device.Read(packets, sizes, offset)
+}
+
+func (t *networkTun) Close() error {
+	err := t.Device.Close()
+	t.startOnce.Do(func() { close(t.startReady) })
+	return err
 }
 
 func (t *networkTun) DialContext(ctx context.Context, network string, destination metadata.Socksaddr) (net.Conn, error) {

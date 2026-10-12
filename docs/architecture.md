@@ -733,6 +733,10 @@ serialized with startup and shutdown; sockets already closed by the shared
 connection manager do not prevent reopening. The existing peer and inner
 network stack remain in use.
 
+AWG holds its first TUN read until IPC configuration is applied, then returns an
+empty read once so the pinned engine reloads S4 before the first packet. Failed
+configuration releases the waiting reader during close.
+
 The default dialer keeps explicit IPv4/IPv6 wildcard UDP requests on `udp4`/`udp6`,
 including the platform interface-selection path used by Android candidates.
 AWG's separate wildcard sockets therefore receive the matching Windows interface
@@ -1107,6 +1111,8 @@ and probe deadlines. Cleanup preserves the last
 observed stage, while `duration_ms` continues to include cleanup.
 
 ## Candidate failure diagnostics
+
+When both owned targets fail, `probe_error.primary_error` retains one flat snapshot of the primary failure before the reserve resets its IO state. The outer error remains the reserve failure. Each snapshot keeps its own operation, cause and stage/completion time relative to the candidate start; cancellation and final total duration cannot overwrite the primary snapshot. A single failure keeps the prior wire shape, and a successful reserve does not change the existing success verdict or emit a failure diagnostic.
 
 Isolated candidate probes preserve closed dial/TLS/HTTP failure details separately
 from the caller's timeout or cancellation: logical owned target/request, operation,
