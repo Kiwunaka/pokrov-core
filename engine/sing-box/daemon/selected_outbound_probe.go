@@ -161,7 +161,7 @@ func probeSelectedOutbound(ctx context.Context, tag string,
 			return false, ctx.Err()
 		}
 		current, ok := selectedProbeLeaf(tag, lookup)
-		succeeded := value.err == nil && ctx.Err() == nil && value.delay > 0 && value.delay < 65535
+		succeeded := value.err == nil && ctx.Err() == nil && value.delay < 65535
 		if succeeded && (!ok || current != selected) {
 			return false, errors.New("selected route probe unavailable")
 		}

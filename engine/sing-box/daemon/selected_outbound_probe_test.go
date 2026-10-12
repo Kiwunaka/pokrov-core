@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/sagernet/sing-box/adapter"
 	C "github.com/sagernet/sing-box/constant"
@@ -59,6 +60,13 @@ func TestSelectedProbeCannotConfirmChangedRouteOrDirectLeaf(t *testing.T) {
 		})
 	if !healthy || err != nil {
 		t.Fatal("fresh proof for the replacement leaf was unavailable")
+	}
+	healthy, err = probeRuntimeEgress(context.Background(), time.Second, func() bool { return false }, "select", lookup,
+		func(context.Context, adapter.Outbound) (uint16, error) {
+			return 0, nil // A verified HEAD response can finish within one millisecond.
+		})
+	if !healthy || err != nil {
+		t.Fatal("zero-millisecond runtime proof was rejected")
 	}
 	networkFailure := errors.New("URL probe connection failed")
 	group.selected.Store("a")

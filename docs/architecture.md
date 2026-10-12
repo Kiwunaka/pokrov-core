@@ -294,6 +294,8 @@ Desktop ABI 2 exposes the same checks through `pokrovCoreProbeSelectedOutbound`
 and `pokrovCoreProbeRuntimeEgressV1`; `smart_access_probe_version=1` identifies
 support. Startup retains its existing selected-probe budget; the periodic call
 accepts at most 3000 ms and joins its cancellation observer before return.
+An owned HEAD probe with a valid 204 and marker remains successful when its
+measured latency rounds to zero milliseconds; latency alone cannot reject it.
 Only an empty caller-owned string means healthy; fixed errors disclose no
 transport details. The caller releases every string with `freeString` and owns
 the profile/generation fence. Missing older-library support fails closed for
