@@ -761,6 +761,14 @@ WireGuard. Synthetic documentation-address fixtures may test the typed
 endpoints; real endpoint, key and provider material must not enter source,
 logs, fixtures or retained public evidence.
 
+Naive URI imports use H2/TCP by default. Only `quic=true` or `quic=1`
+selects QUIC; `quic=false` and `quic=0` retain H2/TCP. This parser behavior
+does not admit Naive to the managed catalog or establish endpoint readiness.
+
+`scripts/build-android.ps1 -Arm64Only` builds and validates only arm64-v8a
+for private physical-device candidates. The default release build retains
+all four Android ABIs.
+
 ### Compiled transport inventory (source only)
 
 `include.TransportCapabilities()` is the shared producer behind

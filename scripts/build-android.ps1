@@ -3,7 +3,8 @@ param(
   [string]$AndroidSdk,
   [string]$AndroidNdk,
   [string]$GomobileBinDirectory,
-  [string]$OutputDirectory
+  [string]$OutputDirectory,
+  [switch]$Arm64Only
 )
 
 $ErrorActionPreference = "Stop"
@@ -59,6 +60,8 @@ $goExecutableSuffix = if ($IsWindows) { ".exe" } else { "" }
 $gomobile = Join-Path $GomobileBinDirectory "gomobile$goExecutableSuffix"
 $gobind = Join-Path $GomobileBinDirectory "gobind$goExecutableSuffix"
 $outputPath = Join-Path $OutputDirectory $release.artifacts.android
+$target = if ($Arm64Only) { "android/arm64" } else { "android" }
+$expectedAbis = if ($Arm64Only) { @("arm64-v8a") } else { @("armeabi-v7a", "arm64-v8a", "x86", "x86_64") }
 
 $previousPath = $env:PATH
 $previousGobin = $env:GOBIN
@@ -118,7 +121,7 @@ try {
       -tags $tags `
       -trimpath `
       -ldflags "-w -s -checklinkname=0 -buildid= -X github.com/Kiwunaka/POKROV-core/v2/hcommon/constants.Version=$($release.version)" `
-      -target android `
+      -target $target `
       -o $outputPath `
       "github.com/sagernet/sing-box/experimental/libbox" `
       "./platform/mobile"
@@ -148,7 +151,7 @@ try {
 } finally {
   $archive.Dispose()
 }
-foreach ($abi in @("armeabi-v7a", "arm64-v8a", "x86", "x86_64")) {
+foreach ($abi in $expectedAbis) {
   if ($aarEntries -notcontains "jni/$abi/libpokrov-core.so") {
     throw "Android artifact is missing $abi/libpokrov-core.so."
   }

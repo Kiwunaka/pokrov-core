@@ -43,7 +43,7 @@ func NaiveSingbox(vlessURL string) (*T.Outbound, error) {
 			Password:                    u.Password,
 			InsecureConcurrency:         toInt(getOneOfN(decoded, "0", "insecure_concurrency")),
 			ExtraHeaders:                GetHttpHeaders(getOneOfN(decoded, "", "header")),
-			QUIC:                        getOneOfN(decoded, "", "quic") != "",
+			QUIC:                        decoded["quic"] == "true" || decoded["quic"] == "1",
 			QUICCongestionControl:       getOneOfN(decoded, "", "quic_congestion_control"),
 			OutboundTLSOptionsContainer: tlsOptions,
 			UDPOverTCP:                  &uot,
