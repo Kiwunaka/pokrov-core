@@ -400,7 +400,9 @@ func (d *DefaultDialer) ListenSerialInterfacePacket(ctx context.Context, destina
 		fallbackDelay = d.networkFallbackDelay
 	}
 	network := N.NetworkUDP
-	if destination.IsIPv4() && !destination.Addr.IsUnspecified() {
+	if destination.IsIPv6() {
+		network += "6"
+	} else if destination.IsIPv4() {
 		network += "4"
 	}
 	packetConn, err := d.listenSerialInterfacePacket(ctx, d.udpListener, network, "", *strategy, interfaceType, fallbackInterfaceType, fallbackDelay)

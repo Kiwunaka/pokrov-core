@@ -728,7 +728,8 @@ bootstrap behavior for DNS graphs with FakeIP. AWG peers remain IP literals;
 their socket protection and bootstrap policy remain intact, as do TLS verification
 and the authenticated egress hostname.
 
-The default dialer keeps explicit IPv4/IPv6 wildcard UDP requests on `udp4`/`udp6`.
+The default dialer keeps explicit IPv4/IPv6 wildcard UDP requests on `udp4`/`udp6`,
+including the platform interface-selection path used by Android candidates.
 AWG's separate wildcard sockets therefore receive the matching Windows interface
 control instead of leaving IPv4 traffic on an IPv6-only interface binding through
 a dual-stack socket. Unspecified destination family retains the generic UDP path.
