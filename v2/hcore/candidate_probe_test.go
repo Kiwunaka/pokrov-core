@@ -113,7 +113,8 @@ func TestCandidateProbeGET64KDetectsStallAfter16K(t *testing.T) {
 					_, err := server.Write(make([]byte, 16*1024))
 					done <- err
 				}()
-				var detail urltest.HTTP64KDiagnostic
+				var probeError urltest.ProbeFailure
+				detail := urltest.HTTP64KDiagnostic{ProbeError: &probeError}
 				result := CandidateProbeResult{Stage: "http_64k"}
 				result.FailureKind = candidateGET64K(context.Background(), client, bufio.NewReader(client), target.endpoint, &detail)
 				result.HTTP64KFailure, result.HTTP64KObservation = detail.Failure, detail.Observation
@@ -126,6 +127,9 @@ func TestCandidateProbeGET64KDetectsStallAfter16K(t *testing.T) {
 				}
 				if result.FailureKind != "probe_failed" || ack["http_64k_failure"] != "body_short" {
 					t.Fatalf("16 KiB EOF lost its closed detail: kind=%s detail=%v", result.FailureKind, ack["http_64k_failure"])
+				}
+				if probeError.Operation != "read_body" || probeError.Cause != "unexpected_eof" || probeError.Status != 200 || probeError.Target != target.name {
+					t.Fatalf("short body lost its safe cause: %+v", probeError)
 				}
 				observation, ok := ack["http_64k_observation"].(map[string]any)
 				if !ok || len(observation) != 4 || observation["target"] != target.name || observation["status"] != float64(200) ||

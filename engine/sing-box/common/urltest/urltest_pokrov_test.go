@@ -9,6 +9,7 @@ import (
 	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/json"
 	"errors"
 	"io"
 	"math/big"
@@ -17,6 +18,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -27,6 +29,58 @@ import (
 	N "github.com/sagernet/sing/common/network"
 	"github.com/sagernet/sing/service"
 )
+
+func TestProbe204PreservesSafeCauseAfterCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	client, server := net.Pipe()
+	defer client.Close()
+	go func() {
+		_, _ = http.ReadRequest(bufio.NewReader(server))
+		cancel()
+		_ = server.Close()
+	}()
+	var detail ProbeFailure
+	kind, err := ProbeGET204(ctx, client, bufio.NewReader(client), ProtectedProbeURL, &detail)
+	if kind != "probe_failed" || !errors.Is(err, io.ErrUnexpectedEOF) && !errors.Is(err, io.EOF) {
+		t.Fatalf("unexpected probe result: %s", kind)
+	}
+	if detail.Operation != "read_headers" || detail.Cause != "unexpected_eof" && detail.Cause != "eof" ||
+		detail.Context != "cancelled" || detail.Target != "owned_api" || detail.Request != "egress_204" || detail.Status != 0 {
+		t.Fatalf("lost original failure while cancelled: %+v", detail)
+	}
+	wrapped := &net.OpError{Op: "dial", Net: "tcp", Addr: &net.TCPAddr{IP: net.IPv4(192, 0, 2, 1), Port: 443}, Err: syscall.ECONNREFUSED}
+	detail.Capture(ctx, "dial", ProtectedProbeURL, wrapped, 0, time.Now())
+	encoded, _ := json.Marshal(detail)
+	if detail.OSErrorCode != int(syscall.ECONNREFUSED) || detail.Cause != "io" || strings.Contains(string(encoded), "192.0.2") || strings.Contains(string(encoded), "https:") {
+		t.Fatal("OS cause missing or raw network material retained")
+	}
+}
+
+func TestProbe204RejectsInvalidStatusWithoutDrainingBody(t *testing.T) {
+	client, server := net.Pipe()
+	defer client.Close()
+	defer server.Close()
+	go func() {
+		_, _ = http.ReadRequest(bufio.NewReader(server))
+		_, _ = io.WriteString(server, "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n")
+	}()
+	done := make(chan string, 1)
+	var detail ProbeFailure
+	go func() {
+		kind, _ := ProbeGET204(context.Background(), client, bufio.NewReader(client), ProtectedProbeURL, &detail)
+		done <- kind
+	}()
+	select {
+	case kind := <-done:
+		if kind != "unexpected_status" || detail.Status != 200 || detail.Operation != "validate_response" {
+			t.Fatalf("wrong rejection: %s %+v", kind, detail)
+		}
+	case <-time.After(time.Second):
+		_ = server.Close()
+		<-done
+		t.Fatal("invalid response waited for its body instead of preserving status")
+	}
+}
 
 type localProbeDialer struct {
 	N.Dialer

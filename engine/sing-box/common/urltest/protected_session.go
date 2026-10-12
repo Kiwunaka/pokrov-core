@@ -4,10 +4,12 @@ import (
 	"bufio"
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"io"
 	"net"
 	"net/http"
+	"syscall"
 	"time"
 
 	"github.com/sagernet/sing-box/adapter"
@@ -27,6 +29,73 @@ const (
 
 type OwnedProbeTarget struct{ Host, ProbeURL, PayloadURL string }
 
+// ProbeFailure preserves an attempted operation's cause separately from caller
+// cancellation. It never retains error text, addresses, headers or payloads.
+type ProbeFailure struct {
+	Operation      string `json:"operation"`
+	Cause          string `json:"cause"`
+	Context        string `json:"cancel_state"`
+	Target         string `json:"target"`
+	Request        string `json:"request"`
+	ElapsedMS      int64  `json:"elapsed_ms"`
+	StageStartedMS int64  `json:"stage_started_ms"`
+	DurationMS     int64  `json:"duration_ms"`
+	Status         int    `json:"status,omitempty"`
+	OSErrorCode    int    `json:"os_error_code,omitempty"`
+}
+
+func (d *ProbeFailure) Capture(ctx context.Context, operation, endpoint string, err error, status int, started time.Time) {
+	if d == nil {
+		return
+	}
+	*d = ProbeFailure{Operation: operation, Cause: "io", Context: "active", Status: status,
+		ElapsedMS: time.Since(started).Milliseconds()}
+	switch endpoint {
+	case ProtectedProbeURL, ProtectedPayloadURL:
+		d.Target = "owned_api"
+	case ProtectedReserveProbeURL, ProtectedReservePayloadURL:
+		d.Target = "owned_reserve"
+	}
+	switch endpoint {
+	case ProtectedProbeURL, ProtectedReserveProbeURL:
+		d.Request = "egress_204"
+	case ProtectedPayloadURL, ProtectedReservePayloadURL:
+		d.Request = "egress_64k"
+	}
+	var networkError net.Error
+	var dnsError *net.DNSError
+	var certificateError *tls.CertificateVerificationError
+	var unknownAuthority x509.UnknownAuthorityError
+	var errno syscall.Errno
+	switch {
+	case errors.Is(err, context.DeadlineExceeded), errors.As(err, &networkError) && networkError.Timeout():
+		d.Cause = "timeout"
+	case errors.Is(err, context.Canceled):
+		d.Cause = "cancelled"
+	case errors.Is(err, io.ErrUnexpectedEOF):
+		d.Cause = "unexpected_eof"
+	case errors.Is(err, io.EOF):
+		d.Cause = "eof"
+	case errors.Is(err, net.ErrClosed), errors.Is(err, io.ErrClosedPipe):
+		d.Cause = "closed"
+	case errors.As(err, &dnsError):
+		d.Cause = "dns"
+	case errors.As(err, &certificateError), errors.As(err, &unknownAuthority):
+		d.Cause = "tls_certificate"
+	case operation == "validate_response":
+		d.Cause = "invalid_response"
+	}
+	if errors.As(err, &errno) {
+		d.OSErrorCode = int(errno)
+	}
+	switch ctx.Err() {
+	case context.DeadlineExceeded:
+		d.Context = "deadline"
+	case context.Canceled:
+		d.Context = "cancelled"
+	}
+}
+
 // HTTP64KObservation describes an attempted body read from an owned responder.
 type HTTP64KObservation struct {
 	Target        string `json:"target"`
@@ -38,6 +107,7 @@ type HTTP64KObservation struct {
 type HTTP64KDiagnostic struct {
 	Failure     string
 	Observation *HTTP64KObservation
+	ProbeError  *ProbeFailure
 }
 
 // ProbeOwnedTargets retains the candidate probe's primary/reserve policy inside
@@ -131,29 +201,44 @@ func protectedURLTestAt(ctx context.Context, detour N.Dialer, target OwnedProbeT
 // ProbeGET204 and ProbeGET64K share the candidate/startup HTTP exchange. The
 // returned closed kind preserves the candidate diagnostic contract; err keeps
 // the original IO/context cause for typed runtime probe errors.
-func ProbeGET204(ctx context.Context, conn net.Conn, reader *bufio.Reader, endpoint string) (string, error) {
+func ProbeGET204(ctx context.Context, conn net.Conn, reader *bufio.Reader, endpoint string, detail ...*ProbeFailure) (string, error) {
+	var diagnostic *ProbeFailure
+	if len(detail) > 0 {
+		diagnostic = detail[0]
+	}
+	started := time.Now()
 	request, _ := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err := request.Write(conn); err != nil {
+		diagnostic.Capture(ctx, "write", endpoint, err, 0, started)
 		return "probe_failed", err
 	}
+	started = time.Now()
 	response, err := http.ReadResponse(reader, request)
 	if err != nil {
+		diagnostic.Capture(ctx, "read_headers", endpoint, err, 0, started)
 		return "probe_failed", err
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusNoContent || response.Header.Get("X-Pokrov-Egress-Probe") != ProtectedProbeMarker {
-		return "unexpected_status", errors.New("authenticated egress response invalid")
+		err = errors.New("authenticated egress response invalid")
+		diagnostic.Capture(ctx, "validate_response", endpoint, err, response.StatusCode, started)
+		// This session has failed. Closing the socket prevents Body.Close from
+		// draining an invalid response until the caller's entire budget expires.
+		_ = conn.Close()
+		return "unexpected_status", err
 	}
 	return "", nil
 }
 
 func ProbeGET64K(ctx context.Context, conn net.Conn, reader *bufio.Reader, endpoint string, detail ...*HTTP64KDiagnostic) (string, error) {
 	var diagnostic *HTTP64KDiagnostic
+	var probeError *ProbeFailure
 	if len(detail) > 0 {
 		diagnostic = detail[0]
 	}
 	if diagnostic != nil {
-		*diagnostic = HTTP64KDiagnostic{}
+		probeError = diagnostic.ProbeError
+		*diagnostic = HTTP64KDiagnostic{ProbeError: probeError}
 	}
 	recordFailure := func(reason string) {
 		if diagnostic != nil {
@@ -162,15 +247,19 @@ func ProbeGET64K(ctx context.Context, conn net.Conn, reader *bufio.Reader, endpo
 	}
 	request, _ := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	request.Close = true
+	started := time.Now()
 	if err := request.Write(conn); err != nil {
+		probeError.Capture(ctx, "write", endpoint, err, 0, started)
 		kind := probeIOFailureKind(err)
 		if kind == "probe_failed" {
 			recordFailure("write_error")
 		}
 		return kind, err
 	}
+	started = time.Now()
 	response, err := http.ReadResponse(reader, request)
 	if err != nil {
+		probeError.Capture(ctx, "read_headers", endpoint, err, 0, started)
 		kind := probeIOFailureKind(err)
 		if kind == "probe_failed" {
 			recordFailure("header_error")
@@ -180,9 +269,14 @@ func ProbeGET64K(ctx context.Context, conn net.Conn, reader *bufio.Reader, endpo
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK || response.Header.Get("X-Pokrov-Egress-Probe") != ProtectedProbeMarker ||
 		response.ContentLength != ProtectedPayloadBytes || response.Header.Get("Content-Encoding") != "" {
-		return "unexpected_status", errors.New("authenticated egress response invalid")
+		err = errors.New("authenticated egress response invalid")
+		probeError.Capture(ctx, "validate_response", endpoint, err, response.StatusCode, started)
+		_ = conn.Close()
+		return "unexpected_status", err
 	}
+	started = time.Now()
 	if n, err := io.CopyN(io.Discard, response.Body, ProtectedPayloadBytes); err != nil {
+		probeError.Capture(ctx, "read_body", endpoint, err, response.StatusCode, started)
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			return "data_stalled", ctx.Err()
 		}

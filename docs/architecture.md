@@ -1096,3 +1096,12 @@ Zero setup milliseconds mean sub-millisecond work or a phase not entered, as
 identified by the last stage. The diagnostics preserve execution, trust, curves
 and probe deadlines. Cleanup preserves the last
 observed stage, while `duration_ms` continues to include cleanup.
+
+## Candidate failure diagnostics
+
+Isolated candidate probes preserve closed dial/TLS/HTTP failure details separately
+from the caller's timeout or cancellation: logical owned target/request, operation,
+cause, OS error number or HTTP status when observed, and stage/operation/total timing.
+Invalid owned HTTP responses close the failed session before body cleanup so a
+stalled rejected response cannot replace its status with a timeout. No error text,
+address, response body or connection material enters the returned diagnostic.

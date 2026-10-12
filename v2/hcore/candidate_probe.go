@@ -37,6 +37,7 @@ type candidateProbeTarget struct {
 type CandidateProbeResult struct {
 	Success               bool                        `json:"success"`
 	FailureKind           string                      `json:"failure_kind"`
+	ProbeError            *urltest.ProbeFailure       `json:"probe_error,omitempty"`
 	HTTP64KFailure        string                      `json:"http_64k_failure,omitempty"`
 	HTTP64KObservation    *urltest.HTTP64KObservation `json:"http_64k_observation,omitempty"`
 	DurationMS            int64                       `json:"duration_ms"`
@@ -81,7 +82,13 @@ func CancelCandidateProbe(id string) {
 func ProbeCandidate(config, id string, timeout time.Duration, bindInterface string,
 	platform libbox.PlatformInterface, interrupted func() bool, stage ...func(string)) (result CandidateProbeResult) {
 	started := time.Now()
-	defer func() { result.DurationMS = time.Since(started).Milliseconds() }()
+	defer func() {
+		result.DurationMS = time.Since(started).Milliseconds()
+		if result.ProbeError != nil {
+			result.ProbeError.StageStartedMS = result.StageStartedMS
+			result.ProbeError.DurationMS = result.DurationMS
+		}
+	}()
 	reportStage := func(name string) {
 		result.Stage = name
 		result.StageStartedMS = time.Since(started).Milliseconds()
@@ -210,7 +217,11 @@ func ProbeCandidate(config, id string, timeout time.Duration, bindInterface stri
 		return conn, err
 	}
 	var http64kDiagnostic urltest.HTTP64KDiagnostic
-	result.FailureKind = candidateHTTPProbe(ctx, probeDial, reportStage, &http64kDiagnostic)
+	var probeError urltest.ProbeFailure
+	result.FailureKind = candidateHTTPProbe(ctx, probeDial, reportStage, &http64kDiagnostic, &probeError)
+	if probeError.Cause != "" {
+		result.ProbeError = &probeError
+	}
 	result.HTTP64KFailure = http64kDiagnostic.Failure
 	result.HTTP64KObservation = http64kDiagnostic.Observation
 	result.Success = result.FailureKind == ""
@@ -363,10 +374,10 @@ func candidateProtectedLeaf(tag string, lookup func(string) (adapter.Outbound, b
 	return nil
 }
 
-func candidateHTTPProbe(ctx context.Context, dial func(context.Context, string, M.Socksaddr) (net.Conn, error), reportStage func(string), detail *urltest.HTTP64KDiagnostic) string {
+func candidateHTTPProbe(ctx context.Context, dial func(context.Context, string, M.Socksaddr) (net.Conn, error), reportStage func(string), detail *urltest.HTTP64KDiagnostic, failure ...*urltest.ProbeFailure) string {
 	var kind string
 	_ = urltest.ProbeOwnedTargets(ctx, func(ctx context.Context, target urltest.OwnedProbeTarget) error {
-		kind = candidateProbeAt(ctx, dial, candidateProbeTarget{target.Host, target.ProbeURL, target.PayloadURL}, reportStage, detail)
+		kind = candidateProbeAt(ctx, dial, candidateProbeTarget{target.Host, target.ProbeURL, target.PayloadURL}, reportStage, detail, failure...)
 		if kind == "" {
 			return nil
 		}
@@ -375,7 +386,7 @@ func candidateHTTPProbe(ctx context.Context, dial func(context.Context, string, 
 	return kind
 }
 
-func candidateProbeAt(ctx context.Context, dial func(context.Context, string, M.Socksaddr) (net.Conn, error), target candidateProbeTarget, reportStage func(string), detail *urltest.HTTP64KDiagnostic) string {
+func candidateProbeAt(ctx context.Context, dial func(context.Context, string, M.Socksaddr) (net.Conn, error), target candidateProbeTarget, reportStage func(string), detail *urltest.HTTP64KDiagnostic, failure ...*urltest.ProbeFailure) string {
 	return candidateHTTPSProbe(ctx, dial, target, &tls.Config{
 		ServerName: target.host,
 		MinVersion: tls.VersionTLS12,
@@ -384,16 +395,23 @@ func candidateProbeAt(ctx context.Context, dial func(context.Context, string, M.
 			reportStage("tls_certificate_verified")
 			return nil
 		},
-	}, reportStage, detail)
+	}, reportStage, detail, failure...)
 }
 
-func candidateHTTPSProbe(ctx context.Context, dial func(context.Context, string, M.Socksaddr) (net.Conn, error), target candidateProbeTarget, tlsConfig *tls.Config, reportStage func(string), detail *urltest.HTTP64KDiagnostic) string {
+func candidateHTTPSProbe(ctx context.Context, dial func(context.Context, string, M.Socksaddr) (net.Conn, error), target candidateProbeTarget, tlsConfig *tls.Config, reportStage func(string), detail *urltest.HTTP64KDiagnostic, failure ...*urltest.ProbeFailure) string {
 	if detail != nil {
 		*detail = urltest.HTTP64KDiagnostic{}
 	}
+	var diagnostic *urltest.ProbeFailure
+	if len(failure) > 0 {
+		diagnostic = failure[0]
+		*diagnostic = urltest.ProbeFailure{}
+	}
 	// Keep dial, TLS and HTTP synchronous so no transport worker outlives cancel.
+	started := time.Now()
 	conn, err := dial(ctx, "tcp", M.ParseSocksaddr(target.host+":443"))
 	if err != nil {
+		diagnostic.Capture(ctx, "dial", target.probeURL, err, 0, started)
 		return "connect_failed"
 	}
 	defer conn.Close()
@@ -411,17 +429,22 @@ func candidateHTTPSProbe(ctx context.Context, dial func(context.Context, string,
 	reportStage("tls_handshake")
 	tracked := &candidateTLSConn{Conn: conn, reportStage: reportStage}
 	secured := tls.Client(tracked, tlsConfig)
+	started = time.Now()
 	if err := secured.HandshakeContext(ctx); err != nil {
+		diagnostic.Capture(ctx, "tls", target.probeURL, err, 0, started)
 		return "tls_failed"
 	}
 	tracked.reportStage = nil
 	reportStage("tls_complete")
 	reader := bufio.NewReader(secured)
 	reportStage("http_204")
-	if kind := candidateGET204(ctx, secured, reader, target.probeURL); kind != "" {
+	if kind := candidateGET204(ctx, secured, reader, target.probeURL, diagnostic); kind != "" {
 		return kind
 	}
 	reportStage("http_64k")
+	if detail != nil {
+		detail.ProbeError = diagnostic
+	}
 	return candidateGET64K(ctx, secured, reader, target.payloadURL, detail)
 }
 
@@ -456,8 +479,8 @@ func (c *candidateTLSConn) Write(p []byte) (n int, err error) {
 	return
 }
 
-func candidateGET204(ctx context.Context, conn net.Conn, reader *bufio.Reader, endpoint string) string {
-	kind, _ := urltest.ProbeGET204(ctx, conn, reader, endpoint)
+func candidateGET204(ctx context.Context, conn net.Conn, reader *bufio.Reader, endpoint string, detail ...*urltest.ProbeFailure) string {
+	kind, _ := urltest.ProbeGET204(ctx, conn, reader, endpoint, detail...)
 	return kind
 }
 
