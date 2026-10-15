@@ -277,17 +277,6 @@ func ProbeGET64K(ctx context.Context, conn net.Conn, reader *bufio.Reader, endpo
 	started = time.Now()
 	if n, err := io.CopyN(io.Discard, response.Body, ProtectedPayloadBytes); err != nil {
 		probeError.Capture(ctx, "read_body", endpoint, err, response.StatusCode, started)
-		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return "data_stalled", ctx.Err()
-		}
-		if probeIOFailureKind(err) == "timeout" {
-			return "data_stalled", err
-		}
-		if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
-			recordFailure("body_short")
-		} else {
-			recordFailure("body_read_error")
-		}
 		if diagnostic != nil {
 			var target string
 			switch endpoint {
@@ -300,6 +289,17 @@ func ProbeGET64K(ctx context.Context, conn net.Conn, reader *bufio.Reader, endpo
 				diagnostic.Observation = &HTTP64KObservation{Target: target, Status: response.StatusCode,
 					ReceivedBytes: n, ExpectedBytes: ProtectedPayloadBytes}
 			}
+		}
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return "data_stalled", ctx.Err()
+		}
+		if probeIOFailureKind(err) == "timeout" {
+			return "data_stalled", err
+		}
+		if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+			recordFailure("body_short")
+		} else {
+			recordFailure("body_read_error")
 		}
 		return "probe_failed", err
 	}

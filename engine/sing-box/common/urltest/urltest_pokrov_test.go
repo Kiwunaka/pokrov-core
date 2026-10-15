@@ -242,7 +242,7 @@ func TestProtectedStartupSessionReads64KAndRetainsResponseFailures(t *testing.T)
 			}
 			var delay uint16
 			var err error
-			if eofMode {
+			if eofMode || mode == "stall16k" {
 				var bodyKind string
 				var detail HTTP64KDiagnostic
 				err = ProbeOwnedTargets(ctx, func(ctx context.Context, target OwnedProbeTarget) error {
@@ -251,6 +251,8 @@ func TestProtectedStartupSessionReads64KAndRetainsResponseFailures(t *testing.T)
 						return err
 					}
 					defer conn.Close()
+					stopClose := context.AfterFunc(ctx, func() { _ = conn.Close() })
+					defer stopClose()
 					secured := tls.Client(conn, &tls.Config{ServerName: target.Host, RootCAs: roots, MinVersion: tls.VersionTLS12})
 					if err := secured.HandshakeContext(ctx); err != nil {
 						return err
@@ -260,17 +262,26 @@ func TestProtectedStartupSessionReads64KAndRetainsResponseFailures(t *testing.T)
 						return err
 					}
 					bodyKind, err = ProbeGET64K(ctx, secured, reader, target.PayloadURL, &detail)
+					if err != nil && mode == "stall16k" {
+						return &ProbeError{Stage: ProbeStageResponse, Err: err}
+					}
 					return err
 				})
-				if ctx.Err() != nil || !terminalWithData.Load() || payloadWritten.Load() != ProtectedPayloadBytes {
+				if mode == "stall16k" {
+					if bodyKind != "data_stalled" || detail.Failure != "" || detail.Observation == nil ||
+						detail.Observation.Target != "owned_reserve" || detail.Observation.Status != http.StatusOK ||
+						detail.Observation.ReceivedBytes != 16*1024 || detail.Observation.ExpectedBytes != ProtectedPayloadBytes {
+						t.Fatalf("deadline lost partial body observation: kind=%s detail=%+v", bodyKind, detail.Observation)
+					}
+				} else if ctx.Err() != nil || !terminalWithData.Load() || payloadWritten.Load() != ProtectedPayloadBytes {
 					t.Fatal("terminal EOF fixture did not finish its read with a live context")
 				}
-				if detail.Observation != nil {
+				if eofMode && detail.Observation != nil {
 					t.Fatalf("full verified response failed at http_64k: kind=%s detail=%s target=%s status=%d received=%d/%d",
 						bodyKind, detail.Failure, detail.Observation.Target, detail.Observation.Status,
 						detail.Observation.ReceivedBytes, detail.Observation.ExpectedBytes)
 				}
-				if err != nil || bodyKind != "" || detail.Failure != "" {
+				if eofMode && (err != nil || bodyKind != "" || detail.Failure != "") {
 					t.Fatal("full response did not pass the strict 65536 byte read")
 				}
 			} else {

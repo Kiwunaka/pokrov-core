@@ -1094,6 +1094,12 @@ tuple comes only from the attempted body read; success, unperformed reads and
 caller cancellation/deadline overrides omit it. It describes the incomplete
 response, without identifying its underlying cause or exposing URLs/headers/body.
 
+The internal payload reader also records this tuple before returning a body
+timeout, so a partial read is not lost when the deadline expires. The existing
+16 KiB stall fixture checks the retained count. The hcore candidate ACK filter
+still omits observations for `data_stalled`; this source change does not expand
+the wire contract and has not been built into the accepted 1.2.14 runtime.
+
 The QUIC IO adapter preserves literal `io.EOF`, including a final read with
 data and EOF. Wrapping that sentinel can stop Go's TLS record reader before it
 processes an already received complete record, leaving the strict body read
