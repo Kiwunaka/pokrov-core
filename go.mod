@@ -317,3 +317,5 @@ replace github.com/Psiphon-Labs/psiphon-tls => ./engine/sing-box/replace/psiphon
 replace github.com/sagernet/sing-tun => ./engine/sing-box/replace/sing-tun
 
 replace github.com/sagernet/sing-quic => ./engine/sing-box/replace/sing-quic
+
+replace github.com/amnezia-vpn/amneziawg-go/v3 => ./engine/sing-box/replace/amneziawg-go

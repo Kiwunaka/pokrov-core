@@ -702,10 +702,18 @@ graph. Their machine owners are `config/awg2-capability.json` and
 lab is pinned by `config/hy2-capability.json` as
 `pokrov.hy2.outbound.v1`; raw `hysteria2://` and `hy2://` conversion remains
 disabled so only a provenance-bound managed profile can reach the embedded
-official sing-box outbound. The engine uses the official pinned
-`amneziawg-go/v3` module for both modes; POKROV adds only typed configuration,
+official sing-box outbound. The engine pins `amneziawg-go/v3 v3.1.20260814`
+through a local replace for both modes; POKROV adds typed configuration,
 validation and host integration, not custom cryptography. AWG 3.1 requires an
 explicit contract ID and remains wire-incompatible with AWG2.
+
+The local AWG copy backports only upstream [PR #205, commit 0421ab3](https://github.com/amnezia-vpn/amneziawg-go/commit/0421ab3db604c66f4f4895f9c677f0309481d889):
+timer expiry clears `duration` before releasing `modifyingLock`, preserving a
+concurrent reset. The upstream race regression failed on the original source
+and passed after this change with Go 1.26.8 on Windows. Both module roots resolve
+to that local copy; the focused protocol/awg integration test also passes. This is source-only;
+client and server binaries are unchanged, and no network failure is attributed
+to this race.
 
 Android and Windows release builds include the `with_awg` tag. The retained
 release ABI descriptor does not advertise either AWG lab. The new optional

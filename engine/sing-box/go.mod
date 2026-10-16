@@ -295,3 +295,5 @@ replace github.com/Psiphon-Labs/psiphon-tls => ./replace/psiphon-tls
 replace github.com/sagernet/sing-tun => ./replace/sing-tun
 
 replace github.com/sagernet/sing-quic => ./replace/sing-quic
+
+replace github.com/amnezia-vpn/amneziawg-go/v3 => ./replace/amneziawg-go
