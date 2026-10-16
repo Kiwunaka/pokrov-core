@@ -89,6 +89,9 @@ func TestEndpointResolvesDomainBeforeDialingAWGDevice(t *testing.T) {
 			if !errors.Is(err, expected) {
 				t.Fatalf("expected AWG endpoint DNS error, got %v", err)
 			}
+			if endpoint.destinationDNS.Load() != "failed" {
+				t.Fatal("destination DNS failure must remain distinct from AWG handshake")
+			}
 			if dnsRouter.lastOptions.Strategy != C.DomainStrategyIPv4Only || dnsRouter.lastOptions.Transport != test.transport {
 				t.Fatal("AWG endpoint ignored its explicit resolver or changed the default bootstrap options")
 			}

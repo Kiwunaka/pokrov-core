@@ -26,12 +26,13 @@ type DeviceOpts struct {
 }
 
 type Device struct {
-	bindAccess sync.Mutex
-	awgDevice  *device.Device
-	tun        tunAdapter
-	bind       conn.Bind
-	logger     *device.Logger
-	ipcConfig  string
+	bindAccess  sync.Mutex
+	awgDevice   *device.Device
+	tun         tunAdapter
+	bind        conn.Bind
+	logger      *device.Logger
+	diagnostics *safeDeviceLogAdapter
+	ipcConfig   string
 }
 
 func NewDevice(ctx context.Context, logger logger.ContextLogger, dial network.Dialer, ipcConfig string, opts DeviceOpts) (*Device, error) {
@@ -52,12 +53,19 @@ func NewDevice(ctx context.Context, logger logger.ContextLogger, dial network.Di
 		}
 	}
 
+	deviceLogger, diagnostics := newSafeDeviceLogger(logger)
 	return &Device{
-		tun:       tun,
-		bind:      newBind(ctx, dial),
-		logger:    newSafeDeviceLogger(logger),
-		ipcConfig: ipcConfig,
+		tun:         tun,
+		bind:        newBind(ctx, dial),
+		logger:      deviceLogger,
+		diagnostics: diagnostics,
+		ipcConfig:   ipcConfig,
 	}, nil
+}
+
+// AWGHandshakeSnapshot contains only bounded classifier counts for this device.
+func (d *Device) AWGHandshakeSnapshot() map[string]any {
+	return d.diagnostics.snapshot()
 }
 
 func (d *Device) Start(stage adapter.StartStage) error {

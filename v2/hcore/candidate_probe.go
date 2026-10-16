@@ -37,6 +37,7 @@ type candidateProbeTarget struct {
 type CandidateProbeError struct {
 	urltest.ProbeFailure
 	PrimaryError *urltest.ProbeFailure `json:"primary_error,omitempty"`
+	AWG          map[string]any        `json:"awg,omitempty"`
 }
 
 type CandidateProbeResult struct {
@@ -212,6 +213,15 @@ func ProbeCandidate(config, id string, timeout time.Duration, bindInterface stri
 	if selected == nil {
 		result.FailureKind = "invalid_profile"
 		return
+	}
+	if awg, ok := selected.(interface{ AWGProbeSnapshot() map[string]any }); ok {
+		defer func() {
+			// Join the device before freezing counts, including cancellation.
+			closeInstance()
+			if result.ProbeError != nil {
+				result.ProbeError.AWG = awg.AWGProbeSnapshot()
+			}
+		}()
 	}
 	probeDial := func(ctx context.Context, network string, destination M.Socksaddr) (net.Conn, error) {
 		reportStage("proxy_dial")

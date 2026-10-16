@@ -25,6 +25,37 @@ type readStartedTun struct {
 	once    sync.Once
 }
 
+func TestAWGProbeCountersAreDeviceLocalAndSurviveClose(t *testing.T) {
+	logger, counters := newSafeDeviceLogger(log.NewNOPFactory().Logger())
+	_, otherCounters := newSafeDeviceLogger(log.NewNOPFactory().Logger())
+	current := &Device{diagnostics: counters}
+	other := &Device{diagnostics: otherCounters}
+	for i := 0; i < 7; i++ {
+		logger.Verbosef("%s - Sending handshake initiation", "never-format-peer")
+	}
+	logger.Errorf("%s - Failed to send handshake initiation: %v", "never-format-peer", "never-format-error")
+	logger.Verbosef("%s - Received handshake response", "never-format-peer")
+	logger.Verbosef("%s - Handshake did not complete after 5 seconds, retrying", "never-format-peer")
+	if err := current.Close(); err != nil {
+		t.Fatal(err)
+	}
+	snapshot := current.AWGHandshakeSnapshot()
+	if len(snapshot) != 4 || snapshot["handshake_initiations"] != uint8(4) ||
+		snapshot["handshake_errors"] != uint8(1) || snapshot["handshake_responses"] != uint8(1) ||
+		snapshot["handshake_retries"] != uint8(1) {
+		t.Fatal("bounded closed counters lost after cleanup")
+	}
+	for _, count := range other.AWGHandshakeSnapshot() {
+		if count != uint8(0) {
+			t.Fatal("another candidate inherited counters")
+		}
+	}
+	snapshot["handshake_initiations"] = uint8(0)
+	if current.AWGHandshakeSnapshot()["handshake_initiations"] != uint8(4) {
+		t.Fatal("snapshot is not detached from the device")
+	}
+}
+
 func (t *readStartedTun) Read(packets [][]byte, sizes []int, offset int) (int, error) {
 	t.once.Do(func() { close(t.reading) })
 	return t.tunAdapter.Read(packets, sizes, offset)
@@ -54,7 +85,8 @@ func TestFirstPacketUsesConfiguredTransportPadding(t *testing.T) {
 			t.Fatal(err)
 		}
 		bind := newBind(ctx, dial).(*bind_adapter)
-		devices[i] = device.NewDevice(observed, bind, newSafeDeviceLogger(log.NewNOPFactory().Logger()))
+		deviceLogger, _ := newSafeDeviceLogger(log.NewNOPFactory().Logger())
+		devices[i] = device.NewDevice(observed, bind, deviceLogger)
 		t.Cleanup(devices[i].Close)
 		select {
 		case <-observed.reading:

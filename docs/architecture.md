@@ -782,6 +782,14 @@ forwarding is disabled, the daemon recognizes only that closed code set and
 occurrence `1..4`, reconstructs the canonical payload and drops every other
 line before the Android callback.
 
+An isolated failed AWG candidate also snapshots four saturated `0..4` counters
+(handshake initiation, send error, response, retry) from that exact device after
+cleanup, plus the last destination-DNS state. The snapshot travels in
+`probe_error.awg`; it does not enable logging or read the active tunnel's counters.
+A zero response count proves neither that UDP was sent nor where it was lost;
+destination DNS can fail before a handshake starts. This is source-only until
+the next runtime release and device observation.
+
 `ray2sing` is not an AWG authority. Raw `awg://` and WireGuard-style
 `[Interface]` AWG inputs fail closed instead of being rewritten as ordinary
 WireGuard. Synthetic documentation-address fixtures may test the typed

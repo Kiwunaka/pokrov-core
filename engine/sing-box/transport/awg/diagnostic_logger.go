@@ -16,7 +16,7 @@ type safeDeviceLogAdapter struct {
 	counts map[string]uint8
 }
 
-func newSafeDeviceLogger(parent logger.ContextLogger) *device.Logger {
+func newSafeDeviceLogger(parent logger.ContextLogger) (*device.Logger, *safeDeviceLogAdapter) {
 	adapter := &safeDeviceLogAdapter{
 		logger: parent,
 		counts: make(map[string]uint8),
@@ -24,6 +24,17 @@ func newSafeDeviceLogger(parent logger.ContextLogger) *device.Logger {
 	return &device.Logger{
 		Verbosef: adapter.verbosef,
 		Errorf:   adapter.errorf,
+	}, adapter
+}
+
+func (a *safeDeviceLogAdapter) snapshot() map[string]any {
+	a.mutex.Lock()
+	defer a.mutex.Unlock()
+	return map[string]any{
+		"handshake_initiations": a.counts["send_handshake_initiation"],
+		"handshake_errors":      a.counts["send_handshake_error"],
+		"handshake_responses":   a.counts["receive_handshake_response"],
+		"handshake_retries":     a.counts["handshake_retry"],
 	}
 }
 

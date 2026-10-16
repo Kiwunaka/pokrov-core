@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"net"
 	"net/netip"
+	"sync/atomic"
 
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/adapter/endpoint"
@@ -39,6 +40,7 @@ type Endpoint struct {
 	dnsQueryOptions adapter.DNSQueryOptions
 	started         bool
 	ctx             context.Context
+	destinationDNS  atomic.Value
 }
 
 func NewEndpoint(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, options option.AwgEndpointOptions) (adapter.Endpoint, error) {
@@ -295,6 +297,17 @@ func (w *Endpoint) NewConnectionEx(ctx context.Context, conn net.Conn, source M.
 	w.router.RouteConnectionEx(ctx, conn, metadata, onClose)
 }
 
+// AWGProbeSnapshot is consumed only from the selected isolated candidate.
+func (w *Endpoint) AWGProbeSnapshot() map[string]any {
+	snapshot := w.Device.AWGHandshakeSnapshot()
+	state, _ := w.destinationDNS.Load().(string)
+	if state == "" {
+		state = "not_started"
+	}
+	snapshot["destination_dns"] = state
+	return snapshot
+}
+
 func (w *Endpoint) DialContext(ctx context.Context, network string, destination M.Socksaddr) (net.Conn, error) {
 	switch network {
 	case N.NetworkTCP:
@@ -303,14 +316,18 @@ func (w *Endpoint) DialContext(ctx context.Context, network string, destination 
 		w.logger.InfoContext(ctx, "outbound packet connection to ", destination)
 	}
 	if destination.IsFqdn() {
+		w.destinationDNS.Store("lookup")
 		destinationAddresses, err := w.dnsRouter.Lookup(ctx, destination.Fqdn, w.dnsQueryOptions)
 		if err != nil {
+			w.destinationDNS.Store("failed")
 			return nil, err
 		}
+		w.destinationDNS.Store("resolved")
 		return N.DialSerial(ctx, w.Device, network, destination, destinationAddresses)
 	} else if !destination.Addr.IsValid() {
 		return nil, E.New("invalid destination: ", destination)
 	}
+	w.destinationDNS.Store("not_needed")
 	return w.Device.DialContext(ctx, network, destination)
 }
 
