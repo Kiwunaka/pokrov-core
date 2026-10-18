@@ -24,11 +24,55 @@ import (
 
 	"github.com/sagernet/quic-go"
 	"github.com/sagernet/sing-box/adapter"
+	"github.com/sagernet/sing-box/pokrov/ipinfo"
 	qtls "github.com/sagernet/sing-quic"
 	M "github.com/sagernet/sing/common/metadata"
 	N "github.com/sagernet/sing/common/network"
 	"github.com/sagernet/sing/service"
 )
+
+func TestHistoryStorageKeepsPublishedSnapshots(t *testing.T) {
+	storage := NewHistoryStorage()
+	firstInfo := &ipinfo.IpInfo{}
+	first := adapter.URLTestHistory{Time: time.Unix(1, 0), Delay: 25, IpInfo: firstInfo}
+	published := storage.StoreURLTestHistory("candidate", &first)
+	selected := storage.LoadURLTestHistory("candidate")
+	storage.StoreURLTestHistory("candidate", &adapter.URLTestHistory{Time: time.Unix(2, 0), Delay: 90})
+	if selected.Delay != 25 || !selected.Time.Equal(time.Unix(1, 0)) || published.Delay != 25 {
+		t.Fatal("a new probe mutated the history already held by a reader")
+	}
+	first.Delay = 65535
+	if selected.Delay != 25 {
+		t.Fatal("the producer still owns the published history storage")
+	}
+	current := storage.LoadURLTestHistory("candidate")
+	if current.Delay != 90 || current.IpInfo != firstInfo {
+		t.Fatal("a new probe lost its result or the previously known IP metadata")
+	}
+	secondInfo := &ipinfo.IpInfo{}
+	storage.AddOnlyIpToHistory("candidate", &adapter.URLTestHistory{IpInfo: secondInfo})
+	if current.IpInfo != firstInfo || storage.LoadURLTestHistory("candidate").IpInfo != secondInfo {
+		t.Fatal("IP metadata refresh changed an existing reader's snapshot")
+	}
+	updated := make(chan struct{})
+	go func() {
+		defer close(updated)
+		for delay := uint16(100); delay < 164; delay++ {
+			first.Delay = delay
+			storage.StoreURLTestHistory("candidate", &first)
+		}
+	}()
+	for {
+		if selected.Delay != 25 || storage.LoadURLTestHistory("candidate").Delay == 65535 {
+			t.Fatal("a concurrent producer mutated a published result")
+		}
+		select {
+		case <-updated:
+			return
+		default:
+		}
+	}
+}
 
 func TestProbe204PreservesSafeCauseAfterCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())

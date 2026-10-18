@@ -132,16 +132,20 @@ func (s *HistoryStorage) DeleteURLTestHistory(tag string) {
 
 func (s *HistoryStorage) StoreURLTestHistory(tag string, history *adapter.URLTestHistory) *adapter.URLTestHistory {
 	s.access.Lock()
-	if old, ok := s.delayHistory[tag]; ok && history != nil {
-		old.Delay = history.Delay
-		old.Time = history.Time
-		if history.IpInfo != nil {
-			old.IpInfo = history.IpInfo
+	if history != nil {
+		updated := *history
+		if old := s.delayHistory[tag]; old != nil {
+			updated = *old
+			updated.Delay = history.Delay
+			updated.Time = history.Time
+			if history.IpInfo != nil {
+				updated.IpInfo = history.IpInfo
+			}
 		}
-	} else {
-		s.delayHistory[tag] = history
+		history = &updated
 	}
-	history = s.delayHistory[tag]
+	// Readers keep this snapshot after unlocking; producers may reuse their input.
+	s.delayHistory[tag] = history
 	s.access.Unlock()
 	s.notifyUpdated()
 	return history
@@ -149,11 +153,15 @@ func (s *HistoryStorage) StoreURLTestHistory(tag string, history *adapter.URLTes
 
 func (s *HistoryStorage) AddOnlyIpToHistory(tag string, history *adapter.URLTestHistory) {
 	s.access.Lock()
-	if old, ok := s.delayHistory[tag]; ok && history != nil {
-		old.IpInfo = history.IpInfo
-	} else {
-		s.delayHistory[tag] = history
+	if history != nil {
+		updated := *history
+		if old := s.delayHistory[tag]; old != nil {
+			updated = *old
+			updated.IpInfo = history.IpInfo
+		}
+		history = &updated
 	}
+	s.delayHistory[tag] = history
 	s.access.Unlock()
 	s.notifyUpdated()
 }

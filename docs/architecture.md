@@ -23,6 +23,10 @@ remaining live members become eligible; recovery restores the preferred tier.
 Groups without this field use ordinary latency selection. Failed probe history
 is excluded from live selection, and tolerance arithmetic cannot wrap into a
 smaller delay. The managed issuer gates this input to Core 1.2.4 or later.
+URLTest history publishes a copied snapshot on each probe or IP metadata update.
+Selection and diagnostics can read that snapshot after releasing the storage
+lock while monitoring reuses its own input object. Read paths allocate no extra
+copy; existing delay, metadata merge and route preference rules are unchanged.
 Published Core 1.2.3 and
 subscription exports for external clients omit this option.
 
