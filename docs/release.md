@@ -164,8 +164,11 @@ evidence.
 Release `1.0.0` has reproducible local Android and Windows builds. Their exact sizes and SHA-256 values are retained in `config/release.json`. Host integration and the Windows 100-cycle test must use those exact artifacts; Apple remains `MANUAL_OWNER_TEST`.
 
 The Windows build accepts `libcronet.dll` only when its size and SHA-256 match
-the retained public release dependency in `config/release.json`. Pass it
-through `-CronetLibrary` on a clean checkout.
+the current `engine.cronet_windows_amd64` pin in `config/release.json`. Its
+module version must match `go.mod`; the immutable source URL names the same
+Cronet revision. Pass those bytes through `-CronetLibrary` on a clean checkout.
+The retained 1.0.3 DLL is historical and has an incompatible callback ABI with
+the current cronet-go dependency. Updating this pin does not rebuild Core.
 The build does not fetch a mutable or unavailable revision implicitly.
 
 Release `1.0.1` disables incidental Go VCS stamping in Android and Windows

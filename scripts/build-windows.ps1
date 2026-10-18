@@ -8,6 +8,12 @@ param(
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 $release = Get-Content -Raw -LiteralPath (Join-Path $root "config\release.json") | ConvertFrom-Json
+$cronetPin = $release.engine.cronet_windows_amd64
+$cronetModule = [regex]::Match([IO.File]::ReadAllText((Join-Path $root 'go.mod')),
+  '(?m)^\s*github\.com/sagernet/cronet-go/lib/windows_amd64\s+(\S+)').Groups[1].Value
+if ($cronetModule -ne $cronetPin.module_version) {
+  throw 'Windows Cronet dependency pin does not match go.mod.'
+}
 $abiContract = Get-Content -Raw -LiteralPath (Join-Path $root "config\abi-contract.json") | ConvertFrom-Json
 if (-not $OutputDirectory) {
   $OutputDirectory = Join-Path $root "dist\windows"
@@ -124,9 +130,8 @@ foreach ($symbol in @($abiContract.desktop_abi.exports)) {
 Write-Host "Windows ABI exports verified: $(@($abiContract.desktop_abi.exports).Count) required symbols." -ForegroundColor Green
 
 $cronetOutput = Join-Path $OutputDirectory "libcronet.dll"
-$retainedEvidence = $release.retained_public_release.local_build_evidence
-$expectedCronetSize = [int64]$retainedEvidence.windows.libcronet.size
-$expectedCronetSha256 = [string]$retainedEvidence.windows.libcronet.sha256
+$expectedCronetSize = [int64]$cronetPin.size
+$expectedCronetSha256 = [string]$cronetPin.sha256
 
 function Test-CronetIdentity {
   param([Parameter(Mandatory)][string]$Path)

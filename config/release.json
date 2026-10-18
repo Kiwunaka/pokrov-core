@@ -13,7 +13,13 @@
     "sing": "0.9.6-0.20260922013354-87c33f17688f",
     "gomobile": "0.1.12",
     "android_ndk": "29.0.14206865",
-    "cronet_distribution": "caller_supplied_sha256_pinned_binary"
+    "cronet_distribution": "caller_supplied_sha256_pinned_binary",
+    "cronet_windows_amd64": {
+      "module_version": "v0.0.0-20260912104006-c10c03c318db",
+      "source_url": "https://raw.githubusercontent.com/SagerNet/cronet-go/c10c03c318db6d47bec8705c8290bad34bc32b64/lib/windows_amd64/libcronet.dll",
+      "size": 9529344,
+      "sha256": "3217c6260fbca5f16072e0b79735742f40109a63bb0ff88fd6b96dd6b54a2928"
+    }
   },
   "artifacts": {
     "android": "pokrov-core.aar",
