@@ -1,10 +1,20 @@
 # Architecture
 
+This document describes source contracts. Loaded-library capabilities and the
+client-selected runtime manifest establish what a particular binary contains;
+[client cutover readiness](../../POKROV-app/docs/operations/cutover-readiness.md)
+owns current integration and device acceptance. Dated checks and NOT_VERIFIED
+notes below describe their original source stage, not today's work queue.
+See [README layout](../README.md#layout) for owning paths and
+[release](release.md) for pinned tools and artifact checks.
+
 POKROV Core is one client runtime with three layers:
 
 1. `platform/` exposes the small Android and desktop interfaces consumed by the app.
 2. `v2/` owns setup, configuration, lifecycle, WARP, DNS, and safe shutdown behavior.
 3. `engine/sing-box/` owns transports, routing, TLS, TUN, and protocol implementations.
+
+## Runtime selection and Android preparation
 
 Managed Country Auto can explicitly list `preferred_outbounds` in its existing
 URLTest group. A healthy member of that tier takes precedence over other members;
@@ -16,13 +26,13 @@ smaller delay. The managed issuer gates this input to Core 1.2.4 or later.
 Published Core 1.2.3 and
 subscription exports for external clients omit this option.
 
-An owned Windows A/B comparison kept public client 1.4.1, identical profile
+The historical Windows A/B comparison kept public client 1.4.1, identical profile
 bytes, the effective digest and all four SRS files. Stock Core 1.2.2 reached the
 native TLS deadline after 19.542 seconds; exact Core 1.2.2 with only the URLTest
 selection fix retained native DNS and egress health beyond 200 seconds and
 passed strict HTTPS 204 and 64 KiB checks. This supports the isolated selection
-fix; the selected member/history was not exposed. Live acceptance of the
-complete Core 1.2.5 SDK remains pending.
+fix; the selected member/history was not exposed. It did not establish live
+acceptance of the complete Core 1.2.5 SDK.
 
 Android callers that start Libbox CommandServer directly use the mobile SDK's
 `NormalizeRuntimeConfig` on a runtime copy after validating the saved profile's
@@ -672,6 +682,8 @@ remains pending after finish; it cannot silently restart as clean. Strict journa
 loading rejects duplicate scope keys. Positive renewal retention rejects a scope
 already present in `scope_actions`. Client secure retention precedes exact-hash ACK.
 
+## Native egress verification
+
 Android endpoint verification uses the additive `CommandServer.ProbeEndpoint`
 gomobile method. Its bounded result belongs to the captured runtime instance and
 endpoint of that call; a terminal diagnostic event cannot complete another probe.
@@ -698,6 +710,8 @@ The shared event ABI and desktop ABI are unchanged. Source-level checks do not
 prove that a retained AAR contains the method; replacement artifact binding and
 device evidence remain required before promoting this behavior.
 
+## AWG and managed transport contracts
+
 The AWG2 and AWG 3.1 experiments remain inside the same embedded sing-box
 graph. Their machine owners are `config/awg2-capability.json` and
 `config/awg31-capability.json`, with distinct `pokrov.awg2.endpoint.v1` and
@@ -715,10 +729,10 @@ timer expiry clears `duration` before releasing `modifyingLock`, preserving a
 concurrent reset. The upstream race regression failed on the original source
 and passed after this change with Go 1.26.8 on Windows. Both module roots resolve
 to that local copy; the focused protocol/awg integration test also passes.
-On16October the private ARM64 AAR from5ad6e62 was built with the pinned toolchain
+On 16 October the private ARM64 AAR from `5ad6e62` was built with the pinned toolchain
 and installed in Android4170; its bundled native library matches that AAR.
 The new binary passed an ordinary VLESS bridge connection. AWG device acceptance
-remains open; Windows and server binaries are unchanged, and no network failure
+was still open in that check; Windows and server binaries were unchanged, and no network failure
 is attributed to this race.
 
 Android and Windows release builds include the `with_awg` tag. The retained
@@ -925,17 +939,16 @@ disabled. The desktop FFI returns a local caller-owned error string for
 ABI compatibility, but it does not mirror that raw error into the process log;
 the release host maps it to a fixed public failure category.
 
+## Lifecycle and host ownership
+
 On Windows, the current source materializes the auto-route TUN inbound with the
 exact interface name `POKROV`. The privileged client service uses that stable
 ownership identifier to snapshot and restore only Core-owned addresses,
 routes, DNS and interface settings after stop or crash. Android and other
-platforms keep their platform-owned naming behavior. Source target `1.1.0` is
-`PRE_CANDIDATE_LOCAL`; published `1.0.3` artifact hashes predate this source
-change and do not prove it until a new exact DLL and Android AAR are built and
-retained. The retained `1.0.3`
-artifacts also predate the structured event surfaces; clients may recognize
-that exact legacy identity for compatibility, but release `1.2.0` requires
-replacement artifacts with the structured event capability.
+platforms keep their platform-owned naming behavior. Historical `1.0.3`
+artifacts predate this behavior and the structured event surfaces; they cannot
+prove either. The current client manifest and loaded capabilities determine
+the installed implementation.
 
 `StartedService.CloseService` stops the current engine instance while keeping
 the command server's observers available for another start or reload.
@@ -1059,6 +1072,8 @@ real-time settlement is claimed. No tests, formatter, ABI generation, build,
 native call or runtime proof was performed. Retained binaries are unchanged.
 
 Server inbounds, panel state, provisioning, and traffic accounting remain outside POKROV Core.
+
+## Candidate probes
 
 Ordinary candidate selection uses an isolated raw-profile Core instance with no
 inbounds, host routes, command server or persistent cache. The selected protected

@@ -1,10 +1,15 @@
 # POKROV Core
 
 POKROV Core is the network runtime used by POKROV clients. Source/build version
-is defined by `VERSION` and `config/release.json`; the binaries selected by the
-client are recorded in POKROV-app's runtime manifest. A source fix does not
+is defined by [VERSION](VERSION) and [config/release.json](config/release.json);
+the client selects binaries through its [default runtime manifest](../POKROV-app/config/runtime-artifacts.seed.json)
+or an explicit build override. A source fix does not
 update those binaries or publish a release. Current app readiness and accepted
-runtime versions are maintained in POKROV-app's cutover-readiness document.
+runtime versions are maintained in POKROV-app's [cutover readiness](../POKROV-app/docs/operations/cutover-readiness.md).
+Start with the [layout](#layout), [architecture](docs/architecture.md), and
+[release/build contract](docs/release.md). The owner's [current queue](C:/Users/kiwun/Downloads/POKROV_KNOWN_PROBLEMS_2026-10-13.md)
+and [execution plan, section 0](C:/Users/kiwun/Downloads/POKROV_EXECUTION_PLAN_2026-09-24.md)
+set the active work; dated receipts below are history.
 
 The repository contains:
 
@@ -16,7 +21,8 @@ The repository contains:
   separate digest-bound contracts;
 - build and test scripts.
 
-The server remains a separate Xray-based system. This repository builds client outbounds only.
+POKROV-node owns server provisioning and operation. Its opt-in use of the
+embedded engine's server features is separate from the client release builds.
 
 `SelectOutbound` selects a candidate already present in the running selector;
 `ResetNetwork` resets network sessions and DNS while preserving the runtime and
@@ -37,8 +43,8 @@ and close after their last user. This does not change the bridge Xray pin.
 | --- | --- | --- |
 | Android | `pokrov-core.aar` | active |
 | Windows x64 | `pokrov-core.dll` + `libcronet.dll` | active |
-| iOS/macOS | `PokrovCore.xcframework` | source-build CI; hosted result and device proof required |
-| Linux | none | not shipped in POKROV 1.2.0 |
+| iOS/macOS | `PokrovCore.xcframework` | local macOS build script; artifact and device acceptance remain separate |
+| Linux | none | private daemon/probe adapters; no public release artifact |
 
 The [private Linux daemon adapter](platform/linux/README.md) now provides the
 conditional beta's internal Core lifecycle. Its isolated-VM evidence does not
@@ -48,9 +54,9 @@ change the public release targets above.
 
 - Go `1.26.8`
 - Git
-- Android SDK and `gomobile v0.1.12` for Android
+- Android SDK, NDK `29.0.14206865`, JDK, and pinned `gomobile v0.1.12` for Android
 - MinGW-w64 for the Windows DLL
-- Xcode and gomobile for Apple frameworks
+- Xcode, Python 3, and pinned gomobile for Apple frameworks
 
 ## Build
 
@@ -71,6 +77,13 @@ Android:
   -AndroidSdk C:\path\to\Android\Sdk
 ```
 
+The script verifies cached gomobile and gobind module/toolchain identities with
+`go version -m` and installs the pinned versions when they differ. Default output
+contains all four Android ABIs; `-Arm64Only` is for explicit private candidates.
+Use `-OutputDirectory` to keep a private AAR outside the checkout. On macOS,
+`bash scripts/build-apple.sh` builds the XCFramework with the pinned tools;
+this command is not exercised by Linux CI.
+
 Tests:
 
 ```powershell
@@ -86,23 +99,34 @@ libraries; release builds are made locally with the scripts above.
 
 ## Layout
 
-- `platform/` — public Android and desktop adapters.
-- `v2/` — POKROV configuration, lifecycle, resolver, WARP, and service code.
-- `engine/sing-box/` — embedded transport engine.
+| Area | Owning code |
+| --- | --- |
+| Android bindings and runtime normalization | `platform/mobile/` |
+| Desktop C ABI and caller-owned strings | `platform/desktop/`; `config/abi-contract.json` |
+| Private Linux daemon and fixed probe | `platform/linux/`, `platform/probecli/`; [Linux contract](platform/linux/README.md) |
+| Profile parsing, DNS, inbound validation and WARP configuration | `v2/config/` |
+| Lifecycle, selection, network reset and candidate probes | `v2/hcore/` |
+| Embedded routing, DNS, transports and CommandServer | `engine/sing-box/`; its `go.mod` is a separate module |
+| Local transport dependency patches | `engine/sing-box/replace/`; replacements must agree in both module graphs |
+| Closed runtime event fields | `internal/observability/`; `config/core-event-abi.json` |
+
 - `ray2sing/` — profile-to-sing-box conversion.
 - `config/awg2-capability.json`, `config/awg31-capability.json`, and
   `config/hy2-capability.json` — AWG/Hysteria2 capability schemas read by the
   portal.
 - `third_party/warp-plus/` — pinned WARP helper.
 - `scripts/` — builds and tests.
-- `docs/` — architecture and release policy.
+- `docs/architecture.md` — source contracts and focused subsystem references.
+- `docs/release.md` — build pins, artifact acceptance and historical receipts.
+- `docs/reference-review.md` — importing a focused upstream fix.
 
 ## Versioning
 
 POKROV Core follows semantic versioning. Public ABI breaks require a major
 release. Additive runtime capabilities produce a minor release; targeted fixes
-produce a patch release after the Android and Windows backtests pass. Core
-`1.2.2` is a separate component version from the POKROV app release.
+produce a patch release after the affected platform backtests pass. Core and
+POKROV app versions are separate. A private build may retain the current Core
+version while its caller-supplied manifest records the exact source revision.
 
 ## License
 

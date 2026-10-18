@@ -1,5 +1,18 @@
 # Release process
 
+## Current source and artifact ownership
+
+`VERSION` and `config/release.json` own the source/build version and tool pins.
+The client-selected manifest (default seed or explicit build override) owns the
+exact consumed AAR/DLL and source revision. Current app integration, release
+queue and device acceptance are maintained in
+[POKROV-app cutover readiness](../../POKROV-app/docs/operations/cutover-readiness.md).
+Historical receipts in this document do not select binaries or reopen checks
+that the owner has already accepted. A private build for a concrete source fix
+may keep the existing Core version; it does not create a tag or public release.
+
+## Runtime build contract
+
 The embedded fork targets stable sing-box `1.14.2` while retaining POKROV
 XHTTP, Smart Access, WARP, AWG and opt-in Telegram WSS transports. Runtime client
 builds use `pokrov_client`: Psiphon, Tor, Mieru, DNSTT, SSH and remote server
@@ -31,17 +44,26 @@ version compiled into the loaded library. The desktop string is released with
 `freeString`; the host can show this value in diagnostics without guessing from
 the client seed.
 
-1. Update `VERSION`, `config/release.json`, and `CHANGELOG.md`.
+## Release checklist
+
+Apply the affected platform checks to the changed artifact. A script or doc fix
+alone does not require rebuilding an already accepted AAR/DLL.
+
+1. For a new Core release, update `VERSION`, `config/release.json`, and `CHANGELOG.md`.
 2. Run `scripts/test.ps1`.
 3. Build the changed Android and Windows libraries with the release scripts.
    Do not rebuild unchanged source solely to refresh hashes or evidence.
-4. Verify Android contains `armeabi-v7a`, `arm64-v8a`, `x86`, and `x86_64`.
-5. Verify the Windows exports and run the 100-cycle app backtest.
+4. For a universal Android artifact, verify `armeabi-v7a`, `arm64-v8a`, `x86`, and `x86_64`.
+5. For a changed Windows DLL, verify exports and run the 100-cycle app backtest.
 6. Record remaining physical-device and Apple checks without converting them into passes.
-7. Commit the exact source, create an annotated `vX.Y.Z` tag, then publish artifacts from that commit.
+7. Commit the exact source. A public release requires the owner's publication approval;
+   then create an annotated `vX.Y.Z` tag and publish artifacts from that commit.
 
-Core `1.2.2` is a prerelease for the Android and Windows libraries; `1.1.2`
-remains latest stable. Prior prerelease assets are retained.
+## Historical 1.2.0–1.2.2 receipts
+
+The following versions, rollout pins and pending checks describe those releases,
+not the current queue. Core `1.2.2` was a prerelease for Android and Windows;
+`1.1.2` remained latest stable at that point. Prior prerelease assets were retained.
 `config/release.json` retains the immutable prior `1.0.3` evidence in a
 separate `retained_public_release` block.
 
@@ -91,11 +113,30 @@ integrity check without Flutter. This prerelease does not
 change app `1.4.0`'s Core `1.1.2` pin or latest stable; these checks do not assert
 localDPI, Windows TUN or Apple acceptance.
 
+## Build tools and focused verification
+
 `scripts/test.ps1` checks the desktop `//export` declarations, ABI version and
 capability descriptor against `config/abi-contract.json`, runs gofmt, the root
 module tests and focused engine tests (AWG, REALITY/uTLS, XHTTP, Hysteria2
-reload, DNS, selector groups, daemon and libbox). It takes about 30 seconds with
-a warm build cache. CI runs the same script on Linux and builds no artifacts.
+reload, DNS, selector groups, daemon and libbox). CI runs the same script on Linux
+and builds no artifacts. During development, run the owning package test with
+the script's client tags; rerun accepted checks only after a relevant change or failure.
+
+Use the commands in [README](../README.md#build). Android validates Go `1.26.8`,
+NDK `29.0.14206865`, and both gomobile/gobind `v0.1.12` identities. Existing cached
+tools are read with `go version -m`; a missing or mismatched command, module or
+Go compiler version triggers installation of the exact pin and revalidation.
+`-GomobileBinDirectory` selects the cache, and `-OutputDirectory` selects the AAR
+destination. The default target contains four ABIs; `-Arm64Only` is explicit
+private scope and cannot substitute for the universal artifact check.
+Apple installs the same pinned commands, invokes gomobile from that installation
+directory and puts gobind there first in PATH. This script selection and shell
+syntax check do not establish an Apple build or device result.
+
+## Dependency contract and historical qualification
+
+The dependency pins below remain source requirements. Their dated checks describe
+the qualification that introduced them, not automatic acceptance of later artifacts.
 
 Both module graphs pin Psiphon uTLS to
 `v1.1.1-0.20260729134728-7a1fc711853d`, the upstream
@@ -154,14 +195,14 @@ precision. A bounded source scan without call paths is not a full reachability
 proof for other advisories.
 
 The source contract declares desktop ABI `2` and Core event ABI `1` through
-`config/abi-contract.json` and `config/core-event-abi.json`. A release `1.2.0`
+`config/abi-contract.json` and `config/core-event-abi.json`. A release
 candidate must include both callback exports in the Windows DLL and the
 corresponding gomobile handler/context methods in the Android AAR. A successful
 source test or development AAR build does not replace exact candidate hashes,
 reproducibility, signing, client manifest synchronization, or retained build
 evidence.
 
-Release `1.0.0` has reproducible local Android and Windows builds. Their exact sizes and SHA-256 values are retained in `config/release.json`. Host integration and the Windows 100-cycle test must use those exact artifacts; Apple remains `MANUAL_OWNER_TEST`.
+## Windows Cronet packaging
 
 The Windows build accepts `libcronet.dll` only when its size and SHA-256 match
 the current `engine.cronet_windows_amd64` pin in `config/release.json`. Its
@@ -171,10 +212,16 @@ The retained 1.0.3 DLL is historical and has an incompatible callback ABI with
 the current cronet-go dependency. Updating this pin does not rebuild Core.
 The build does not fetch a mutable or unavailable revision implicitly.
 
-Release `1.0.1` disables incidental Go VCS stamping in Android and Windows
+## Historical 1.0.x receipts
+
+Release `1.0.0` had reproducible local Android and Windows builds; its original
+release history owns those identities. The current `retained_public_release`
+block describes `1.0.3`, not `1.0.0`. Apple acceptance was separate.
+
+Release `1.0.1` disabled incidental Go VCS stamping in Android and Windows
 artifacts. Source identity is the annotated release tag and its GitHub release
-commit. This lets the final evidence-only commit retain exact artifact hashes
-without changing those artifacts on the required second build.
+commit. The two builds recorded below verified that release's reproducibility;
+they are not an instruction to rebuild unchanged current artifacts.
 
 The two pre-tag `1.0.1` builds matched byte-for-byte:
 
@@ -212,6 +259,6 @@ The two pre-tag `1.0.3` builds matched byte-for-byte:
   SHA-256 `8ef1f8bbde77f954af1ae47bee1819ac8dc2354bb0e1d4baba3dad9e58d7a6f7`.
 
 Post-`1.0.3` working source assigns the Windows TUN interface the stable name
-`POKROV` for the client service recovery contract. This is not part of the
-retained `1.0.3` DLL above. It requires a new reproducible build, ABI contract
-verification, exact hashes and client sync before it can become release truth.
+`POKROV` for the client service recovery contract. The retained `1.0.3` DLL above
+predates this behavior. Its later artifact and client acceptance belong to the
+current client-selected manifest and cutover document, not this historical receipt.

@@ -58,10 +58,22 @@ $GomobileBinDirectory = [System.IO.Path]::GetFullPath($GomobileBinDirectory)
 New-Item -ItemType Directory -Force -Path $GomobileBinDirectory | Out-Null
 $goExecutableSuffix = if ($IsWindows) { ".exe" } else { "" }
 $gomobile = Join-Path $GomobileBinDirectory "gomobile$goExecutableSuffix"
-$gobind = Join-Path $GomobileBinDirectory "gobind$goExecutableSuffix"
 $outputPath = Join-Path $OutputDirectory $release.artifacts.android
 $target = if ($Arm64Only) { "android/arm64" } else { "android" }
 $expectedAbis = if ($Arm64Only) { @("arm64-v8a") } else { @("armeabi-v7a", "arm64-v8a", "x86", "x86_64") }
+
+function Test-GomobileTool {
+  param([string]$Path, [string]$Name)
+
+  if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $false }
+  $identity = @(& $goCommand.Source version -m $Path 2>$null)
+  if ($LASTEXITCODE -ne 0 -or $identity.Count -eq 0) { return $false }
+  $goPattern = ':\s+' + [regex]::Escape($release.go_toolchain) + '$'
+  $pathPattern = '(?m)^\s*path\s+github\.com/sagernet/gomobile/cmd/' + [regex]::Escape($Name) + '\s*$'
+  $modulePattern = '(?m)^\s*mod\s+github\.com/sagernet/gomobile\s+v' + [regex]::Escape($release.engine.gomobile) + '(?:\s|$)'
+  $metadata = $identity -join "`n"
+  return $identity[0] -match $goPattern -and $metadata -match $pathPattern -and $metadata -match $modulePattern
+}
 
 $previousPath = $env:PATH
 $previousGobin = $env:GOBIN
@@ -89,13 +101,15 @@ try {
   $env:GOFLAGS = "-buildvcs=false"
   $PSNativeCommandArgumentPassing = "Standard"
 
-  if (-not (Test-Path -LiteralPath $gomobile)) {
-    & $goCommand.Source install "github.com/sagernet/gomobile/cmd/gomobile@v$($release.engine.gomobile)"
-    if ($LASTEXITCODE -ne 0) { throw "Could not install gomobile." }
-  }
-  if (-not (Test-Path -LiteralPath $gobind)) {
-    & $goCommand.Source install "github.com/sagernet/gomobile/cmd/gobind@v$($release.engine.gomobile)"
-    if ($LASTEXITCODE -ne 0) { throw "Could not install gobind." }
+  foreach ($toolName in @("gomobile", "gobind")) {
+    $toolPath = Join-Path $GomobileBinDirectory "$toolName$goExecutableSuffix"
+    if (-not (Test-GomobileTool -Path $toolPath -Name $toolName)) {
+      & $goCommand.Source install "github.com/sagernet/gomobile/cmd/$toolName@v$($release.engine.gomobile)"
+      if ($LASTEXITCODE -ne 0) { throw "Could not install $toolName." }
+      if (-not (Test-GomobileTool -Path $toolPath -Name $toolName)) {
+        throw "$toolName must use gomobile v$($release.engine.gomobile) and $($release.go_toolchain)."
+      }
+    }
   }
 
   $tags = @(

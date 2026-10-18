@@ -2,6 +2,14 @@
 
 This repository owns the POKROV client runtime core. It produces the Android, Windows and future Apple runtime libraries consumed by `POKROV-app`. Server-side behavior belongs to `C:/Users/kiwun/Documents/ai/POKROV-node`, not here. Current work follows the owner's execution plan `C:/Users/kiwun/Downloads/POKROV_EXECUTION_PLAN_2026-09-24.md`.
 
+Use [README layout](README.md#layout) for code ownership, [architecture](docs/architecture.md)
+for runtime contracts, and [release](docs/release.md) for build pins and checks.
+The [current queue](C:/Users/kiwun/Downloads/POKROV_KNOWN_PROBLEMS_2026-10-13.md)
+and execution plan section 0 take precedence over historical receipts.
+Client-selected artifacts and runtime acceptance belong to
+[POKROV-app cutover readiness](../POKROV-app/docs/operations/cutover-readiness.md),
+including explicit manifest overrides; a source capability alone is not binary readiness.
+
 ## How To Work
 
 - Check `git status` and the scoped diff first. Other agents may work in the same repos; never overwrite, revert or reformat work outside your task.

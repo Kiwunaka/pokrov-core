@@ -16,6 +16,10 @@ GOMOBILE_VERSION="$(python3 -c 'import json, sys; print(json.load(open(sys.argv[
 go install "github.com/sagernet/gomobile/cmd/gomobile@v$GOMOBILE_VERSION"
 go install "github.com/sagernet/gomobile/cmd/gobind@v$GOMOBILE_VERSION"
 
+GOMOBILE_BIN="$(go env GOBIN)"
+GOMOBILE_BIN="${GOMOBILE_BIN:-$(go env GOPATH)/bin}"
+export PATH="$GOMOBILE_BIN:$PATH"
+
 mkdir -p "$OUTPUT_DIRECTORY"
 cd "$ROOT"
 
@@ -25,7 +29,7 @@ export TZ=UTC
 
 TAGS="pokrov_client,with_gvisor,with_quic,with_wireguard,with_utls,with_clash_api,with_grpc,with_awg,tfogo_checklinkname0,with_naive_outbound,with_conntrack,with_dhcp,with_low_memory,with_purego"
 
-gomobile bind \
+"$GOMOBILE_BIN/gomobile" bind \
   -target ios,iossimulator,macos \
   -libname PokrovCore \
   -tags "$TAGS" \
