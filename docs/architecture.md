@@ -27,8 +27,11 @@ complete Core 1.2.5 SDK remains pending.
 Android callers that start Libbox CommandServer directly use the mobile SDK's
 `NormalizeRuntimeConfig` on a runtime copy after validating the saved profile's
 signature and digest. It reuses the existing legacy DNS normalizer before the
-strict engine parser; saved profile bytes stay unchanged and normalization errors
-stop startup.
+strict engine parser and applies the existing SOCKS/HTTP/mixed inbound password
+requirement, including loopback, before CommandServer startup. Authenticated
+proxy and TUN-only profiles remain valid; saved profile bytes stay unchanged.
+Normalization or inbound-validation errors stop startup. This mobile source
+change requires a new Android AAR; it does not change the desktop ABI or DLL.
 
 The embedded engine also contains the dedicated Linux HY2 server's opt-in `experimental.hysteria_reload` path. Its local pinned `replace/sing-quic` patch closes removed/rotated users' actual QUIC sessions and cancels only their routing contexts. Private SIGUSR2 changes only that inbound's auth and direct account routes; listener, TLS, DNS and other options stay immutable. The same process may include one fixed private IPv4 TCP/UDP port 53 `pokrov-awg-dns` direct inbound with its exact first scoped DNS hijack rule; reload preserves that listener, rule, DNS policy and rule sets. Adding the listener requires a cold restart; later auth reloads retain the running process. Rule snapshots let unchanged users finish pending DNS/sniff matching while account routes swap. The existing command writes a private loaded-config/PID/systemd-InvocationID proof only after the new state is applied. This path is off for client runtimes and has no public control port.
 

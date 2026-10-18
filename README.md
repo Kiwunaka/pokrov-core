@@ -1,10 +1,10 @@
 # POKROV Core
 
-POKROV Core is the network runtime used by POKROV clients. The current Core
-prerelease is `1.2.2`; latest stable remains `1.1.2`. The app `1.4.0` keeps
-Core `1.1.2` until app `1.5`.
-`config/release.json` retains the original `1.0.3` build
-evidence separately.
+POKROV Core is the network runtime used by POKROV clients. Source/build version
+is defined by `VERSION` and `config/release.json`; the binaries selected by the
+client are recorded in POKROV-app's runtime manifest. A source fix does not
+update those binaries or publish a release. Current app readiness and accepted
+runtime versions are maintained in POKROV-app's cutover-readiness document.
 
 The repository contains:
 
