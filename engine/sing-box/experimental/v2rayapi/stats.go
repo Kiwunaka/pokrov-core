@@ -12,6 +12,7 @@ import (
 
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/option"
+	"github.com/sagernet/sing-tun"
 	"github.com/sagernet/sing/common/bufio"
 	E "github.com/sagernet/sing/common/exceptions"
 	N "github.com/sagernet/sing/common/network"
@@ -31,6 +32,7 @@ type StatsService struct {
 	inbounds  map[string]bool
 	outbounds map[string]bool
 	users     map[string]bool
+	allUsers  bool
 	access    sync.Mutex
 	counters  map[string]*atomic.Int64
 }
@@ -56,6 +58,7 @@ func NewStatsService(options option.V2RayStatsServiceOptions) *StatsService {
 		inbounds:  inbounds,
 		outbounds: outbounds,
 		users:     users,
+		allUsers:  options.AllUsers,
 		counters:  make(map[string]*atomic.Int64),
 	}
 }
@@ -68,7 +71,7 @@ func (s *StatsService) RoutedConnection(ctx context.Context, conn net.Conn, meta
 	var writeCounter []*atomic.Int64
 	countInbound := inbound != "" && s.inbounds[inbound]
 	countOutbound := outbound != "" && s.outbounds[outbound]
-	countUser := user != "" && s.users[user]
+	countUser := user != "" && (s.allUsers || s.users[user])
 	if !countInbound && !countOutbound && !countUser {
 		return conn
 	}
@@ -97,7 +100,7 @@ func (s *StatsService) RoutedPacketConnection(ctx context.Context, conn N.Packet
 	var writeCounter []*atomic.Int64
 	countInbound := inbound != "" && s.inbounds[inbound]
 	countOutbound := outbound != "" && s.outbounds[outbound]
-	countUser := user != "" && s.users[user]
+	countUser := user != "" && (s.allUsers || s.users[user])
 	if !countInbound && !countOutbound && !countUser {
 		return conn
 	}
@@ -116,6 +119,11 @@ func (s *StatsService) RoutedPacketConnection(ctx context.Context, conn N.Packet
 	}
 	s.access.Unlock()
 	return bufio.NewInt64CounterPacketConn(conn, readCounter, nil, writeCounter, nil)
+}
+
+func (s *StatsService) RoutedFlow(ctx context.Context, metadata adapter.InboundContext, matchedRule adapter.Rule, matchOutbound adapter.Outbound) tun.FlowTracker {
+	// This service counts routed streams and packets, not TUN fast-path flows.
+	return nil
 }
 
 func (s *StatsService) GetStats(ctx context.Context, request *GetStatsRequest) (*GetStatsResponse, error) {

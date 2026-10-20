@@ -49,6 +49,13 @@ change requires a new Android AAR; it does not change the desktop ABI or DLL.
 
 The embedded engine also contains the dedicated Linux HY2 server's opt-in `experimental.hysteria_reload` path. Its local pinned `replace/sing-quic` patch closes removed/rotated users' actual QUIC sessions and cancels only their routing contexts. Private SIGUSR2 changes only that inbound's auth and direct account routes; listener, TLS, DNS and other options stay immutable. The same process may include one fixed private IPv4 TCP/UDP port 53 `pokrov-awg-dns` direct inbound with its exact first scoped DNS hijack rule; reload preserves that listener, rule, DNS policy and rule sets. Adding the listener requires a cold restart; later auth reloads retain the running process. Rule snapshots let unchanged users finish pending DNS/sniff matching while account routes swap. The existing command writes a private loaded-config/PID/systemd-InvocationID proof only after the new state is applied. This path is off for client runtimes and has no public control port.
 
+The existing V2Ray statistics service optionally accepts `stats.all_users: true`.
+It counts TCP and UDP bytes for every nonempty authenticated user, including users
+added after startup, and retains cumulative counters after connections close.
+The default remains the explicit `stats.users` allowlist. A dedicated server
+build needs `with_v2ray_api`; Node owns the private loopback listener and counter
+collection. This option does not enable an API or collection in client runtimes.
+
 The opt-in `pokrov-telegram-ws` outbound accepts an explicit Telegram DC address
 table and an existing encrypted `vpn_outbound`. Only native obfuscated TCP:443
 flows in that table can use TLS-verified `kwsN.web.telegram.org/apiws` with the

@@ -55,6 +55,7 @@ type V2RayStatsServiceOptions struct {
 	Inbounds  []string `json:"inbounds,omitempty"`
 	Outbounds []string `json:"outbounds,omitempty"`
 	Users     []string `json:"users,omitempty"`
+	AllUsers  bool     `json:"all_users,omitempty"`
 }
 
 type UnifiedDelayOptions struct {
