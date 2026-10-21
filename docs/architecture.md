@@ -253,8 +253,15 @@ not verify the platform signature or choose a provider. The host must bind this
 projection to the current account/device/profile and approved policies.
 
 Only visible-SNI TLS over TCP/443 is admitted. Before dialing a permitted relay,
-the outbound reads at most 65535 bytes of ClientHello records, rejects ECH
-(including GREASE), absent/malformed SNI and names outside the lease. It replays
+the outbound reads at most 65535 bytes of ClientHello records and rejects
+absent/malformed SNI and names outside the lease. ECH (including GREASE) is rejected
+by default, preserving the owned-gateway boundary. A host-verified approved external
+provider may project `external_ech_outer_sni=true` only with exact-domain lease scope;
+Core rejects this flag with suffix domains. This explicitly authorizes the visible
+outer SNI and pinned relay TCP/443, not the encrypted inner application name. It does
+not attempt to distinguish GREASE from real ECH or broaden the lease's DNS, relay,
+time or quota authority. The host must bind the flag to the verified provider kind
+and retain that boundary on renewal and policy replacement. The outbound replays
 the same bytes through the existing connection manager, without TLS termination
 or certificate changes. Raw dialer and UDP calls are rejected. Relay addresses
 exclude private, mapped, translated, reserved and documentation ranges; IPv6
@@ -359,9 +366,10 @@ queries and already established connections keep their original owner.
 Actual selected-service DNS refusal and native ClientHello ECH rejection retain
 a fixed DNS/TLS probe failure on the current grant. Once no approved member is
 available, readiness reports that observed failure through the existing native
-probe mapping, so the host can apply its scoped VPN recovery. ECH still closes
-before a relay dial. A fresh verified generation does not inherit a previous
-TLS flow's failure; the same resolver's existing profile-wide retirement retains
+probe mapping, so the host can apply its scoped VPN recovery. ECH outside the
+explicit external outer-SNI policy still closes before a relay dial. A fresh
+verified generation does not inherit a previous TLS flow's failure; the same
+resolver's existing profile-wide retirement retains
 its DNS reason after renewal. Revoked/closed grants and invalid catalog or clock
 windows never become recoverable provider failures. Ordinary unavailable states
 remain distinct.

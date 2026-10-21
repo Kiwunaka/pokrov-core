@@ -10,6 +10,8 @@ type PokrovSmartAccessOutboundOptions struct {
 	ActiveFlowsUntil string `json:"active_flows_until"`
 	RelayAddresses []string `json:"relay_addresses"`
 	RelayConnectPolicy *PokrovRelayConnectPolicy `json:"relay_connect_policy,omitempty"`
+	// Only a host-verified external provider with an exact-domain lease may set this.
+	ExternalECHOuterSNI bool `json:"external_ech_outer_sni,omitempty"`
 	Domains []PokrovSmartAccessDomain `json:"domains"`
 	MaxNewConnectionsPerMinute int `json:"max_new_connections_per_minute"`
 	MaxConcurrentConnections int `json:"max_concurrent_connections"`

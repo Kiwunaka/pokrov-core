@@ -13,7 +13,7 @@ var errECHUnsupported = fmt.Errorf("%w: ech_unsupported", errInvalidClientHello)
 
 // Parser adapted from the platform owned-smart-dns ClientHello boundary.
 // Reads and replays the exact TLS records; never terminates or rewrites TLS.
-func readClientHello(connection net.Conn) ([]byte, string, error) {
+func readClientHello(connection net.Conn, externalECHOuterSNI bool) ([]byte, string, error) {
 	const maximum = 65535
 	var raw []byte
 	var handshake []byte
@@ -47,7 +47,7 @@ func readClientHello(connection net.Conn) ([]byte, string, error) {
 			}
 		}
 		if expectedHandshake >= 0 && len(handshake) >= expectedHandshake {
-			name, err := parseClientHelloSNI(handshake[:expectedHandshake])
+			name, err := parseClientHelloSNI(handshake[:expectedHandshake], externalECHOuterSNI)
 			if err != nil {
 				return nil, "", err
 			}
@@ -57,7 +57,7 @@ func readClientHello(connection net.Conn) ([]byte, string, error) {
 	return nil, "", fmt.Errorf("%w: size limit", errInvalidClientHello)
 }
 
-func parseClientHelloSNI(handshake []byte) (string, error) {
+func parseClientHelloSNI(handshake []byte, externalECHOuterSNI bool) (string, error) {
 	if len(handshake) < 4 || handshake[0] != 1 ||
 		len(handshake) != 4+(int(handshake[1])<<16)+(int(handshake[2])<<8)+int(handshake[3]) {
 		return "", errInvalidClientHello
@@ -102,9 +102,10 @@ func parseClientHelloSNI(handshake []byte) (string, error) {
 		if offset+extensionLength > extensionsEnd {
 			return "", errInvalidClientHello
 		}
-		// ECH hides the destination in ClientHelloInner; an allowed outer SNI
-		// cannot authorize this selective relay (including ECH GREASE).
-		if extensionType == 0xfe0d {
+		// ECH and GREASE cannot be distinguished here. Owned gateways require
+		// visible application intent. Approved external providers may explicitly
+		// authorize the visible outer SNI only; the TLS bytes remain opaque.
+		if extensionType == 0xfe0d && !externalECHOuterSNI {
 			return "", errECHUnsupported
 		}
 		if extensionType == 0 {

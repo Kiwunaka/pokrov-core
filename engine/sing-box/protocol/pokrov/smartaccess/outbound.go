@@ -46,6 +46,7 @@ type Outbound struct {
 	preferredRelay int
 	serviceGroup *ServiceLeaseGroup // Shared by service route and DNS windows.
 	domains []option.PokrovSmartAccessDomain
+	externalECHOuterSNI bool
 	lease *leaseAuthorization
 	leases map[string]*leaseAuthorization
 	maxNew, maxConcurrent int
@@ -113,7 +114,8 @@ func NewOutbound(ctx context.Context, _ adapter.Router, _ log.ContextLogger, tag
 	seen := make(map[option.PokrovSmartAccessDomain]bool)
 	for _, domain := range options.Domains {
 		name, err := normalizeDomain(domain.Name)
-		if err != nil || name != domain.Name || (domain.Match != "exact" && domain.Match != "suffix") || seen[domain] {
+		if err != nil || name != domain.Name || (domain.Match != "exact" && domain.Match != "suffix") || seen[domain] ||
+			(options.ExternalECHOuterSNI && domain.Match != "exact") {
 			return nil, errScope
 		}
 		seen[domain] = true
@@ -128,6 +130,7 @@ func NewOutbound(ctx context.Context, _ adapter.Router, _ log.ContextLogger, tag
 		Adapter: outbound.NewAdapter(Type, tag, []string{N.NetworkTCP}, nil), ctx: ctx, dialer: transport, connection: manager,
 		relays: relays, relayPolicy: options.RelayConnectPolicy, relayStates: make([]relayConnectState, len(relays)),
 		domains: append([]option.PokrovSmartAccessDomain(nil), options.Domains...),
+		externalECHOuterSNI: options.ExternalECHOuterSNI,
 		lease: lease, leases: map[string]*leaseAuthorization{lease.id: lease},
 		maxNew: options.MaxNewConnectionsPerMinute, maxConcurrent: options.MaxConcurrentConnections,
 		flows: make(map[*leaseFlow]struct{}),
@@ -324,7 +327,7 @@ func (h *Outbound) newConnection(ctx context.Context, conn net.Conn, metadata ad
 		N.CloseOnHandshakeFailure(flow, finish, errScope)
 		return
 	}
-	raw, serverName, err := readClientHello(flow)
+	raw, serverName, err := readClientHello(flow, h.externalECHOuterSNI)
 	if err != nil || !h.allows(serverName) {
 		if errors.Is(err, errECHUnsupported) {
 			h.recordProbeFailure(flow.authorization, urltest.ProbeStageTLS)
