@@ -104,6 +104,11 @@ host. It does not admit a holder or perform the TLS proof. Signed Selective
 authority and native proof integration remain separate, with the feature
 disabled; existing Full and expiry behavior is unchanged.
 
+Windows local-DPI preparation and runtime fallback validation follow encrypted
+bridge detours and the existing `pokrov-ats-lease` wrapper recursively, rejecting
+cycles and unprotected paths. The prepared fallback keeps its original wrapper
+and detours; ATS admission, expiry and revocation remain enforced by that wrapper.
+
 Windows source has a separate `WindowsLocalDpiAdmissionVersion` and desktop
 `windows_local_dpi_admission_version:1` descriptor. Native
 `PrepareWindowsLocalDpiProfile` verifies Windows authority with the host's

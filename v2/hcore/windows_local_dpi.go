@@ -212,11 +212,14 @@ func windowsDpiString(raw json.RawMessage) string {
 
 func windowsDpiProtectedVPN(byTag map[string]map[string]json.RawMessage, tag string, visiting map[string]bool) bool {
 	outbound := byTag[tag]
-	if outbound == nil || visiting[tag] || windowsDpiString(outbound["detour"]) != "" {
+	if outbound == nil || visiting[tag] {
 		return false
 	}
 	visiting[tag] = true
 	defer delete(visiting, tag)
+	if detour := windowsDpiString(outbound["detour"]); detour != "" && !windowsDpiProtectedVPN(byTag, detour, visiting) {
+		return false
+	}
 	switch windowsDpiString(outbound["type"]) {
 	case "vless":
 		var tls struct {
@@ -226,6 +229,9 @@ func windowsDpiProtectedVPN(byTag map[string]map[string]json.RawMessage, tag str
 		return json.Unmarshal(outbound["tls"], &tls) == nil && tls.Enabled && !tls.Insecure
 	case "hysteria2", "wireguard", "awg":
 		return true
+	case "pokrov-ats-lease":
+		// Validate the encrypted upstream without bypassing the lease gate.
+		return windowsDpiProtectedVPN(byTag, windowsDpiString(outbound["upstream_tag"]), visiting)
 	case "selector", "urltest":
 		var children []string
 		if json.Unmarshal(outbound["outbounds"], &children) != nil || len(children) == 0 {

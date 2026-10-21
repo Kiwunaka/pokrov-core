@@ -89,10 +89,10 @@ func TestWindowsLocalDpiPreparationRetainsVPNAndExactSignedScope(t *testing.T) {
 	var prepared windowsDpiPreparation
 	var output struct {
 		Outbounds []struct {
-			Tag, Type   string
-			Windows     bool   `json:"windows_direct"`
-			Bind        string `json:"bind_interface"`
-			VPNOutbound string `json:"vpn_outbound"`
+			Tag, Type, Detour string
+			Windows           bool   `json:"windows_direct"`
+			Bind              string `json:"bind_interface"`
+			VPNOutbound       string `json:"vpn_outbound"`
 		}
 		Route struct {
 			Final string
@@ -115,6 +115,40 @@ func TestWindowsLocalDpiPreparationRetainsVPNAndExactSignedScope(t *testing.T) {
 		}
 	}
 	vpn["tls"] = vpnTLS
+	// ATS wraps the ordinary VPN tag. Keep that wrapper as the fallback so its
+	// lease deadlines and revocation still apply after local DPI withdrawal.
+	originalOutbounds := config["outbounds"].([]any)
+	lease := map[string]any{"type": "pokrov-ats-lease", "tag": "lease", "upstream_tag": "vpn"}
+	bridge := map[string]any{"type": "vless", "tag": "bridge", "tls": vpnTLS}
+	vpn["detour"] = "bridge"
+	config["outbounds"] = append(originalOutbounds, bridge, lease)
+	rule["outbound"] = "lease"
+	encoded, _ = json.Marshal(config)
+	result, err = PrepareWindowsLocalDpiProfile(string(encoded), string(keys), "lab", "physical-fixture")
+	if err != nil || json.Unmarshal([]byte(result), &prepared) != nil || json.Unmarshal(prepared.Profile, &output) != nil ||
+		len(output.Outbounds) != 6 || output.Outbounds[1].Detour != "bridge" || output.Outbounds[5].VPNOutbound != "lease" {
+		t.Fatal("ATS preparation rejected or bypassed the encrypted bridge and lease fallback")
+	}
+	vpn["detour"] = "direct"
+	encoded, _ = json.Marshal(config)
+	if result, err = PrepareWindowsLocalDpiProfile(string(encoded), string(keys), "lab", "physical-fixture"); err == nil || result != "" {
+		t.Fatal("an unprotected bridge detour was prepared")
+	}
+	vpn["detour"] = "bridge"
+	bridge["detour"] = "vpn"
+	encoded, _ = json.Marshal(config)
+	if result, err = PrepareWindowsLocalDpiProfile(string(encoded), string(keys), "lab", "physical-fixture"); err == nil || result != "" {
+		t.Fatal("a recursive bridge detour was prepared")
+	}
+	delete(bridge, "detour")
+	lease["upstream_tag"] = "direct"
+	encoded, _ = json.Marshal(config)
+	if result, err = PrepareWindowsLocalDpiProfile(string(encoded), string(keys), "lab", "physical-fixture"); err == nil || result != "" {
+		t.Fatal("ATS wrapper admitted an unprotected upstream")
+	}
+	config["outbounds"] = originalOutbounds
+	delete(vpn, "detour")
+	rule["outbound"] = "group"
 	for selector, value := range map[string]any{"domain_regex": []string{".*"}, "domain_keyword": []string{"foreign"}, "ip_cidr": []string{"0.0.0.0/0"}, "invert": true} {
 		rule[selector] = value
 		encoded, _ = json.Marshal(config)

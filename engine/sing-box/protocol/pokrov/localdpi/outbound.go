@@ -18,6 +18,7 @@ import (
 	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
+	"github.com/sagernet/sing-box/protocol/pokrov/atslease"
 	M "github.com/sagernet/sing/common/metadata"
 	N "github.com/sagernet/sing/common/network"
 	"github.com/sagernet/sing/protocol/socks"
@@ -184,21 +185,21 @@ func protectedFallback(manager adapter.OutboundManager, target adapter.Outbound,
 	defer delete(seen, target.Tag())
 	switch target.Type() {
 	case C.TypeVLESS, C.TypeHysteria2, C.TypeWireGuard, C.TypeAwg:
-		return true
-	case C.TypeSelector, C.TypeURLTest:
+		// A protected exit can itself use an encrypted bridge detour.
+	case C.TypeSelector, C.TypeURLTest, atslease.Type:
 		if len(target.Dependencies()) == 0 {
 			return false
 		}
-		for _, tag := range target.Dependencies() {
-			child, found := manager.Outbound(tag)
-			if !found || !protectedFallback(manager, child, seen) {
-				return false
-			}
-		}
-		return true
 	default:
 		return false
 	}
+	for _, tag := range target.Dependencies() {
+		child, found := manager.Outbound(tag)
+		if !found || !protectedFallback(manager, child, seen) {
+			return false
+		}
+	}
+	return true
 }
 
 func (h *Outbound) Close() error {

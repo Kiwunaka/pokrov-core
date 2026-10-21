@@ -12,10 +12,13 @@ import (
 	"github.com/sagernet/sing-box/adapter/outbound"
 	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/option"
+	"github.com/sagernet/sing-box/protocol/direct"
+	"github.com/sagernet/sing-box/protocol/pokrov/atslease"
 	"github.com/sagernet/sing-box/protocol/pokrov/localdpi"
 	"github.com/sagernet/sing-box/protocol/pokrov/telegramws"
 	"github.com/sagernet/sing-box/protocol/socks"
 	"github.com/sagernet/sing-box/protocol/vless"
+	M "github.com/sagernet/sing/common/metadata"
 	"github.com/sagernet/sing/service"
 )
 
@@ -144,6 +147,76 @@ func localDpiFixtureOutbound(t *testing.T, s *StartedService, tag string) *local
 		t.Fatal("local DPI holder missing")
 	}
 	return local
+}
+
+func TestLocalDpiATSFallbackKeepsLeaseRevocation(t *testing.T) {
+	registry := outbound.NewRegistry()
+	localdpi.RegisterOutbound(registry)
+	atslease.RegisterOutbound(registry)
+	vless.RegisterOutbound(registry)
+	direct.RegisterOutbound(registry)
+	ctx := service.ContextWith[adapter.OutboundRegistry](context.Background(), registry)
+	ctx = service.ContextWith[option.OutboundOptionsRegistry](ctx, registry)
+	s := NewStartedService(ServiceOptions{Context: ctx, LogMaxLines: 1})
+	t.Cleanup(func() { _ = s.Close() })
+	options := option.Options{Log: &option.LogOptions{Disabled: true}, Outbounds: []option.Outbound{
+		{Type: C.TypeVLESS, Tag: "vpn", Options: &option.VLESSOutboundOptions{
+			DialerOptions: option.DialerOptions{Detour: "bridge"},
+			ServerOptions: option.ServerOptions{Server: "127.0.0.1", ServerPort: 1}, UUID: "00000000-0000-0000-0000-000000000001",
+			OutboundTLSOptionsContainer: option.OutboundTLSOptionsContainer{TLS: &option.OutboundTLSOptions{Enabled: true}},
+		}},
+		{Type: C.TypeVLESS, Tag: "bridge", Options: &option.VLESSOutboundOptions{
+			ServerOptions: option.ServerOptions{Server: "127.0.0.1", ServerPort: 1}, UUID: "00000000-0000-0000-0000-000000000001",
+			OutboundTLSOptionsContainer: option.OutboundTLSOptionsContainer{TLS: &option.OutboundTLSOptions{Enabled: true}},
+		}},
+		{Type: C.TypeVLESS, Tag: "unsafe", Options: &option.VLESSOutboundOptions{
+			DialerOptions: option.DialerOptions{Detour: "direct"},
+			ServerOptions: option.ServerOptions{Server: "127.0.0.1", ServerPort: 1}, UUID: "00000000-0000-0000-0000-000000000001",
+			OutboundTLSOptionsContainer: option.OutboundTLSOptionsContainer{TLS: &option.OutboundTLSOptions{Enabled: true}},
+		}},
+		{Type: C.TypeDirect, Tag: "direct", Options: &option.DirectOutboundOptions{}},
+	}, Route: &option.RouteOptions{Final: "vpn"}}
+	now := time.Now().UTC()
+	for _, upstream := range []string{"vpn", "direct", "unsafe"} {
+		options.Outbounds = append(options.Outbounds,
+			option.Outbound{Type: atslease.Type, Tag: "lease-" + upstream, Options: &option.PokrovATSLeaseOutboundOptions{
+				UpstreamTag: upstream, LeaseID: "lease_0123456789abcdef0123456789abcdef",
+				IssuedAt: now.Add(-time.Minute).Format(time.RFC3339), NewFlowsUntil: now.Add(time.Minute).Format(time.RFC3339),
+				ActiveFlowsUntil: now.Add(2 * time.Minute).Format(time.RFC3339),
+			}},
+			option.Outbound{Type: localdpi.Type, Tag: "local-" + upstream, Options: &option.PokrovLocalDPIOutboundOptions{
+				ServerOptions: option.ServerOptions{Server: "127.0.0.1", ServerPort: 1}, ServiceID: "test-" + upstream, VPNOutbound: "lease-" + upstream,
+			}})
+	}
+	instance, err := s.newInstanceOptions(options, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.instance, s.serviceStatus.Status = instance, ServiceStatus_STARTED
+	wrapped, _ := instance.instance.Outbound().Outbound("lease-vpn")
+	lease := wrapped.(*atslease.Outbound)
+	local := localDpiFixtureOutbound(t, s, "local-vpn")
+	// Start only the relevant outbound owners: no listener, TUN or network dial.
+	if err := lease.Start(); err != nil {
+		t.Fatal(err)
+	}
+	if err := local.Start(); err != nil {
+		t.Fatal("local DPI rejected the encrypted ATS fallback")
+	}
+	if err := localDpiFixtureOutbound(t, s, "local-direct").Start(); err == nil {
+		t.Fatal("local DPI admitted an ATS wrapper around direct")
+	}
+	if err := localDpiFixtureOutbound(t, s, "local-unsafe").Start(); err == nil {
+		t.Fatal("local DPI admitted an unprotected bridge detour")
+	}
+	lease.Revoke(true)
+	conn, err := local.DialContext(context.Background(), "tcp", M.ParseSocksaddr("127.0.0.1:1"))
+	if conn != nil {
+		_ = conn.Close()
+	}
+	if err == nil || err.Error() != "ats_endpoint_lease_unavailable" {
+		t.Fatal("local DPI bypassed the revoked ATS fallback")
+	}
 }
 
 func TestLocalDpiWithdrawalPreservesOtherAdmissionAndCatalog(t *testing.T) {
