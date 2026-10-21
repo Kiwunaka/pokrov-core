@@ -39,6 +39,17 @@ var errScope = errors.New("local_dpi_scope_invalid")
 var errClosed = errors.New("local_dpi_closed")
 var errUnavailable = errors.New("local_dpi_admission_unavailable")
 
+type admissionFailure string
+
+const (
+	failureConnectTimeoutIPv4 admissionFailure = "connect_timeout_ipv4"
+	failureConnectTimeoutIPv6 admissionFailure = "connect_timeout_ipv6"
+	failureConnectErrorIPv4   admissionFailure = "connect_error_ipv4"
+	failureConnectErrorIPv6   admissionFailure = "connect_error_ipv6"
+	failureEarlyRead          admissionFailure = "early_read"
+	failureEarlyWrite         admissionFailure = "early_write"
+)
+
 func RegisterOutbound(registry *outbound.Registry) {
 	outbound.Register[option.PokrovLocalDPIOutboundOptions](registry, Type, NewOutbound)
 }
@@ -63,6 +74,7 @@ type Outbound struct {
 	withdrawCompleted bool
 	localHandoffs     uint64
 	vpnHandoffs       uint64
+	failureReason     admissionFailure // First ready-to-failed cause; guarded by mu.
 }
 
 type Observation struct {
@@ -70,6 +82,7 @@ type Observation struct {
 	WithdrawCompleted bool   `json:"withdraw_completed"`
 	LocalHandoffs     uint64 `json:"local_handoffs"`
 	VPNHandoffs       uint64 `json:"vpn_handoffs"`
+	FailureReason     string `json:"failure_reason"`
 }
 
 func NewOutbound(ctx context.Context, _ adapter.Router, _ log.ContextLogger, tag string,
@@ -127,9 +140,21 @@ func (h *Outbound) ReadObservation() Observation {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	states := [...]string{"unpublished", "ready", "failed", "withdrawn"}
+	reason := string(h.failureReason)
+	if reason == "" {
+		reason = "none"
+	}
 	return Observation{
 		State: states[h.admission.Load()], WithdrawCompleted: h.withdrawCompleted,
-		LocalHandoffs: h.localHandoffs, VPNHandoffs: h.vpnHandoffs,
+		LocalHandoffs: h.localHandoffs, VPNHandoffs: h.vpnHandoffs, FailureReason: reason,
+	}
+}
+
+func (h *Outbound) failAdmission(reason admissionFailure) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.admission.CompareAndSwap(admissionReady, admissionFailed) {
+		h.failureReason = reason
 	}
 }
 
@@ -278,7 +303,20 @@ func (h *Outbound) NewConnection(ctx context.Context, conn net.Conn, metadata ad
 		if remote != nil {
 			_ = remote.Close()
 		}
-		h.admission.CompareAndSwap(admissionReady, admissionFailed)
+		var timeoutError net.Error
+		timedOut := errors.Is(setupErr, context.DeadlineExceeded) || errors.Is(err, context.DeadlineExceeded) ||
+			(errors.As(err, &timeoutError) && timeoutError.Timeout())
+		reason := failureConnectErrorIPv6
+		if metadata.Destination.Addr.Is4() {
+			reason = failureConnectErrorIPv4
+		}
+		if timedOut {
+			reason = failureConnectTimeoutIPv6
+			if metadata.Destination.Addr.Is4() {
+				reason = failureConnectTimeoutIPv4
+			}
+		}
+		h.failAdmission(reason)
 		if h.admission.Load() == admissionWithdrawn {
 			N.CloseOnHandshakeFailure(conn, finish, errUnavailable)
 			return
@@ -288,7 +326,7 @@ func (h *Outbound) NewConnection(ctx context.Context, conn net.Conn, metadata ad
 	}
 	// SOCKS CONNECT and direct TCP setup contain no client payload. After handoff,
 	// every write (including a partial write) belongs to it; no retry exists.
-	observed := &observedConn{Conn: remote, ctx: flowCtx, admission: &h.admission}
+	observed := &observedConn{Conn: remote, ctx: flowCtx, owner: h}
 	h.mu.Lock()
 	attached := !h.closed && h.IsReady() && flowCtx.Err() == nil && f.attach(observed)
 	if attached {

@@ -96,7 +96,10 @@ func TestWindowsLocalDpiPreparationRetainsVPNAndExactSignedScope(t *testing.T) {
 		}
 		Route struct {
 			Final string
-			Rules []struct{ Outbound string }
+			Rules []struct {
+				Outbound  string
+				IPVersion int `json:"ip_version"`
+			}
 		}
 	}
 	if json.Unmarshal([]byte(result), &prepared) != nil || json.Unmarshal(prepared.Profile, &output) != nil ||
@@ -104,9 +107,29 @@ func TestWindowsLocalDpiPreparationRetainsVPNAndExactSignedScope(t *testing.T) {
 		prepared.Services[0].Domains[0].Match != "exact" || prepared.ExpiresAt != expires || len(output.Outbounds) != 4 ||
 		output.Outbounds[3].Type != "pokrov-local-dpi" || !output.Outbounds[3].Windows || output.Outbounds[3].Bind != "physical-fixture" ||
 		output.Outbounds[3].VPNOutbound != "group" || output.Route.Final != "direct" ||
-		output.Route.Rules[0].Outbound != prepared.Services[0].OutboundTag || output.Route.Rules[1].Outbound != "vpn" {
+		len(output.Route.Rules) != 3 || output.Route.Rules[0].Outbound != prepared.Services[0].OutboundTag ||
+		output.Route.Rules[0].IPVersion != 4 || output.Route.Rules[1].Outbound != "group" ||
+		output.Route.Rules[1].IPVersion != 0 || output.Route.Rules[2].Outbound != "vpn" {
 		t.Fatal("preparation escaped signed scope or changed the existing VPN")
 	}
+	// IPv6 misses the IPv4 local override and still matches the unchanged
+	// original encrypted route, rather than falling through to final direct.
+	var retained struct {
+		Route struct{ Rules []json.RawMessage }
+	}
+	if json.Unmarshal(prepared.Profile, &retained) != nil {
+		t.Fatal("prepared rules invalid")
+	}
+	originalRule, _ := json.Marshal(rule)
+	if string(retained.Route.Rules[1]) != string(originalRule) {
+		t.Fatal("IPv6 fallback lost the original domain, VPN or signed window")
+	}
+	rule["ip_version"] = 6
+	encoded, _ = json.Marshal(config)
+	if result, err = PrepareWindowsLocalDpiProfile(string(encoded), string(keys), "lab", "physical-fixture"); err == nil || result != "" {
+		t.Fatal("IPv6-only authority was widened to physical IPv4")
+	}
+	delete(rule, "ip_version")
 	for _, unsafeTLS := range []any{nil, map[string]any{"enabled": true, "insecure": true}} {
 		vpn["tls"] = unsafeTLS
 		encoded, _ = json.Marshal(config)

@@ -121,10 +121,21 @@ assets, current profile/network proof and captured-holder lifetime ownership
 remain required, so this source capability does not enable the feature or
 change retained releases.
 
+Windows local-DPI rules admit only IPv4, matching the native physical control
+proof. Each override precedes its unchanged signed VPN rule, so IPv6 retains
+the encrypted fallback instead of reaching final direct. A browser's unused
+speculative TCP socket reaching EOF before any client write does not retire the
+service; failures after a client write retain the existing terminal admission.
+
 The optional Windows descriptor `windows_local_dpi_observation_version:1` and
 caller-owned `pokrovCoreReadLocalDpiObservation(captured_admission_id)` expose
 only the current holder's latch state, completed withdrawal and successful
-local/VPN TCP handoff counts. Stale IDs and stopped runtimes return empty;
+local/VPN TCP handoff counts, plus `failure_reason`: `none`,
+`connect_timeout_ipv4`, `connect_timeout_ipv6`, `connect_error_ipv4`,
+`connect_error_ipv6`, `early_read` or `early_write`. The first ready-to-failed
+cause is retained through withdrawal under the same observation lock; it contains
+no raw error or address. Older artifacts omit this diagnostic field.
+Stale IDs and stopped runtimes return empty;
 same-profile reloads start fresh counters. Withdrawal completion follows closure
 of old local streams, while a VPN handoff after withdrawal requires a fresh
 request. Raw dialers, UDP and native probes do not count; the snapshot contains

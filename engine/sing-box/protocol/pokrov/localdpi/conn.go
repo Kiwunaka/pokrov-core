@@ -3,6 +3,7 @@ package localdpi
 import (
 	"context"
 	"errors"
+	"io"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -13,7 +14,8 @@ import (
 type observedConn struct {
 	net.Conn
 	ctx       context.Context
-	admission *atomic.Uint32
+	owner     *Outbound
+	wrote     atomic.Bool
 	responded atomic.Bool
 	closed    atomic.Bool
 	once      sync.Once
@@ -24,23 +26,30 @@ func (c *observedConn) Read(p []byte) (int, error) {
 	if n > 0 {
 		c.responded.Store(true)
 	}
-	c.observe(err)
+	// Browsers can open speculative TCP sockets without sending a request.
+	// An idle peer closing such a socket has not exercised the DPI strategy.
+	if !errors.Is(err, io.EOF) || c.wrote.Load() {
+		c.observe(err, failureEarlyRead)
+	}
 	return n, err
 }
 
 func (c *observedConn) Write(p []byte) (int, error) {
-	if c.admission.Load() == admissionWithdrawn || c.ctx.Err() != nil {
+	if c.owner.admission.Load() == admissionWithdrawn || c.ctx.Err() != nil {
 		return 0, errUnavailable
 	}
+	if len(p) > 0 {
+		c.wrote.Store(true)
+	}
 	n, err := c.Conn.Write(p)
-	c.observe(err)
+	c.observe(err, failureEarlyWrite)
 	return n, err
 }
 
-func (c *observedConn) observe(err error) {
+func (c *observedConn) observe(err error, reason admissionFailure) {
 	if err != nil && !c.responded.Load() && !c.closed.Load() && c.ctx.Err() == nil &&
 		!errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
-		c.admission.CompareAndSwap(admissionReady, admissionFailed)
+		c.owner.failAdmission(reason)
 	}
 }
 

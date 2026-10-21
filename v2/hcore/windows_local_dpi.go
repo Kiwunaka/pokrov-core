@@ -109,6 +109,7 @@ func PrepareWindowsLocalDpiProfile(configJSON, publicKeysJSON, audience, bindInt
 	}
 	sort.Strings(serviceIDs)
 	prepared := windowsDpiPreparation{ExpiresAt: envelope.Payload.ExpiresAt}
+	localRules := make(map[int]map[string]json.RawMessage)
 	for _, serviceID := range serviceIDs {
 		host := metadata.Services[serviceID]
 		if !daemon.VerifyWindowsLocalDpiCatalog(metadata.Envelope, publicKeysJSON, audience, metadata.Digest,
@@ -128,8 +129,8 @@ func PrepareWindowsLocalDpiProfile(configJSON, publicKeysJSON, audience, bindInt
 		}
 		selected := windowsDpiService{ServiceID: serviceID, OutboundTag: tag, ControlHost: host}
 		var fallback string
-		var matching []map[string]json.RawMessage
-		for _, rule := range rules {
+		var matching []int
+		for ruleIndex, rule := range rules {
 			var window map[string]json.RawMessage
 			if json.Unmarshal(rule["pokrov_catalog_window"], &window) != nil ||
 				windowsDpiString(window["service_id"]) != serviceID || windowsDpiString(rule["action"]) != "route" ||
@@ -142,6 +143,12 @@ func PrepareWindowsLocalDpiProfile(configJSON, publicKeysJSON, audience, bindInt
 			}
 			if _, leasedGroup := window["lease_group"]; leasedGroup {
 				continue
+			}
+			if raw, present := rule["ip_version"]; present {
+				var version int
+				if json.Unmarshal(raw, &version) != nil || (version != 0 && version != 4) {
+					continue
+				}
 			}
 			var inverted bool
 			if raw, present := rule["invert"]; present && (json.Unmarshal(raw, &inverted) != nil || inverted) {
@@ -168,7 +175,7 @@ func PrepareWindowsLocalDpiProfile(configJSON, publicKeysJSON, audience, bindInt
 					return "", errWindowsDpiScope
 				}
 				fallback = vpn
-				matching = append(matching, rule)
+				matching = append(matching, ruleIndex)
 				selected.Domains = append(selected.Domains, domain)
 			}
 		}
@@ -187,8 +194,16 @@ func PrepareWindowsLocalDpiProfile(configJSON, publicKeysJSON, audience, bindInt
 		var local map[string]json.RawMessage
 		_ = json.Unmarshal(encoded, &local)
 		outbounds = append(outbounds, local)
-		for _, rule := range matching {
-			rule["outbound"], _ = json.Marshal(tag)
+		for _, ruleIndex := range matching {
+			// Native admission proves only physical IPv4. Keep the original VPN
+			// rule immediately after its IPv4 override, including its signed window.
+			localRule := make(map[string]json.RawMessage, len(rules[ruleIndex])+1)
+			for key, value := range rules[ruleIndex] {
+				localRule[key] = value
+			}
+			localRule["outbound"], _ = json.Marshal(tag)
+			localRule["ip_version"] = json.RawMessage("4")
+			localRules[ruleIndex] = localRule
 		}
 		prepared.Services = append(prepared.Services, selected)
 	}
@@ -196,7 +211,14 @@ func PrepareWindowsLocalDpiProfile(configJSON, publicKeysJSON, audience, bindInt
 		return "", errWindowsDpiScope
 	}
 	config["outbounds"], _ = json.Marshal(outbounds)
-	route["rules"], _ = json.Marshal(rules)
+	preparedRules := make([]map[string]json.RawMessage, 0, len(rules)+len(localRules))
+	for index, rule := range rules {
+		if localRule := localRules[index]; localRule != nil {
+			preparedRules = append(preparedRules, localRule)
+		}
+		preparedRules = append(preparedRules, rule)
+	}
+	route["rules"], _ = json.Marshal(preparedRules)
 	config["route"], _ = json.Marshal(route)
 	delete(config, "_meta")
 	prepared.Profile, _ = json.Marshal(config)
