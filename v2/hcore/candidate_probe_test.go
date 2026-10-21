@@ -196,8 +196,12 @@ func TestCandidateProbeGET64KDetectsStallAfter16K(t *testing.T) {
 	if kind := candidateGET64K(ctx, client, bufio.NewReader(client), candidatePayloadURL, &detail); kind != "data_stalled" {
 		t.Fatalf("body stall: %s", kind)
 	}
-	if detail.Failure != "" || detail.Observation != nil {
-		t.Fatal("body timeout retained a generic IO observation")
+	// This helper retains partial reads internally. ProbeCandidate's finalizer
+	// separately omits the observation from data_stalled ACKs.
+	if detail.Failure != "" || detail.Observation == nil ||
+		detail.Observation.Target != "owned_api" || detail.Observation.Status != 200 ||
+		detail.Observation.ReceivedBytes != 16*1024 || detail.Observation.ExpectedBytes != candidatePayloadBytes {
+		t.Fatal("body timeout lost its internal partial-read observation")
 	}
 	if err := <-done; err != nil && err != io.ErrClosedPipe {
 		t.Fatal(err)
