@@ -4,6 +4,8 @@ import (
 	"errors"
 	"time"
 
+	"github.com/Kiwunaka/POKROV-core/internal/observability"
+	"github.com/sagernet/sing-box/common/urltest"
 	"github.com/sagernet/sing-box/daemon"
 )
 
@@ -14,6 +16,7 @@ func ProbeSelectedOutbound(tag string) (bool, error) {
 	if started == nil {
 		return false, errors.New("selected route probe unavailable")
 	}
+	emit := operationalEventEmitter.CaptureContext()
 	healthy, err := started.ProbeSelectedOutboundResult(tag)
 	if !static.lock.TryLock() {
 		return false, errors.New("selected route probe unavailable")
@@ -22,6 +25,13 @@ func ProbeSelectedOutbound(tag string) (bool, error) {
 	static.lock.Unlock()
 	if !current {
 		return false, errors.New("selected route probe unavailable")
+	}
+	// The C result intentionally exposes only the probe stage. Preserve the
+	// typed dial failure in the existing closed event channel before truncation;
+	// the captured context rejects a late result from a replaced attempt.
+	var probeError *urltest.ProbeError
+	if emit != nil && errors.As(err, &probeError) && probeError.Stage == urltest.ProbeStageConnect {
+		emit(observability.EgressProbe, observability.OutcomeFailed, observability.ClassifyStartError(err))
 	}
 	return healthy, err
 }

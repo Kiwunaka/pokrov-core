@@ -331,6 +331,12 @@ the client recognize the completed Smart Access failure and apply its existing
 scoped VPN recovery, matching Android. Caller cancellation, an outer probe
 deadline and late results retain their existing lifecycle outcomes.
 
+A current selected-outbound TCP dial failure also emits `core.egress.probe`
+with the existing closed transport error code before the desktop string drops
+the underlying cause. The captured attempt/generation fences this diagnostic;
+raw errors, relay addresses and lease identities never enter the event. The
+existing Windows service journal receives it without an ABI or schema change.
+
 If every current service grant has reached its new-flow deadline while the paired
 compiled DNS/TCP catalog windows remain current, the probe returns the closed typed
 outcome `Smart Access lease expired` for host VPN recovery. A revoked or closed
