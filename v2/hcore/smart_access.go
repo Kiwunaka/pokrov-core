@@ -45,6 +45,7 @@ func ProbeRuntimeEgress(tag string, timeout time.Duration, interrupted func() bo
 	if started == nil {
 		return false, errors.New("runtime egress probe unavailable")
 	}
+	emit := operationalEventEmitter.CaptureContext()
 	healthy, err := started.ProbeRuntimeEgressResult(tag, timeout, interrupted)
 	if !static.lock.TryLock() {
 		return false, errors.New("runtime egress probe unavailable")
@@ -53,6 +54,10 @@ func ProbeRuntimeEgress(tag string, timeout time.Duration, interrupted func() bo
 	static.lock.Unlock()
 	if !current {
 		return false, errors.New("runtime egress probe unavailable")
+	}
+	var probeError *urltest.ProbeError
+	if emit != nil && errors.As(err, &probeError) && probeError.Stage == urltest.ProbeStageConnect {
+		emit(observability.EgressProbe, observability.OutcomeFailed, observability.ClassifyStartError(err))
 	}
 	return healthy, err
 }

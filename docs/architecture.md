@@ -336,7 +336,7 @@ the client recognize the completed Smart Access failure and apply its existing
 scoped VPN recovery, matching Android. Caller cancellation, an outer probe
 deadline and late results retain their existing lifecycle outcomes.
 
-A current selected-outbound TCP dial failure also emits `core.egress.probe`
+A current startup or periodic selected-outbound TCP dial failure also emits `core.egress.probe`
 with the existing closed transport error code before the desktop string drops
 the underlying cause. The captured attempt/generation fences this diagnostic;
 raw errors, relay addresses and lease identities never enter the event. The
