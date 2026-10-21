@@ -13,7 +13,7 @@ func DnsttSingbox(vlessURL string) (*T.Outbound, error) {
 	}
 	decoded := u.Params
 	uot := T.UDPOverTCPOptions{
-		Enabled: getOneOfN(decoded, "", "uot") != "false" && getOneOfN(decoded, "", "uot") != "0",
+		Enabled: getOneOfN(decoded, "false", "uot") != "false" && getOneOfN(decoded, "false", "uot") != "0",
 	}
 	return &T.Outbound{
 		Tag:  u.Name + "§hide§",
@@ -23,7 +23,7 @@ func DnsttSingbox(vlessURL string) (*T.Outbound, error) {
 			PublicKey:         getOneOfN(decoded, "", "pubkey", "publickey", "serverpublickey"),
 			Domain:            getOneOfN(decoded, "", "domain", "serveraddress", "address"),
 			Resolvers:         strings.Split(getOneOfN(decoded, "", "resolver"), ","),
-			TunnelPerResolver: toInt(getOneOfN(decoded, "4", "tunnel_per_resolver")),
+			TunnelPerResolver: toInt(getOneOfN(decoded, "1", "tunnel_per_resolver")),
 			UDPOverTCP:        &uot,
 		},
 	}, nil

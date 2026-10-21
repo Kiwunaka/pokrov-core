@@ -15,8 +15,11 @@ may keep the existing Core version; it does not create a tag or public release.
 
 The embedded fork targets stable sing-box `1.14.2` while retaining POKROV
 XHTTP, Smart Access, WARP, AWG and opt-in Telegram WSS transports. Runtime client
-builds use `pokrov_client`: Psiphon, Tor, Mieru, DNSTT, SSH and remote server
+builds use `pokrov_client`: Psiphon, Tor, Mieru, SSH and remote server
 inbounds are omitted; TUN and authenticated local SOCKS/HTTP/mixed remain.
+DNSTT is a TCP-only VLESS detour reported by `dnstt_vless_v1`; the same Core
+version in older binaries does not imply that feature is present. Its first
+source slice still needs an owned delegated endpoint and matching App admission.
 Android host certificate roots and the public host callbacks remain supported.
 POKROV catalog DNS and `bypass_if_failed` retain their failure/reselection path;
 combining that path with the new DNS response/evaluate/race actions is rejected.

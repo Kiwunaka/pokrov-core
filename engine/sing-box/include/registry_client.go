@@ -25,6 +25,7 @@ import (
 	"github.com/sagernet/sing-box/protocol/http"
 	"github.com/sagernet/sing-box/protocol/mixed"
 	"github.com/sagernet/sing-box/protocol/pokrov/atslease"
+	"github.com/sagernet/sing-box/protocol/pokrov/dnstt"
 	"github.com/sagernet/sing-box/protocol/pokrov/hinvalid"
 	"github.com/sagernet/sing-box/protocol/pokrov/localdpi"
 	"github.com/sagernet/sing-box/protocol/pokrov/smartaccess"
@@ -61,6 +62,7 @@ func OutboundRegistry() *outbound.Registry {
 	registry := outbound.NewRegistry()
 	direct.RegisterOutbound(registry)
 	atslease.RegisterOutbound(registry)
+	dnstt.RegisterOutbound(registry)
 	smartaccess.RegisterOutbound(registry)
 	telegramws.RegisterOutbound(registry)
 	localdpi.RegisterOutbound(registry)

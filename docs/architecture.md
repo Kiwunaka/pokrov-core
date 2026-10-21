@@ -16,6 +16,33 @@ POKROV Core is one client runtime with three layers:
 
 ## Runtime selection and Android preparation
 
+The client registry exposes `dnstt_vless_v1` through the existing transport
+inventory. This is the first SlipNet-compatible DNSTT transport slice, using
+the already pinned CC0 `mahsanet/dnstt` codec/Noise implementation with KCP and
+smux. It is not the SlipNet application and does not import its server manager.
+The `dnstt` outbound takes one numeric UDP resolver (`resolvers: ["IP:53"]`),
+`domain`, the pinned Noise `publicKey`, `network: "tcp"` and
+`tunnel_per_resolver: 1` (also the omitted default). An ordinary flowless VLESS
+outbound uses `detour` to that tag and the fixed server-side upstream
+`127.0.0.1:12543`. DNSTT carries raw streams, not their destinations: VLESS
+supplies destination framing and the personal account key. The server must
+restrict its loopback VLESS companion to current Premium keys, including active
+trial/manual/gift/promo/bonus/family access, and revoke Free/expired/blocked keys.
+Knowing the DNS zone or Noise public key grants no VLESS access.
+
+DNS sockets use the existing Core protected/bound dialer. One lazy session is
+shared; cancellation stops setup, Close joins both packet loops, and ordinary
+stream cancellation preserves other established streams. No payload logging or
+duplicate traffic retention, resolver fanout, authoritative-server bypass, UDP/UoT,
+or automatic plain connection fallback is supported. An owned UDP53 endpoint,
+DNS delegation and private Premium VLESS upstream are deployment prerequisites.
+Focused loopback tests cover DNS TXT/KCP/Noise/smux data transfer, protection
+callback and cancellation/Close; they do not establish reachability through a
+public recursive resolver. Older 1.2.14 binaries lack this feature despite the
+same Core version. App must gate materialization on the loaded inventory; the
+Linux host allowlist and DPI/TG encrypted-fallback validators do not yet admit
+this new detour. Public client issuance and endpoint acceptance remain separate.
+
 Managed Country Auto can explicitly list `preferred_outbounds` in its existing
 URLTest group. A healthy member of that tier takes precedence over other members;
 latency and hysteresis still select within the tier. When its probes fail, the

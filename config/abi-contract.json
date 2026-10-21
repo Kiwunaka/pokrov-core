@@ -99,6 +99,7 @@
     "arguments": "none; pure compiled-feature inventory, no runtime or network setup",
     "returns": "Caller-owned UTF-8 JSON, at most 4096 bytes, release desktop string with freeString. Closed shape: schema=1, features=sorted unique ASCII feature IDs. Absent symbol/null/invalid or unknown schema means unavailable, never inferred support. This optional additive export does not change desktop ABI 2 or the existing exact capability descriptor.",
     "features": {
+      "dnstt_vless_v1": "TCP-only VLESS detour over pinned Noise/KCP/smux DNS tunnel, one numeric UDP resolver and fixed server upstream. Compiled support only; host entitlement, owned delegated endpoint and server-side Premium authorization remain required.",
       "pokrov_ats_lease_v1": "Core outbound wrapper for a single VLESS ATS endpoint. New TCP/UDP flows stop within 10 minutes of issue; admitted flows close within one hour. The host must bind and revoke the exact running profile/lease.",
       "pokrov_telegram_ws_v1": "Native obfuscated Telegram TCP:443 to TLS-verified binary WSS with encrypted VPN fallback. Implementation support only; signed DC route authority, lifetime gate and matching App consumer remain required.",
       "singbox_tls_v1": "Native TLS client implementation; per-profile validation still required",

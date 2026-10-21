@@ -1,204 +1,248 @@
 package dnstt
 
 import (
-	"bytes"
 	"context"
-	"fmt"
+	"errors"
+	"io"
 	"net"
+	"net/netip"
 	"sync"
+	"time"
 
 	dnstt "github.com/mahsanet/dnstt/client"
+	"github.com/mahsanet/dnstt/noise"
+	"github.com/mahsanet/dnstt/turbotunnel"
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/adapter/outbound"
+	"github.com/sagernet/sing-box/common/dialer"
 	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
-	E "github.com/sagernet/sing/common/exceptions"
-	"github.com/sagernet/sing/common/logger"
+	"github.com/sagernet/sing/common/bufio"
 	M "github.com/sagernet/sing/common/metadata"
-	"github.com/sagernet/sing/common/uot"
+	N "github.com/sagernet/sing/common/network"
+	kcp "github.com/xtaci/kcp-go/v5"
+	"github.com/xtaci/smux"
 )
 
 func RegisterOutbound(registry *outbound.Registry) {
 	outbound.Register[option.DnsttOptions](registry, C.TypeDNSTT, NewOutbound)
 }
 
-var _ adapter.Outbound = (*Outbound)(nil)
-
+// Outbound is a raw TCP transport to the DNSTT server's fixed upstream. Use it
+// as a VLESS detour, not as a destination-aware proxy: Noise authenticates the
+// server; the upstream VLESS listener must enforce each user's entitlement.
 type Outbound struct {
 	outbound.Adapter
-	dnsRouter adapter.DNSRouter
-	logger    logger.ContextLogger
-	ctx       context.Context
-
-	resolvers    []dnstt.Resolver
-	publicKey    string
-	domain       string
-	tunnels      []*dnstt.Tunnel
-	tunnel_index int
-	mu           sync.Mutex
-
-	uotClient *uot.Client
-	resolve   bool
+	ctx      context.Context
+	cancel   context.CancelFunc
+	dialer   N.Dialer
+	resolver M.Socksaddr
+	server   dnstt.TunnelServer
+	key      []byte
+	timeout  time.Duration
+	gate     chan struct{}
+	session  *tunnelSession // owned under gate, including setup
 }
 
-func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, options option.DnsttOptions) (adapter.Outbound, error) {
-	resolvers := []dnstt.Resolver{}
-	if options.TunnelPerResolver <= 0 {
-		options.TunnelPerResolver = 4
+func NewOutbound(ctx context.Context, _ adapter.Router, _ log.ContextLogger, tag string, options option.DnsttOptions) (adapter.Outbound, error) {
+	if len(options.Resolvers) != 1 || options.TunnelPerResolver < 0 || options.TunnelPerResolver > 1 {
+		return nil, errors.New("dnstt requires one resolver and one tunnel")
 	}
-	for _, resolverAddr := range options.Resolvers {
-		resolver, err := dnstt.NewResolver(dnstt.ResolverTypeUDP, resolverAddr)
-		if err != nil {
-			return nil, fmt.Errorf("invalid resolver address %s: %w", resolverAddr, err)
+	resolver, err := netip.ParseAddrPort(options.Resolvers[0])
+	if err != nil || resolver.Port() == 0 || resolver.Addr().IsUnspecified() || resolver.Addr().IsMulticast() {
+		return nil, errors.New("dnstt requires a numeric UDP resolver address and port")
+	}
+	if options.Detour != "" || options.UDPOverTCP != nil && options.UDPOverTCP.Enabled {
+		return nil, errors.New("dnstt resolver detour and UDP-over-TCP are unsupported")
+	}
+	for _, network := range options.Network.Build() {
+		if network != N.NetworkTCP && options.Network != "" {
+			return nil, errors.New("dnstt transport supports TCP streams only")
 		}
-		for i := 0; i < options.TunnelPerResolver; i++ {
-			resolvers = append(resolvers, resolver)
-		}
 	}
-
-	if len(resolvers) == 0 {
-		return nil, E.New("at least one resolver is required")
-	}
-
-	if options.PublicKey == "" {
-		return nil, E.New("public key is required")
-	}
-
 	if options.Domain == "" {
-		return nil, E.New("domain is required")
+		return nil, errors.New("dnstt domain is required")
 	}
-	return &Outbound{
-		Adapter:   outbound.NewAdapterWithDialerOptions(C.TypeSOCKS, tag, options.Network.Build(), options.DialerOptions),
-		ctx:       ctx,
-		logger:    logger,
-		domain:    options.Domain,
-		publicKey: options.PublicKey,
-		resolvers: resolvers,
-		tunnels:   make([]*dnstt.Tunnel, len(resolvers)),
-	}, nil
-}
-
-func (h *Outbound) DialContext(ctx context.Context, network string, destination M.Socksaddr) (net.Conn, error) {
-	tunnel, err := h.establishDnsttTunnel(ctx)
+	server, err := dnstt.NewTunnelServer(options.Domain, options.PublicKey)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get or establish tunnel: %w", err)
+		return nil, errors.New("invalid dnstt domain or server public key")
 	}
-
-	stream, err := tunnel.OpenStream()
+	key, err := noise.DecodeKey(options.PublicKey)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open stream: %w", err)
+		return nil, errors.New("invalid dnstt server public key")
 	}
-
-	return &LoggingConn{Conn: stream, outbound: h, tunnel_index: h.tunnel_index}, nil
-	// return stream, nil
-}
-
-type LoggingConn struct {
-	net.Conn
-	rx           bytes.Buffer
-	tx           bytes.Buffer
-	outbound     *Outbound
-	tunnel_index int
-}
-
-func (c *LoggingConn) Read(b []byte) (int, error) {
-	n, err := c.Conn.Read(b)
-	if n > 0 {
-		c.rx.Write(b[:n])
+	transportDialer, err := dialer.NewWithOptions(dialer.Options{
+		Context: ctx, Options: options.DialerOptions, ProtectPlatformSocket: true,
+	})
+	if err != nil {
+		return nil, err
 	}
-	return n, err
-}
-
-func (c *LoggingConn) Write(b []byte) (int, error) {
-	if len(b) > 0 {
-		c.tx.Write(b)
+	ctx, cancel := context.WithCancel(ctx)
+	timeout := time.Duration(options.ConnectTimeout)
+	if timeout <= 0 {
+		timeout = C.TCPConnectTimeout
 	}
-	return c.Conn.Write(b)
-}
-
-func (c *LoggingConn) Close() error {
-	c.outbound.logger.Info(c.outbound.Tag(), " Tunnel ", c.tunnel_index, " closing connection. TX bytes: ", c.tx.Len(), ", RX bytes: ", c.rx.Len())
-	// bs := c.rx.Bytes()
-
-	// fmt.Printf("TX bytes: \n%s\n", c.tx.String())
-	// if len(bs) > 0 {
-	// 	fmt.Printf("RX bytes: \n%s\n", c.tx.String())
-	// } else {
-	// 	fmt.Printf("RX bytes: %d \n", len(bs))
-	// }
-	return c.Conn.Close()
-}
-func (h *Outbound) ListenPacket(ctx context.Context, destination M.Socksaddr) (net.PacketConn, error) {
-	ctx, metadata := adapter.ExtendContext(ctx)
-	metadata.Outbound = h.Tag()
-	metadata.Destination = destination
-	if h.uotClient != nil {
-		h.logger.InfoContext(ctx, "outbound UoT packet connection to ", destination)
-		return h.uotClient.ListenPacket(ctx, destination)
+	h := &Outbound{
+		Adapter: outbound.NewAdapter(C.TypeDNSTT, tag, []string{N.NetworkTCP}, nil),
+		ctx:     ctx, cancel: cancel, dialer: transportDialer,
+		resolver: M.SocksaddrFromNetIP(resolver), server: server, key: key,
+		timeout: timeout, gate: make(chan struct{}, 1),
 	}
-	return nil, E.New("UoT is not enabled for this outbound")
+	h.gate <- struct{}{}
+	context.AfterFunc(ctx, func() { h.Close() })
+	return h, nil
 }
 
-func (c *Outbound) Close() error {
-	for _, t := range c.tunnels {
-		if t != nil {
-			t.Close()
+func (h *Outbound) DialContext(ctx context.Context, network string, _ M.Socksaddr) (net.Conn, error) {
+	if N.NetworkName(network) != N.NetworkTCP {
+		return nil, N.ErrUnknownNetwork
+	}
+	ctx, cancel := context.WithTimeout(ctx, h.timeout)
+	defer cancel()
+	stop := context.AfterFunc(h.ctx, cancel)
+	defer stop()
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-h.gate:
+	}
+	defer func() { h.gate <- struct{}{} }()
+	if h.ctx.Err() != nil {
+		return nil, net.ErrClosed
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if h.session != nil && h.session.closed() {
+		h.session.Close()
+		h.session = nil
+	}
+	if h.session == nil {
+		session, err := h.connect(ctx)
+		if err != nil {
+			return nil, err
 		}
+		h.session = session
+	}
+	// smux's OpenStream has no context API. A cancelled caller owns only its
+	// pending stream; it must not kill other streams on the shared session.
+	type result struct {
+		stream *smux.Stream
+		err    error
+	}
+	ready := make(chan result)
+	session := h.session
+	go func() {
+		stream, err := session.mux.OpenStream()
+		select {
+		case ready <- result{stream, err}:
+		case <-ctx.Done():
+			if stream != nil {
+				stream.Close()
+			}
+		}
+	}()
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case result := <-ready:
+		if result.err != nil {
+			h.session.Close()
+			h.session = nil
+		}
+		return result.stream, result.err
+	}
+}
+
+func (h *Outbound) ListenPacket(context.Context, M.Socksaddr) (net.PacketConn, error) {
+	return nil, N.ErrUnknownNetwork
+}
+
+func (h *Outbound) Close() error {
+	h.cancel() // also interrupts a handshake currently holding gate
+	<-h.gate
+	defer func() { h.gate <- struct{}{} }()
+	if h.session != nil {
+		h.session.Close()
+		h.session = nil
 	}
 	return nil
 }
 
-func (c *Outbound) establishDnsttTunnel(ctx context.Context) (*dnstt.Tunnel, error) {
-	// dnsttConfig := streamSettings.ProtocolSettings.(*Config)
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.tunnel_index = (c.tunnel_index + 1) % len(c.resolvers)
-	if c.tunnels[c.tunnel_index] != nil {
-		return c.tunnels[c.tunnel_index], nil
+type tunnelSession struct {
+	packet *dnsPacketConn
+	kcp    *kcp.UDPSession
+	noise  io.ReadWriteCloser
+	mux    *smux.Session
+	once   sync.Once
+}
+
+func (s *tunnelSession) closed() bool {
+	select {
+	case <-s.packet.done:
+		return true
+	default:
+		return s.mux.IsClosed()
 	}
-	tServer, err := dnstt.NewTunnelServer(c.domain, c.publicKey)
+}
+
+func (s *tunnelSession) Close() {
+	s.once.Do(func() {
+		if s.mux != nil {
+			s.mux.Close()
+		}
+		s.kcp.Close()
+		s.packet.Close()
+		// The existing Noise adapter feeds an io.Pipe. Drain its final frame
+		// after KCP closes so a pending pipe writer cannot outlive the session.
+		if s.noise != nil {
+			io.Copy(io.Discard, s.noise)
+		}
+	})
+}
+
+func (h *Outbound) connect(ctx context.Context) (*tunnelSession, error) {
+	udp, err := h.dialer.DialContext(ctx, N.NetworkUDP, h.resolver)
 	if err != nil {
-		return nil, fmt.Errorf("invalid tunnel server: %w", err)
+		return nil, err
 	}
-
-	resolver := c.resolvers[c.tunnel_index]
-
-	tunnel, err := dnstt.NewTunnel(resolver, tServer)
+	packet := newDNSPacketConn(bufio.NewUnbindPacketConn(udp), h.resolver.UDPAddr(), h.server.Addr)
+	conn, err := kcp.NewConn2(packet.addr, nil, 0, 0, packet)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create tunnel: %w", err)
+		packet.Close()
+		return nil, err
 	}
-
-	if err := tunnel.InitiateResolverConnection(); err != nil {
-		return nil, fmt.Errorf("failed to initiate connection to resolver: %w", err)
+	conn.SetStreamMode(true)
+	conn.SetNoDelay(0, 0, 0, 1)
+	conn.SetWindowSize(turbotunnel.QueueSize/2, turbotunnel.QueueSize/2)
+	if !conn.SetMtu(h.server.MTU) {
+		conn.Close()
+		packet.Close()
+		return nil, errors.New("invalid dnstt MTU")
 	}
-
-	if err := tunnel.InitiateDNSPacketConn(tServer.Addr); err != nil {
-		return nil, fmt.Errorf("failed to initiate DNS packet connection: %w", err)
+	session := &tunnelSession{packet: packet, kcp: conn}
+	// Closing the established path also interrupts a peer that never responds
+	// to the Noise handshake. Setup does not leave a background dial running.
+	stop := context.AfterFunc(ctx, func() { conn.Close(); packet.Close() })
+	defer stop()
+	session.noise, err = noise.NewClient(conn, h.key)
+	if err == nil {
+		config := smux.DefaultConfig()
+		config.Version = 2
+		config.KeepAliveTimeout = 2 * time.Minute
+		config.MaxStreamBuffer = 1 << 20
+		session.mux, err = smux.Client(session.noise, config)
 	}
-
-	c.logger.Debug("effective MTU %d", tServer.MTU)
-
-	if err := tunnel.InitiateKCPConn(tServer.MTU); err != nil {
-		return nil, fmt.Errorf("failed to initiate KCP connection: %w", err)
+	if err == nil {
+		err = ctx.Err()
 	}
-
-	c.logger.Debug("established KCP conn")
-
-	if err := tunnel.InitiateNoiseChannel(); err != nil {
-		c.logger.Warn("failed to establish Noise channel: %v", err)
-		return nil, fmt.Errorf("failed to initiate Noise channel: %w", err)
+	if err != nil {
+		session.Close()
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		return nil, err
 	}
-
-	c.logger.Debug("established Noise channel")
-
-	if err := tunnel.InitiateSmuxSession(); err != nil {
-		return nil, fmt.Errorf("failed to initiate smux session: %w", err)
-	}
-
-	c.tunnels[c.tunnel_index] = tunnel
-	c.logger.InfoContext(ctx, "tunnel [", c.tunnel_index, "] ", c.Tag(), "resolver ", resolver.ResolverAddr)
-
-	c.logger.Debug("established smux session")
-	return tunnel, nil
+	return session, nil
 }

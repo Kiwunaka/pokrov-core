@@ -10,7 +10,7 @@ import (
 
 func TestClientRegistryExcludesUnusedProtocolsAndServers(t *testing.T) {
 	outbounds := OutboundRegistry()
-	for _, protocol := range []string{"psiphon", "tor", "mieru", "dnstt", "ssh"} {
+	for _, protocol := range []string{"psiphon", "tor", "mieru", "ssh"} {
 		if _, exists := outbounds.CreateOptions(protocol); exists {
 			t.Errorf("client registered unused outbound %q", protocol)
 		}
@@ -26,7 +26,7 @@ func TestClientRegistryExcludesUnusedProtocolsAndServers(t *testing.T) {
 			t.Errorf("client lost local inbound %q", protocol)
 		}
 	}
-	for _, protocol := range []string{"direct", "vless", "selector", "pokrov-telegram-ws", "pokrov-local-dpi"} {
+	for _, protocol := range []string{"direct", "vless", "dnstt", "selector", "pokrov-telegram-ws", "pokrov-local-dpi"} {
 		if _, exists := outbounds.CreateOptions(protocol); !exists {
 			t.Errorf("client lost outbound %q", protocol)
 		}
@@ -36,7 +36,8 @@ func TestClientRegistryExcludesUnusedProtocolsAndServers(t *testing.T) {
 		Features []string `json:"features"`
 	}
 	if err := json.Unmarshal([]byte(TransportCapabilities()), &inventory); err != nil ||
-		inventory.Schema != 1 || !slices.Contains(inventory.Features, "pokrov_telegram_ws_v1") {
-		t.Fatal("registered Telegram WSS support missing from transport inventory")
+		inventory.Schema != 1 || !slices.Contains(inventory.Features, "pokrov_telegram_ws_v1") ||
+		!slices.Contains(inventory.Features, "dnstt_vless_v1") {
+		t.Fatal("registered transport support missing from transport inventory")
 	}
 }
