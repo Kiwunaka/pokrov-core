@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net"
 	"regexp"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -259,6 +260,14 @@ func ClassifyStartError(err error) string {
 	}
 	if errors.Is(err, syscall.ECONNREFUSED) {
 		return "TRANSPORT-002"
+	}
+	if runtime.GOOS == "windows" {
+		var errno syscall.Errno
+		// Go's Windows ECONNREFUSED is synthetic. ConnectEx/Winsock return
+		// these native codes, whose localized text is not a stable classifier.
+		if errors.As(err, &errno) && (errno == 1225 || errno == 10061) {
+			return "TRANSPORT-002"
+		}
 	}
 	var probeError *urltest.ProbeError
 	if errors.As(err, &probeError) {

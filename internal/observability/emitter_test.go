@@ -3,8 +3,10 @@ package observability
 import (
 	"errors"
 	"fmt"
+	"runtime"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -81,6 +83,23 @@ func TestRawFailureCorpusCannotCrossEventABI(t *testing.T) {
 			}
 		case <-time.After(2 * time.Second):
 			t.Fatal("timed out waiting for event")
+		}
+	}
+}
+
+type localizedSocketError struct{ error }
+
+func (localizedSocketError) Error() string { return "Узел отклонил подключение" }
+
+func (err localizedSocketError) Unwrap() error { return err.error }
+
+func TestWindowsConnectionRefusedDoesNotDependOnErrorLanguage(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows native socket codes")
+	}
+	for _, errno := range []syscall.Errno{1225, 10061} {
+		if code := ClassifyStartError(localizedSocketError{errno}); code != "TRANSPORT-002" {
+			t.Fatalf("native refusal lost its closed classification: %s", code)
 		}
 	}
 }
