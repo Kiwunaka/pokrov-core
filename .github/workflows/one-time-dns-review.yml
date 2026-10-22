@@ -30,7 +30,8 @@ jobs:
           set -euo pipefail
           git config user.name 'Local regression review'
           git config user.email 'regression@example.invalid'
-          git cherry-pick 0cec15f5bac71e46368b36d51a51c74fe35b0398 3d711bed493f1d5fe1fa31999d09f03ade13d1e9
+          git merge --no-edit --no-ff 0cec15f5bac71e46368b36d51a51c74fe35b0398
+          git merge --no-edit --no-ff 3d711bed493f1d5fe1fa31999d09f03ade13d1e9
           git merge --no-edit --no-ff d461afaa9bd347d43e078b185c776c43262a5468
           git diff --check
       - name: Ordinary DNS, lifecycle and transport regressions
