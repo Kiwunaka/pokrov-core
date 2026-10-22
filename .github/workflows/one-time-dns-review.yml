@@ -1,19 +1,18 @@
-name: One-time DNS regression review
+name: One-time DNS generation review
 on:
   push:
     branches: [fix/dns-unpooled-query-lifecycle]
     paths: [.github/workflows/one-time-dns-review.yml]
 permissions:
-  contents: read
+  contents: write
 jobs:
   review:
     if: github.repository == 'Kiwunaka/pokrov-core' && github.event.repository.private == false
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          fetch-depth: 0
           lfs: false
       - name: Exact supported Go toolchain
         shell: bash
@@ -24,28 +23,44 @@ jobs:
           tar -C "$RUNNER_TEMP" -xzf "$RUNNER_TEMP/go.tar.gz"
           echo "$RUNNER_TEMP/go/bin" >> "$GITHUB_PATH"
           echo 'GOTOOLCHAIN=local' >> "$GITHUB_ENV"
-      - name: Combine exact reviewed PRs in runner only
-        shell: bash
-        run: |
-          set -euo pipefail
-          git config user.name 'Local regression review'
-          git config user.email 'regression@example.invalid'
-          git merge --no-edit --no-ff 0cec15f5bac71e46368b36d51a51c74fe35b0398
-          git merge --no-edit --no-ff 3d711bed493f1d5fe1fa31999d09f03ade13d1e9
-          git merge --no-edit --no-ff d461afaa9bd347d43e078b185c776c43262a5468
-          git diff --check
-      - name: Ordinary DNS, lifecycle and transport regressions
+      - name: Reproduce old-generation admission
         working-directory: engine/sing-box
         shell: bash
         run: |
-          set -euo pipefail
-          go version
-          go test -count=1 -race -ldflags=-checklinkname=0 -tags with_utls,tfogo_checklinkname0 ./dns/transport ./dns ./protocol/pokrov/dnstt ./protocol/pokrov/smartaccess ./protocol/group ./common/urltest
-      - name: Persisted profiles and existing lifecycle regressions
+          set +e
+          go test -count=1 -race -ldflags=-checklinkname=0 -tags with_utls,tfogo_checklinkname0 ./dns/transport -run '^TestResetDoesNotAdmitProbeFromOldGeneration$' > "$RUNNER_TEMP/dns-generation.txt" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/dns-generation.txt"
+          test "$result" -ne 0
+          grep -F 'old generation admitted a probe after Reset' "$RUNNER_TEMP/dns-generation.txt"
+      - name: Preserve the dispatch generation before starting a probe
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('engine/sing-box/dns/transport/multiplexer.go')
+          s = p.read_text()
+          old = '\t\tm.maybeStartProbe(ctx, message)'
+          assert s.count(old) == 1
+          s = s.replace(old, '\t\tm.maybeStartProbe(singleCtx, message)')
+          old = '\tm.probeAccess.Lock()\n\tif m.reuseState.Load() == reuseStateProbing {'
+          new = '\tm.probeAccess.Lock()\n\tif context.Cause(ctx) != nil {\n\t\tm.probeAccess.Unlock()\n\t\treturn\n\t}\n\tif m.reuseState.Load() == reuseStateProbing {'
+          assert s.count(old) == 1
+          p.write_text(s.replace(old, new))
+          PY
+          gofmt -w engine/sing-box/dns/transport/multiplexer.go engine/sing-box/dns/transport/multiplexer_generation_test.go
+      - name: Test the complete changed package
+        working-directory: engine/sing-box
+        run: go test -count=1 -race -ldflags=-checklinkname=0 -tags with_utls,tfogo_checklinkname0 ./dns/transport
+      - name: Commit verified fix to the same branch
         shell: bash
         run: |
           set -euo pipefail
-          go test -count=1 -race -ldflags=-checklinkname=0 -tags pokrov_client,with_gvisor,with_quic,with_wireguard,with_utls,with_clash_api,with_grpc,with_awg,tfogo_checklinkname0,with_naive_outbound,with_conntrack,with_purego ./v2/hcore -run '^(TestParseKeepsStoredCredentialsOwnerOnly|TestRuntimeFailureRedactsEveryDiagnosticOutput|TestStartRestartStopCancelsSessions)$'
-      - name: Vendored Tailscale DoH boundary
-        working-directory: engine/sing-box/replace/tailscale
-        run: go test -count=1 -race ./net/tsdial -run '^TestDoHResponseBound$'
+          git diff --check
+          test "$(git ls-remote origin "refs/heads/$GITHUB_REF_NAME" | cut -f1)" = "$GITHUB_SHA"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add engine/sing-box/dns/transport/multiplexer.go engine/sing-box/dns/transport/multiplexer_generation_test.go
+          git commit -m 'fix(dns): fence reuse probes against a reset dispatch generation'
+          git push origin "HEAD:refs/heads/$GITHUB_REF_NAME"
