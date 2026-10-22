@@ -1,0 +1,50 @@
+name: One-time DNS regression review
+on:
+  push:
+    branches: [fix/dns-unpooled-query-lifecycle]
+    paths: [.github/workflows/one-time-dns-review.yml]
+permissions:
+  contents: read
+jobs:
+  review:
+    if: github.repository == 'Kiwunaka/pokrov-core' && github.event.repository.private == false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+          lfs: false
+      - name: Exact supported Go toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location https://go.dev/dl/go1.26.9.linux-amd64.tar.gz -o "$RUNNER_TEMP/go.tar.gz"
+          echo "42d158b4d8f7b61ac0a830567c940a86098fb7aac52e467a5ebec03ef5cc2f8d  $RUNNER_TEMP/go.tar.gz" | sha256sum --check
+          tar -C "$RUNNER_TEMP" -xzf "$RUNNER_TEMP/go.tar.gz"
+          echo "$RUNNER_TEMP/go/bin" >> "$GITHUB_PATH"
+          echo 'GOTOOLCHAIN=local' >> "$GITHUB_ENV"
+      - name: Combine exact reviewed PRs in runner only
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'Local regression review'
+          git config user.email 'regression@example.invalid'
+          git cherry-pick 0cec15f5bac71e46368b36d51a51c74fe35b0398 3d711bed493f1d5fe1fa31999d09f03ade13d1e9
+          git merge --no-edit --no-ff d461afaa9bd347d43e078b185c776c43262a5468
+          git diff --check
+      - name: Ordinary DNS, lifecycle and transport regressions
+        working-directory: engine/sing-box
+        shell: bash
+        run: |
+          set -euo pipefail
+          go version
+          go test -count=1 -race -ldflags=-checklinkname=0 -tags with_utls,tfogo_checklinkname0 ./dns/transport ./dns ./protocol/pokrov/dnstt ./protocol/pokrov/smartaccess ./protocol/group ./common/urltest
+      - name: Persisted profiles and existing lifecycle regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          go test -count=1 -race -ldflags=-checklinkname=0 -tags pokrov_client,with_gvisor,with_quic,with_wireguard,with_utls,with_clash_api,with_grpc,with_awg,tfogo_checklinkname0,with_naive_outbound,with_conntrack,with_purego ./v2/hcore -run '^(TestParseKeepsStoredCredentialsOwnerOnly|TestRuntimeFailureRedactsEveryDiagnosticOutput|TestStartRestartStopCancelsSessions)$'
+      - name: Vendored Tailscale DoH boundary
+        working-directory: engine/sing-box/replace/tailscale
+        run: go test -count=1 -race ./net/tsdial -run '^TestDoHResponseBound$'
