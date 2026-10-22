@@ -28,6 +28,8 @@ type dohConn struct {
 	rbuf bytes.Buffer
 }
 
+const maxDNSMessageSize = 65535
+
 var (
 	_ net.Conn       = (*dohConn)(nil)
 	_ net.PacketConn = (*dohConn)(nil) // be a PacketConn to change net.Resolver semantics
@@ -84,9 +86,15 @@ func (c *dohConn) Write(packet []byte) (n int, err error) {
 	if ct := hres.Header.Get("Content-Type"); ct != dohType {
 		return 0, fmt.Errorf("unexpected response Content-Type %q", ct)
 	}
-	_, err = io.Copy(&c.rbuf, hres.Body)
+	c.rbuf.Reset()
+	_, err = io.Copy(&c.rbuf, io.LimitReader(hres.Body, maxDNSMessageSize+1))
 	if err != nil {
+		c.rbuf.Reset()
 		return 0, err
+	}
+	if c.rbuf.Len() > maxDNSMessageSize {
+		c.rbuf.Reset()
+		return 0, fmt.Errorf("DoH response exceeds %d bytes", maxDNSMessageSize)
 	}
 	if c.dnsCache != nil {
 		c.dnsCache.AddCacheEntry(packet, c.rbuf.Bytes())
