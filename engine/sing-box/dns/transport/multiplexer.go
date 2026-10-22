@@ -40,6 +40,7 @@ type queryMultiplexerOptions struct {
 type queryMultiplexer struct {
 	options    queryMultiplexerOptions
 	connection *ConnPool[*multiplexConn]
+	lifetime   *queryLifetime
 
 	queryAccess sync.Mutex
 	queryId     uint16
@@ -82,8 +83,9 @@ type pendingQuery struct {
 
 func newQueryMultiplexer(options queryMultiplexerOptions) *queryMultiplexer {
 	return &queryMultiplexer{
-		options: options,
-		queries: make(map[uint16]*pendingQuery),
+		options:  options,
+		lifetime: newQueryLifetime(),
+		queries:  make(map[uint16]*pendingQuery),
 		connection: NewConnPool(ConnPoolOptions[*multiplexConn]{
 			Mode: ConnPoolSingle,
 			IsAlive: func(conn *multiplexConn) bool {
@@ -97,18 +99,20 @@ func newQueryMultiplexer(options queryMultiplexerOptions) *queryMultiplexer {
 }
 
 func (m *queryMultiplexer) Close() error {
+	m.lifetime.close()
 	return m.connection.Close()
 }
 
 func (m *queryMultiplexer) Reset() {
+	m.probeAccess.Lock()
 	if m.options.probeReuse {
-		m.probeAccess.Lock()
 		m.probeEpoch++
 		m.reuseState.Store(reuseStateUnknown)
 		m.lastProbeTime = time.Time{}
-		m.probeAccess.Unlock()
 		m.demoteFailures.Store(0)
 	}
+	m.lifetime.reset()
+	m.probeAccess.Unlock()
 	m.connection.Reset()
 }
 
@@ -133,27 +137,43 @@ func (m *queryMultiplexer) ExchangeAsync(ctx context.Context, message *mDNS.Msg,
 
 func (m *queryMultiplexer) dispatch(ctx context.Context, message *mDNS.Msg, callback func(response *mDNS.Msg, err error), retryReadError bool) {
 	if m.options.probeReuse && m.reuseState.Load() != reuseStateSupported {
+		singleCtx, release, err := m.lifetime.bind(ctx)
+		if err != nil {
+			callback(nil, err)
+			return
+		}
 		m.maybeStartProbe(ctx, message)
-		go m.exchangeSingle(ctx, message, callback)
+		go func() {
+			defer release()
+			m.exchangeSingle(singleCtx, message, callback)
+		}()
 		return
 	}
 	m.exchangeAsync(ctx, message, callback, retryReadError)
 }
 
 func (m *queryMultiplexer) exchangeSingle(ctx context.Context, message *mDNS.Msg, callback func(response *mDNS.Msg, err error)) {
+	if err := context.Cause(ctx); err != nil {
+		callback(nil, err)
+		return
+	}
 	conn, err := m.options.dial(ctx)
 	if err != nil {
 		callback(nil, err)
 		return
 	}
 	defer conn.Close()
+	if err := context.Cause(ctx); err != nil {
+		callback(nil, err)
+		return
+	}
 	stop := context.AfterFunc(ctx, func() {
 		conn.Close()
 	})
 	defer stop()
 	err = m.options.write(conn, message, message.Id)
 	if err != nil {
-		ctxErr := ctx.Err()
+		ctxErr := context.Cause(ctx)
 		if ctxErr != nil {
 			callback(nil, ctxErr)
 			return
@@ -165,7 +185,7 @@ func (m *queryMultiplexer) exchangeSingle(ctx context.Context, message *mDNS.Msg
 		var response *mDNS.Msg
 		response, err = m.options.readNext(conn)
 		if err != nil {
-			ctxErr := ctx.Err()
+			ctxErr := context.Cause(ctx)
 			if ctxErr != nil {
 				callback(nil, ctxErr)
 				return
@@ -195,11 +215,22 @@ func (m *queryMultiplexer) maybeStartProbe(ctx context.Context, message *mDNS.Ms
 		m.probeAccess.Unlock()
 		return
 	}
+	// The probe may outlive its initiating request, but never this transport
+	// generation. Bind before unlocking so Reset cannot leave an old probe.
+	probeCtx, release, err := m.lifetime.bind(context.WithoutCancel(ctx))
+	if err != nil {
+		m.probeAccess.Unlock()
+		return
+	}
 	m.reuseState.Store(reuseStateProbing)
 	m.lastProbeTime = time.Now()
 	epoch := m.probeEpoch
+	questionName := message.Question[0].Name
 	m.probeAccess.Unlock()
-	go m.runReuseProbe(context.WithoutCancel(ctx), message.Question[0].Name, epoch)
+	go func() {
+		defer release()
+		m.runReuseProbe(probeCtx, questionName, epoch)
+	}()
 }
 
 func (m *queryMultiplexer) runReuseProbe(ctx context.Context, questionName string, epoch uint32) {
@@ -223,11 +254,17 @@ func (m *queryMultiplexer) runReuseProbe(ctx context.Context, questionName strin
 func (m *queryMultiplexer) executeReuseProbe(ctx context.Context, questionName string) (supported bool, dialFailed bool) {
 	probeCtx, cancel := context.WithTimeout(ctx, reuseProbeTimeout)
 	defer cancel()
+	if context.Cause(probeCtx) != nil {
+		return false, true
+	}
 	conn, err := m.options.dial(probeCtx)
 	if err != nil {
 		return false, true
 	}
 	defer conn.Close()
+	if context.Cause(probeCtx) != nil {
+		return false, true
+	}
 	stop := context.AfterFunc(probeCtx, func() {
 		conn.Close()
 	})
