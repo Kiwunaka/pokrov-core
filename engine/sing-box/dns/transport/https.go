@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -232,21 +231,11 @@ func (t *HTTPSTransport) exchange(ctx context.Context, message *mDNS.Msg) (*mDNS
 	}
 	observe(nil)
 	var responseMessage mDNS.Msg
-	if response.ContentLength > 0 {
-		responseBuffer := buf.NewSize(int(response.ContentLength))
-		defer responseBuffer.Release()
-		_, err = responseBuffer.ReadFullFrom(response.Body, int(response.ContentLength))
-		if err != nil {
-			return nil, err
-		}
-		err = responseMessage.Unpack(responseBuffer.Bytes())
-	} else {
-		rawMessage, err = io.ReadAll(response.Body)
-		if err != nil {
-			return nil, err
-		}
-		err = responseMessage.Unpack(rawMessage)
+	rawMessage, err = readDNSMessageBody(response)
+	if err != nil {
+		return nil, err
 	}
+	err = responseMessage.Unpack(rawMessage)
 	if err != nil {
 		return nil, err
 	}
