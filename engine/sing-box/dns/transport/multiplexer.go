@@ -142,7 +142,7 @@ func (m *queryMultiplexer) dispatch(ctx context.Context, message *mDNS.Msg, call
 			callback(nil, err)
 			return
 		}
-		m.maybeStartProbe(ctx, message)
+		m.maybeStartProbe(singleCtx, message)
 		go func() {
 			defer release()
 			m.exchangeSingle(singleCtx, message, callback)
@@ -207,6 +207,10 @@ func (m *queryMultiplexer) maybeStartProbe(ctx context.Context, message *mDNS.Ms
 		return
 	}
 	m.probeAccess.Lock()
+	if context.Cause(ctx) != nil {
+		m.probeAccess.Unlock()
+		return
+	}
 	if m.reuseState.Load() == reuseStateProbing {
 		m.probeAccess.Unlock()
 		return
