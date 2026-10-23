@@ -43,6 +43,17 @@ same Core version. App must gate materialization on the loaded inventory; the
 Linux host allowlist and DPI/TG encrypted-fallback validators do not yet admit
 this new detour. Public client issuance and endpoint acceptance remain separate.
 
+DNS catalog revocation snapshots the current rule slice under the router's
+lifecycle lock before invoking rule callbacks; unrelated service and manual
+rules remain intact. Ordinary and embedded Tailscale DoH responses are bounded
+to 65535 wire bytes before decoding/caching, including unknown-length bodies.
+TCP/TLS single-use DNS exchanges and reuse probes belong to their transport's
+generation: Reset cancels the old generation, Close denies new queries, and a
+late dial cannot revive a cancelled query. The shared-pool protocol is unchanged.
+The legacy Parse API writes credential-bearing profiles with owner-only
+permissions and reapplies the existing platform permission helper on overwrite;
+this is not an atomic-write or symlink policy change.
+
 Managed Country Auto can explicitly list `preferred_outbounds` in its existing
 URLTest group. A healthy member of that tier takes precedence over other members;
 latency and hysteresis still select within the tier. When its probes fail, the
