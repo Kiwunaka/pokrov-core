@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/netip"
 	"os"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -214,17 +215,28 @@ func (t *NativeTun) Start() error {
 			return err
 		}
 		defer winsys.FwpmFreeMemory0(unsafe.Pointer(&processAppID))
+		processUserID, err := winsys.GetCurrentProcessUserID()
+		if err != nil {
+			return err
+		}
+		defer runtime.KeepAlive(processUserID)
 
 		var filterId uint64
-		permitCondition := make([]winsys.FWPM_FILTER_CONDITION0, 1)
+		permitCondition := make([]winsys.FWPM_FILTER_CONDITION0, 2)
 		permitCondition[0].FieldKey = winsys.FWPM_CONDITION_ALE_APP_ID
 		permitCondition[0].MatchType = winsys.FWP_MATCH_EQUAL
 		permitCondition[0].ConditionValue.Type = winsys.FWP_BYTE_BLOB_TYPE
 		permitCondition[0].ConditionValue.Value = uintptr(unsafe.Pointer(processAppID))
+		// The privileged host's transition guard permits this same executable
+		// only as LocalSystem. A path-only hard permit would override that fence.
+		permitCondition[1].FieldKey = winsys.FWPM_CONDITION_ALE_USER_ID
+		permitCondition[1].MatchType = winsys.FWP_MATCH_EQUAL
+		permitCondition[1].ConditionValue.Type = winsys.FWP_SECURITY_DESCRIPTOR_TYPE
+		permitCondition[1].ConditionValue.Value = uintptr(unsafe.Pointer(processUserID))
 
 		permitFilter4 := winsys.FWPM_FILTER0{}
 		permitFilter4.FilterCondition = &permitCondition[0]
-		permitFilter4.NumFilterConditions = 1
+		permitFilter4.NumFilterConditions = uint32(len(permitCondition))
 		permitFilter4.DisplayData = winsys.CreateDisplayData(TunnelType, "protect ipv4")
 		permitFilter4.SubLayerKey = subLayerKey
 		permitFilter4.LayerKey = winsys.FWPM_LAYER_ALE_AUTH_CONNECT_V4
@@ -239,7 +251,7 @@ func (t *NativeTun) Start() error {
 
 		permitFilter6 := winsys.FWPM_FILTER0{}
 		permitFilter6.FilterCondition = &permitCondition[0]
-		permitFilter6.NumFilterConditions = 1
+		permitFilter6.NumFilterConditions = uint32(len(permitCondition))
 		permitFilter6.DisplayData = winsys.CreateDisplayData(TunnelType, "protect ipv6")
 		permitFilter6.SubLayerKey = subLayerKey
 		permitFilter6.LayerKey = winsys.FWPM_LAYER_ALE_AUTH_CONNECT_V6

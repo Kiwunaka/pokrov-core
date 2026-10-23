@@ -13,6 +13,12 @@ The local changes preserve Windows adapter ownership and correct a DNS error:
   DNS blocking follows the upstream `DNSMode` contract.
 - `tun.go`: IPv4 `/32` without a DNS server returns a configuration error instead
   of indexing a missing IPv6 prefix when formatting that error.
+- Windows strict-route hard permits match both the current executable and its
+  process-token user. The SYSTEM service therefore no longer has a broader
+  exception than the client's transition guard during protected replacement.
+  Sublayer priorities, hard-permit flags and other strict-route filters stay
+  unchanged. `TestCurrentProcessUserIDIsExact` checks the descriptor without
+  opening WFP or changing networking.
 
 The four supplied `internal/wintun/*/wintun.dll` files remain byte-identical
 to the official Wintun 0.14.1 archive (SHA-256
