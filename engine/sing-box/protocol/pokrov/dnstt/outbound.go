@@ -5,11 +5,9 @@ import (
 	"errors"
 	"io"
 	"net"
-	"net/netip"
 	"sync"
 	"time"
 
-	dnstt "github.com/mahsanet/dnstt/client"
 	"github.com/mahsanet/dnstt/noise"
 	"github.com/mahsanet/dnstt/turbotunnel"
 	"github.com/sagernet/sing-box/adapter"
@@ -34,43 +32,20 @@ func RegisterOutbound(registry *outbound.Registry) {
 // server; the upstream VLESS listener must enforce each user's entitlement.
 type Outbound struct {
 	outbound.Adapter
+	*tunnelConfig
 	ctx      context.Context
 	cancel   context.CancelFunc
 	dialer   N.Dialer
 	resolver M.Socksaddr
-	server   dnstt.TunnelServer
-	key      []byte
 	timeout  time.Duration
 	gate     chan struct{}
 	session  *tunnelSession // owned under gate, including setup
 }
 
 func NewOutbound(ctx context.Context, _ adapter.Router, _ log.ContextLogger, tag string, options option.DnsttOptions) (adapter.Outbound, error) {
-	if len(options.Resolvers) != 1 || options.TunnelPerResolver < 0 || options.TunnelPerResolver > 1 {
-		return nil, errors.New("dnstt requires one resolver and one tunnel")
-	}
-	resolver, err := netip.ParseAddrPort(options.Resolvers[0])
-	if err != nil || resolver.Port() == 0 || resolver.Addr().IsUnspecified() || resolver.Addr().IsMulticast() {
-		return nil, errors.New("dnstt requires a numeric UDP resolver address and port")
-	}
-	if options.Detour != "" || options.UDPOverTCP != nil && options.UDPOverTCP.Enabled {
-		return nil, errors.New("dnstt resolver detour and UDP-over-TCP are unsupported")
-	}
-	for _, network := range options.Network.Build() {
-		if network != N.NetworkTCP && options.Network != "" {
-			return nil, errors.New("dnstt transport supports TCP streams only")
-		}
-	}
-	if options.Domain == "" {
-		return nil, errors.New("dnstt domain is required")
-	}
-	server, err := dnstt.NewTunnelServer(options.Domain, options.PublicKey)
+	config, err := parseOptions(options)
 	if err != nil {
-		return nil, errors.New("invalid dnstt domain or server public key")
-	}
-	key, err := noise.DecodeKey(options.PublicKey)
-	if err != nil {
-		return nil, errors.New("invalid dnstt server public key")
+		return nil, err
 	}
 	transportDialer, err := dialer.NewWithOptions(dialer.Options{
 		Context: ctx, Options: options.DialerOptions, ProtectPlatformSocket: true,
@@ -84,10 +59,11 @@ func NewOutbound(ctx context.Context, _ adapter.Router, _ log.ContextLogger, tag
 		timeout = C.TCPConnectTimeout
 	}
 	h := &Outbound{
-		Adapter: outbound.NewAdapter(C.TypeDNSTT, tag, []string{N.NetworkTCP}, nil),
-		ctx:     ctx, cancel: cancel, dialer: transportDialer,
-		resolver: M.SocksaddrFromNetIP(resolver), server: server, key: key,
-		timeout: timeout, gate: make(chan struct{}, 1),
+		Adapter:      outbound.NewAdapter(C.TypeDNSTT, tag, []string{N.NetworkTCP}, nil),
+		tunnelConfig: config,
+		ctx:          ctx, cancel: cancel, dialer: transportDialer,
+		resolver: M.SocksaddrFromNetIP(config.resolver),
+		timeout:  timeout, gate: make(chan struct{}, 1),
 	}
 	h.gate <- struct{}{}
 	context.AfterFunc(ctx, func() { h.Close() })

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/sagernet/sing-box/include"
+	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing-box/protocol/pokrov/telegramws"
 )
 
@@ -68,6 +69,33 @@ func TestTelegramWSPreparationRequiresSignedScopeAndKeepsStaticFallbackRule(t *t
 	if _, err := PrepareTelegramWSProfile(string(receipt.Profile), keys, "lab", "physical-fixture", "windows"); err == nil {
 		t.Fatal("preexisting TG fields bypassed original signed preparation")
 	}
+	originalOutbounds := config["outbounds"]
+	config["outbounds"] = []any{
+		map[string]any{"type": "direct", "tag": "direct"},
+		map[string]any{"type": "vless", "tag": "vpn", "server": "127.0.0.1", "server_port": 12543,
+			"uuid": "00000000-0000-4000-8000-000000000001", "network": "tcp", "detour": "dns-tunnel"},
+		map[string]any{"type": "dnstt", "tag": "dns-tunnel", "domain": "t.example.test",
+			"publicKey": strings.Repeat("01", 32), "resolvers": []string{"192.0.2.1:53"}, "network": "tcp"},
+	}
+	encoded, _ = json.Marshal(config)
+	result, err = PrepareTelegramWSProfile(string(encoded), keys, "lab", "physical-fixture", "windows")
+	if err != nil || json.Unmarshal([]byte(result), &receipt) != nil || json.Unmarshal(receipt.Profile, &prepared) != nil {
+		t.Fatal("signed TG preparation rejected the fixed Noise fallback")
+	}
+	delete(prepared, "_meta")
+	runtimeBytes, _ = json.Marshal(prepared)
+	options, err = parseConfig(ctx, string(runtimeBytes))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = telegramws.BindPreparations(ctx, options); err != nil {
+		t.Fatal("TG preparation did not bind the Noise carrier")
+	}
+	options.Outbounds[2].Options.(*option.DnsttOptions).PublicKey = strings.Repeat("02", 32)
+	if _, err = telegramws.BindPreparations(ctx, options); err == nil {
+		t.Fatal("changing the Noise pin bypassed one-use TG graph authority")
+	}
+	config["outbounds"] = originalOutbounds
 	for _, invalid := range []string{"10.0.0.1", "2001:b28:f23d:f001::a%owned"} {
 		changed := strings.Replace(payload, "149.154.167.50", invalid, 1)
 		metadata.Envelope, keys, metadata.Digest = localDpiSignedCatalog(changed)

@@ -40,8 +40,13 @@ Focused loopback tests cover DNS TXT/KCP/Noise/smux data transfer, protection
 callback and cancellation/Close; they do not establish reachability through a
 public recursive resolver. Older 1.2.14 binaries lack this feature despite the
 same Core version. App must gate materialization on the loaded inventory; the
-Linux host allowlist and DPI/TG encrypted-fallback validators do not yet admit
-this new detour. Public client issuance and endpoint acceptance remain separate.
+Linux host allowlist does not yet admit this new detour. Windows DPI and native
+TG fallback preparation recognize only explicit TCP, flowless VLESS at
+`127.0.0.1:12543`, without TLS/other transport/multiplex, through one validated
+DNSTT carrier. Ordinary plaintext VLESS and a standalone raw DNSTT exit remain
+forbidden. TG's existing one-use preparation binds the carrier's full options,
+including Noise pin, zone and resolver; changing them invalidates admission.
+Public client issuance and endpoint acceptance remain separate.
 
 DNS catalog revocation snapshots the current rule slice under the router's
 lifecycle lock before invoking rule callbacks; unrelated service and manual

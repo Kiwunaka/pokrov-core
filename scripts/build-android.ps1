@@ -18,7 +18,7 @@ New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
 
 $goCommand = Get-Command $GoExecutable -ErrorAction SilentlyContinue
 if (-not $goCommand) {
-  throw "Go 1.26.8 is required."
+  throw "$($release.go_toolchain) is required."
 }
 $goVersion = (& $goCommand.Source env GOVERSION).Trim()
 if ($LASTEXITCODE -ne 0 -or $goVersion -ne $release.go_toolchain) {
@@ -52,7 +52,7 @@ if (-not $ndkRevisionMatch.Success -or $ndkRevisionMatch.Groups[1].Value.Trim() 
 }
 
 if (-not $GomobileBinDirectory) {
-  $GomobileBinDirectory = Join-Path $root "tmp\gomobile-go1.26.8"
+  $GomobileBinDirectory = Join-Path $root ("tmp\gomobile-" + $release.go_toolchain)
 }
 $GomobileBinDirectory = [System.IO.Path]::GetFullPath($GomobileBinDirectory)
 New-Item -ItemType Directory -Force -Path $GomobileBinDirectory | Out-Null

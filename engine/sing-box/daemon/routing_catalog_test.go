@@ -5,6 +5,7 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing-box/protocol/direct"
 	"github.com/sagernet/sing-box/protocol/pokrov/atslease"
+	"github.com/sagernet/sing-box/protocol/pokrov/dnstt"
 	"github.com/sagernet/sing-box/protocol/pokrov/localdpi"
 	"github.com/sagernet/sing-box/protocol/pokrov/telegramws"
 	"github.com/sagernet/sing-box/protocol/socks"
@@ -153,6 +155,7 @@ func TestLocalDpiATSFallbackKeepsLeaseRevocation(t *testing.T) {
 	registry := outbound.NewRegistry()
 	localdpi.RegisterOutbound(registry)
 	atslease.RegisterOutbound(registry)
+	dnstt.RegisterOutbound(registry)
 	vless.RegisterOutbound(registry)
 	direct.RegisterOutbound(registry)
 	ctx := service.ContextWith[adapter.OutboundRegistry](context.Background(), registry)
@@ -175,9 +178,22 @@ func TestLocalDpiATSFallbackKeepsLeaseRevocation(t *testing.T) {
 			OutboundTLSOptionsContainer: option.OutboundTLSOptionsContainer{TLS: &option.OutboundTLSOptions{Enabled: true}},
 		}},
 		{Type: C.TypeDirect, Tag: "direct", Options: &option.DirectOutboundOptions{}},
+		{Type: C.TypeVLESS, Tag: "dns-vpn", Options: &option.VLESSOutboundOptions{
+			DialerOptions: option.DialerOptions{Detour: "dns-tunnel"},
+			ServerOptions: option.ServerOptions{Server: "127.0.0.1", ServerPort: 12543},
+			UUID:          "00000000-0000-4000-8000-000000000001", Network: "tcp",
+		}},
+		{Type: C.TypeDNSTT, Tag: "dns-tunnel", Options: &option.DnsttOptions{
+			Domain: "t.example.test", PublicKey: strings.Repeat("01", 32),
+			Resolvers: []string{"192.0.2.1:53"}, Network: "tcp",
+		}},
+		{Type: localdpi.Type, Tag: "local-raw-dnstt", Options: &option.PokrovLocalDPIOutboundOptions{
+			ServerOptions: option.ServerOptions{Server: "127.0.0.1", ServerPort: 1},
+			ServiceID:     "test-raw", VPNOutbound: "dns-tunnel",
+		}},
 	}, Route: &option.RouteOptions{Final: "vpn"}}
 	now := time.Now().UTC()
-	for _, upstream := range []string{"vpn", "direct", "unsafe"} {
+	for _, upstream := range []string{"vpn", "direct", "unsafe", "dns-vpn"} {
 		options.Outbounds = append(options.Outbounds,
 			option.Outbound{Type: atslease.Type, Tag: "lease-" + upstream, Options: &option.PokrovATSLeaseOutboundOptions{
 				UpstreamTag: upstream, LeaseID: "lease_0123456789abcdef0123456789abcdef",
@@ -208,6 +224,12 @@ func TestLocalDpiATSFallbackKeepsLeaseRevocation(t *testing.T) {
 	}
 	if err := localDpiFixtureOutbound(t, s, "local-unsafe").Start(); err == nil {
 		t.Fatal("local DPI admitted an unprotected bridge detour")
+	}
+	if err := localDpiFixtureOutbound(t, s, "local-dns-vpn").Start(); err != nil {
+		t.Fatal("local DPI rejected the typed VLESS/DNSTT dependency")
+	}
+	if err := localDpiFixtureOutbound(t, s, "local-raw-dnstt").Start(); err == nil {
+		t.Fatal("local DPI admitted a raw DNSTT transport as an exit")
 	}
 	lease.Revoke(true)
 	conn, err := local.DialContext(context.Background(), "tcp", M.ParseSocksaddr("127.0.0.1:1"))

@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 )
@@ -172,6 +173,28 @@ func TestWindowsLocalDpiPreparationRetainsVPNAndExactSignedScope(t *testing.T) {
 	config["outbounds"] = originalOutbounds
 	delete(vpn, "detour")
 	rule["outbound"] = "group"
+	// A fixed flowless VLESS backend may replace TLS only when its exact
+	// detour supplies the pinned Noise transport. Retain the ordinary group.
+	delete(vpn, "tls")
+	vpn["server"], vpn["server_port"], vpn["network"] = "127.0.0.1", 12543, "tcp"
+	vpn["uuid"], vpn["detour"] = "00000000-0000-4000-8000-000000000001", "dns-tunnel"
+	carrier := map[string]any{"type": "dnstt", "tag": "dns-tunnel", "domain": "t.example.test",
+		"publicKey": strings.Repeat("01", 32), "resolvers": []string{"192.0.2.1:53"}, "network": "tcp", "tunnel_per_resolver": 1}
+	config["outbounds"] = append(originalOutbounds, carrier)
+	encoded, _ = json.Marshal(config)
+	if _, err = PrepareWindowsLocalDpiProfile(string(encoded), string(keys), "lab", "physical-fixture"); err != nil {
+		t.Fatal("fixed VLESS/Noise fallback was rejected")
+	}
+	vpn["server_port"] = 443
+	encoded, _ = json.Marshal(config)
+	if _, err = PrepareWindowsLocalDpiProfile(string(encoded), string(keys), "lab", "physical-fixture"); err == nil {
+		t.Fatal("Noise exception widened to an arbitrary plaintext VLESS server")
+	}
+	config["outbounds"] = originalOutbounds
+	for _, field := range []string{"server", "server_port", "network", "uuid", "detour"} {
+		delete(vpn, field)
+	}
+	vpn["tls"] = vpnTLS
 	for selector, value := range map[string]any{"domain_regex": []string{".*"}, "domain_keyword": []string{"foreign"}, "ip_cidr": []string{"0.0.0.0/0"}, "invert": true} {
 		rule[selector] = value
 		encoded, _ = json.Marshal(config)

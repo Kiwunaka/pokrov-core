@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"net"
+	"strings"
 	"sync/atomic"
 	"syscall"
 	"testing"
@@ -24,6 +25,39 @@ import (
 	kcp "github.com/xtaci/kcp-go/v5"
 	"github.com/xtaci/smux"
 )
+
+func TestProtectedVLESSDetourRequiresFixedNoiseGraph(t *testing.T) {
+	leaf := option.VLESSOutboundOptions{
+		DialerOptions: option.DialerOptions{Detour: "dns-tunnel"},
+		ServerOptions: option.ServerOptions{Server: "127.0.0.1", ServerPort: 12543},
+		UUID:          "00000000-0000-4000-8000-000000000001", Network: "tcp",
+	}
+	carrier := option.DnsttOptions{Domain: "t.example.test", PublicKey: strings.Repeat("01", 32),
+		Resolvers: []string{"192.0.2.1:53"}, Network: "tcp", TunnelPerResolver: 1}
+	if !ProtectedVLESSDetour(&leaf, &carrier) {
+		t.Fatal("fixed VLESS/Noise graph rejected")
+	}
+	wrongLeaf := leaf
+	wrongLeaf.Server = "192.0.2.2"
+	if ProtectedVLESSDetour(&wrongLeaf, &carrier) || ProtectedVLESSDetour(&leaf, nil) {
+		t.Fatal("ordinary plaintext VLESS accepted as a Noise detour")
+	}
+	wrongLeaf = leaf
+	wrongLeaf.Network = "udp"
+	if ProtectedVLESSDetour(&wrongLeaf, &carrier) {
+		t.Fatal("UDP escaped the TCP-only backend")
+	}
+	wrongCarrier := carrier
+	wrongCarrier.PublicKey = "invalid"
+	if ProtectedVLESSDetour(&leaf, &wrongCarrier) {
+		t.Fatal("unvalidated Noise pin admitted")
+	}
+	wrongCarrier = carrier
+	wrongCarrier.Detour = "direct"
+	if ProtectedVLESSDetour(&leaf, &wrongCarrier) {
+		t.Fatal("carrier with an alternate detour admitted")
+	}
+}
 
 type protectedTestNetwork struct {
 	adapter.NetworkManager

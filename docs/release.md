@@ -183,7 +183,9 @@ toolchain as CI; a preflight pass alone does not prove an Apple artifact build.
 The 2026-09-06 C05 review found source call paths from the runtime packages to
 `golang.org/x/crypto/ssh` affected by `GO-2026-6354` and `GO-2026-6355`.
 The fixed `x/crypto 0.56.0` requires Go 1.26; the working toolchain is therefore
-pinned to `go1.26.8`. Windows also pins `tfo-go/v2 2.3.3`: the previous 2.3.1
+initially pinned to `go1.26.8`. Current artifact builds use `go1.26.10`; this
+toolchain change alone does not update existing binaries. Windows also pins
+`tfo-go/v2 2.3.3`: the previous 2.3.1
 failed to link against Go 1.26's `internal/poll` implementation. A separate
 trial build reproduced that failure and then built successfully with 2.3.3.
 The local Psiphon TLS ConnectionState mirror also follows Go 1.26's public

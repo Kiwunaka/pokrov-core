@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/sagernet/sing-box/option"
+	"github.com/sagernet/sing-box/protocol/pokrov/dnstt"
 )
 
 type preparedScope struct {
@@ -157,6 +158,20 @@ func FallbackDefinitions(options option.Options, tag string) (map[string]string,
 		var detour string
 		switch value := outbound.options.(type) {
 		case *option.VLESSOutboundOptions:
+			if carrier, ok := byTag[value.Detour]; ok && carrier.kind == "dnstt" {
+				tunnel, ok := carrier.options.(*option.DnsttOptions)
+				if !ok || !dnstt.ProtectedVLESSDetour(value, tunnel) {
+					return errScope
+				}
+				encoded, err := json.Marshal(tunnel)
+				if err != nil {
+					return errScope
+				}
+				// Bind the exact Noise pin, zone and resolver in the existing
+				// one-use preparation, not only the plaintext VLESS leaf.
+				definitions[value.Detour] = carrier.kind + "\n" + string(encoded)
+				break
+			}
 			if value.TLS == nil || !value.TLS.Enabled || value.TLS.Insecure {
 				return errScope
 			}

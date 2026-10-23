@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"github.com/sagernet/sing-box/daemon"
+	"github.com/sagernet/sing-box/option"
+	"github.com/sagernet/sing-box/protocol/pokrov/dnstt"
 )
 
 // Core support is separate from Android's SOCKS admission API and from a host's
@@ -239,8 +241,18 @@ func windowsDpiProtectedVPN(byTag map[string]map[string]json.RawMessage, tag str
 	}
 	visiting[tag] = true
 	defer delete(visiting, tag)
-	if detour := windowsDpiString(outbound["detour"]); detour != "" && !windowsDpiProtectedVPN(byTag, detour, visiting) {
-		return false
+	if detour := windowsDpiString(outbound["detour"]); detour != "" {
+		if windowsDpiString(outbound["type"]) == "vless" && windowsDpiString(byTag[detour]["type"]) == "dnstt" {
+			var leaf option.VLESSOutboundOptions
+			var carrier option.DnsttOptions
+			leafJSON, _ := json.Marshal(outbound)
+			carrierJSON, _ := json.Marshal(byTag[detour])
+			return json.Unmarshal(leafJSON, &leaf) == nil && json.Unmarshal(carrierJSON, &carrier) == nil &&
+				dnstt.ProtectedVLESSDetour(&leaf, &carrier)
+		}
+		if !windowsDpiProtectedVPN(byTag, detour, visiting) {
+			return false
+		}
 	}
 	switch windowsDpiString(outbound["type"]) {
 	case "vless":
