@@ -65,7 +65,7 @@ try {
 
   Push-Location (Join-Path $root "engine\sing-box")
   try {
-    & $goCommand.Source test -count=1 -tags with_awg,with_utls,with_quic . ./protocol/awg ./common/tls ./common/urltest ./daemon ./experimental/libbox ./dns ./protocol/group ./transport/v2rayxhttp
+    & $goCommand.Source test -count=1 -tags with_awg,with_utls,with_quic . ./protocol/awg ./common/tls ./common/urltest ./daemon ./experimental/libbox ./dns ./protocol/pokrov/dnstt ./protocol/group ./transport/v2rayxhttp
     if ($LASTEXITCODE -ne 0) {
       throw "Engine tests failed."
     }
