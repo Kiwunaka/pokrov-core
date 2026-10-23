@@ -125,7 +125,7 @@ reload, DNS, selector groups, daemon and libbox). CI runs the same script on Lin
 and builds no artifacts. During development, run the owning package test with
 the script's client tags; rerun accepted checks only after a relevant change or failure.
 
-Use the commands in [README](../README.md#build). Android validates Go `1.26.8`,
+Use the commands in [README](../README.md#build). Android validates Go `1.26.10`,
 NDK `29.0.14206865`, and both gomobile/gobind `v0.1.12` identities. Existing cached
 tools are read with `go version -m`; a missing or mismatched command, module or
 Go compiler version triggers installation of the exact pin and revalidation.
