@@ -7,6 +7,8 @@ import (
 	"github.com/sagernet/sing-box/protocol/naive"
 )
 
+const pokrovTransportNaiveH2 = true
+
 func registerNaiveOutbound(registry *outbound.Registry) {
 	naive.RegisterOutbound(registry)
 }

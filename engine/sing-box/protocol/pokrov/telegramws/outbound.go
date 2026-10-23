@@ -182,6 +182,9 @@ func protectedFallback(manager adapter.OutboundManager, target adapter.Outbound,
 	seen[target.Tag()] = true
 	defer delete(seen, target.Tag())
 	switch target.Type() {
+	case C.TypeNaive:
+		protected, ok := target.(interface{ IsProtectedH2() bool })
+		return ok && protected.IsProtectedH2()
 	case C.TypeVLESS, C.TypeHysteria2, C.TypeWireGuard, C.TypeAwg:
 		return true
 	case C.TypeSelector, C.TypeURLTest:

@@ -139,6 +139,31 @@ func TestWindowsLocalDpiPreparationRetainsVPNAndExactSignedScope(t *testing.T) {
 		}
 	}
 	vpn["tls"] = vpnTLS
+	// Managed Naive remains a verified TLS/H2 TCP leaf; H3/UoT and plaintext
+	// cannot be promoted merely because the engine knows the naive type.
+	naiveTLS := map[string]any{"enabled": true, "server_name": "proxy.example.test"}
+	naive := map[string]any{"type": "naive", "tag": "vpn", "server": "192.0.2.1", "server_port": 443,
+		"username": "synthetic-user", "password": "synthetic-password", "quic": false, "tls": naiveTLS}
+	originalVPN := config["outbounds"].([]any)[1]
+	config["outbounds"].([]any)[1] = naive
+	encoded, _ = json.Marshal(config)
+	if _, err = PrepareWindowsLocalDpiProfile(string(encoded), string(keys), "lab", "physical-fixture"); err != nil {
+		t.Fatal("verified Naive H2 fallback was rejected")
+	}
+	for field, value := range map[string]any{"tls": nil, "quic": true, "udp_over_tcp": map[string]any{"enabled": true}} {
+		previous := naive[field]
+		naive[field] = value
+		encoded, _ = json.Marshal(config)
+		if _, err = PrepareWindowsLocalDpiProfile(string(encoded), string(keys), "lab", "physical-fixture"); err == nil {
+			t.Fatal("Naive fallback escaped the verified TLS/H2 TCP contract")
+		}
+		if previous == nil {
+			delete(naive, field)
+		} else {
+			naive[field] = previous
+		}
+	}
+	config["outbounds"].([]any)[1] = originalVPN
 	// ATS wraps the ordinary VPN tag. Keep that wrapper as the fallback so its
 	// lease deadlines and revocation still apply after local DPI withdrawal.
 	originalOutbounds := config["outbounds"].([]any)

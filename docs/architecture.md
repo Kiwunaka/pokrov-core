@@ -923,6 +923,16 @@ Hysteria2 requires `with_quic`, and the `pokrov.awg31.endpoint.v1` subset requir
 are not capabilities. In particular native V2Ray XHTTP is independent of the
 unimplemented `xray` outbound and does not advertise xray-json ingestion.
 
+`singbox_naive_h2_v1` is present only with `with_naive_outbound`; the Core version
+does not imply it. Managed Naive uses an authenticated, certificate-verified H2
+leaf with an explicit TLS server name, QUIC and UoT disabled, and no detour.
+The existing DPI/Telegram preparation and runtime fallback guards accept this
+leaf while retaining their signed scope and exact graph binding. General Naive
+imports retain their existing options. Windows packages the pinned Cronet DLL;
+Android links the pinned Cronet archive into each Core library. Matching App
+inventory/profile support and endpoint acceptance remain required; Linux host
+admission is unchanged.
+
 Native XHTTP bounds connection establishment by the caller's dial context, then
 keeps an established stream alive until its connection or owning client closes.
 Closing the client cancels pending HTTP work and closes its TCP/UDP sockets,

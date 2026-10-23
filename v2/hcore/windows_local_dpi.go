@@ -9,6 +9,7 @@ import (
 
 	"github.com/sagernet/sing-box/daemon"
 	"github.com/sagernet/sing-box/option"
+	"github.com/sagernet/sing-box/protocol/naive"
 	"github.com/sagernet/sing-box/protocol/pokrov/dnstt"
 )
 
@@ -255,6 +256,10 @@ func windowsDpiProtectedVPN(byTag map[string]map[string]json.RawMessage, tag str
 		}
 	}
 	switch windowsDpiString(outbound["type"]) {
+	case "naive":
+		var options option.NaiveOutboundOptions
+		encoded, _ := json.Marshal(outbound)
+		return json.Unmarshal(encoded, &options) == nil && naive.ProtectedH2(&options)
 	case "vless":
 		var tls struct {
 			Enabled  bool `json:"enabled"`

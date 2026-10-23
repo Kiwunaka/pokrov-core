@@ -109,6 +109,7 @@
       "singbox_utls_v1": "uTLS client, only with_utls",
       "singbox_reality_v1": "Reality client, only with_utls; requires uTLS",
       "singbox_hysteria2_v1": "Hysteria2 outbound, only with_quic",
+      "singbox_naive_h2_v1": "Naive HTTP/2 over verified TLS with the bundled Cronet client, only with_naive_outbound. Managed profile is authenticated TCP-only with QUIC/UoT disabled; compiled support is not endpoint or Linux host readiness.",
       "pokrov_awg31_endpoint_v1": "Bounded pokrov.awg31.endpoint.v1 subset, only with_awg"
     },
     "scope": "No artifact digest, opaque signed capability reference/revision, IP-family reachability, endpoint lease, entitlement, proof or production readiness. Those bindings remain independent requirements. The inventory reports selected transport implementation support, not every engine registration or authority to use Telegram DC egress."

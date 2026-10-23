@@ -35,10 +35,11 @@ func RegisterOutbound(registry *outbound.Registry) {
 
 type Outbound struct {
 	outbound.Adapter
-	ctx       context.Context
-	logger    logger.ContextLogger
-	client    *cronet.NaiveClient
-	uotClient *uot.Client
+	ctx         context.Context
+	logger      logger.ContextLogger
+	client      *cronet.NaiveClient
+	uotClient   *uot.Client
+	protectedH2 bool
 }
 
 func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, options option.NaiveOutboundOptions) (adapter.Outbound, error) {
@@ -213,13 +214,17 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 		networks = []string{N.NetworkTCP}
 	}
 	return &Outbound{
-		Adapter:   outbound.NewAdapterWithDialerOptions(C.TypeNaive, tag, networks, options.DialerOptions),
-		ctx:       ctx,
-		logger:    logger,
-		client:    client,
-		uotClient: uotClient,
+		Adapter:     outbound.NewAdapterWithDialerOptions(C.TypeNaive, tag, networks, options.DialerOptions),
+		ctx:         ctx,
+		logger:      logger,
+		client:      client,
+		uotClient:   uotClient,
+		protectedH2: ProtectedH2(&options),
 	}, nil
 }
+
+// IsProtectedH2 is consumed by the existing local-DPI and Telegram fallback guards.
+func (h *Outbound) IsProtectedH2() bool { return h.protectedH2 }
 
 func (h *Outbound) Start(stage adapter.StartStage) error {
 	if stage != adapter.StartStateStart {

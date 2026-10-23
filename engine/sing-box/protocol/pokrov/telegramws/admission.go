@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/sagernet/sing-box/option"
+	"github.com/sagernet/sing-box/protocol/naive"
 	"github.com/sagernet/sing-box/protocol/pokrov/dnstt"
 )
 
@@ -157,6 +158,10 @@ func FallbackDefinitions(options option.Options, tag string) (map[string]string,
 		var children []string
 		var detour string
 		switch value := outbound.options.(type) {
+		case *option.NaiveOutboundOptions:
+			if !naive.ProtectedH2(value) {
+				return errScope
+			}
 		case *option.VLESSOutboundOptions:
 			if carrier, ok := byTag[value.Detour]; ok && carrier.kind == "dnstt" {
 				tunnel, ok := carrier.options.(*option.DnsttOptions)

@@ -96,6 +96,31 @@ func TestTelegramWSPreparationRequiresSignedScopeAndKeepsStaticFallbackRule(t *t
 		t.Fatal("changing the Noise pin bypassed one-use TG graph authority")
 	}
 	config["outbounds"] = originalOutbounds
+	config["outbounds"] = []any{
+		map[string]any{"type": "direct", "tag": "direct"},
+		map[string]any{"type": "naive", "tag": "vpn", "server": "192.0.2.1", "server_port": 443,
+			"username": "synthetic-user", "password": "synthetic-password", "quic": false,
+			"tls": map[string]any{"enabled": true, "server_name": "proxy.example.test"}},
+	}
+	encoded, _ = json.Marshal(config)
+	result, err = PrepareTelegramWSProfile(string(encoded), keys, "lab", "physical-fixture", "windows")
+	if err != nil || json.Unmarshal([]byte(result), &receipt) != nil || json.Unmarshal(receipt.Profile, &prepared) != nil {
+		t.Fatal("signed TG preparation rejected verified Naive H2")
+	}
+	delete(prepared, "_meta")
+	runtimeBytes, _ = json.Marshal(prepared)
+	options, err = parseConfig(ctx, string(runtimeBytes))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = telegramws.BindPreparations(ctx, options); err != nil {
+		t.Fatal("TG preparation did not bind the Naive H2 fallback")
+	}
+	options.Outbounds[1].Options.(*option.NaiveOutboundOptions).Password = "changed-synthetic-password"
+	if _, err = telegramws.BindPreparations(ctx, options); err == nil {
+		t.Fatal("changing Naive credentials bypassed one-use TG graph authority")
+	}
+	config["outbounds"] = originalOutbounds
 	for _, invalid := range []string{"10.0.0.1", "2001:b28:f23d:f001::a%owned"} {
 		changed := strings.Replace(payload, "149.154.167.50", invalid, 1)
 		metadata.Envelope, keys, metadata.Digest = localDpiSignedCatalog(changed)
