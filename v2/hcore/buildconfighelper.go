@@ -66,7 +66,12 @@ func Parse(ctx context.Context, in *ParseRequest) (*ParseResponse, error) {
 		}, err
 	}
 	if in.ConfigPath != "" {
-		err = os.WriteFile(in.ConfigPath, config, 0o644)
+		err = os.WriteFile(in.ConfigPath, config, 0o600)
+		if err == nil {
+			// WriteFile leaves an existing file's permissions unchanged. Use the
+			// platform helper to repair old profiles and apply Windows ACLs.
+			err = hutils.Chmod(in.ConfigPath, 0o600)
+		}
 		if err != nil {
 			return &ParseResponse{
 				ResponseCode: hcommon.ResponseCode_FAILED,
