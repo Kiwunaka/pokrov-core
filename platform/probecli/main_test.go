@@ -9,11 +9,40 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	box "github.com/sagernet/sing-box"
 	"github.com/sagernet/sing-box/experimental/libbox"
 	"github.com/sagernet/sing-box/option"
 )
+
+func TestProbeTimeoutArgument(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		argument []string
+		want     time.Duration
+	}{
+		{"default", nil, 12 * time.Second},
+		{"dnstt_budget", []string{"30s"}, 30 * time.Second},
+		{"over_core_limit", []string{"30.000000001s"}, 0},
+		{"nonpositive", []string{"0s"}, 0},
+		{"malformed", []string{"private-invalid-timeout"}, 0},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			args := append([]string{"private-profile", "private-uplink"}, test.argument...)
+			timeout, valid := parseProbeTimeout(args)
+			if timeout != test.want || valid != (test.want > 0) {
+				t.Fatalf("unexpected timeout: %v, valid=%v", timeout, valid)
+			}
+			if !valid {
+				result := run(args)
+				if result.Success || result.FailureKind != "invalid_request" || result.Stage != "" || strings.Contains(result.JSON(), "private-") {
+					t.Fatalf("invalid timeout must fail before profile access without echo: %s", result.JSON())
+				}
+			}
+		})
+	}
+}
 
 func TestRunRejectsInvalidProfileWithoutEcho(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "address-private.example.json")

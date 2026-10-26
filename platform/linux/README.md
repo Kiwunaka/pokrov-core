@@ -103,7 +103,11 @@ public release scope are unchanged by this private adapter.
 
 `platform/probecli` is a separate, source-only command for scheduled fixed probes.
 It calls the same isolated `hcore.ProbeCandidate` used by clients, with a twelve-second
-deadline and the caller's physical uplink interface. It starts no TUN and changes
+default deadline and the caller's physical uplink interface. An optional third
+argument such as `30s` selects a positive duration up to Core's existing 30-second
+limit, allowing a DNSTT diagnostic to use the app's existing reserve budget.
+An invalid duration returns `invalid_request` before opening the profile.
+It starts no TUN and changes
 no host routes. The command accepts a materialized sing-box JSON profile whose
 `route.final` selects the technical account's protected outbound; a subscription
 link is not a profile. Install that profile in a root-owned private directory as
@@ -121,6 +125,8 @@ CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -buildvcs=false \
   -tags with_gvisor,with_quic,with_wireguard,with_utls,with_clash_api,with_grpc,with_awg,tfogo_checklinkname0 \
   -ldflags '-w -s -checklinkname=0' -o pokrov-candidate-probe ./platform/probecli
 sudo ./pokrov-candidate-probe /etc/pokrov/probes/technical.json <physical-uplink>
+# DNSTT diagnostic with the existing app reserve budget:
+sudo ./pokrov-candidate-probe /etc/pokrov/probes/technical-dnstt.json <physical-uplink> 30s
 ```
 
 One invocation makes one probe. Stdout is one JSON object with the client fields

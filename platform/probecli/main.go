@@ -16,7 +16,7 @@ import (
 	"github.com/Kiwunaka/POKROV-core/v2/linuxruntime"
 )
 
-const probeTimeout = 12 * time.Second
+const defaultProbeTimeout = 12 * time.Second
 const fixedBootstrapTag = "pokrov-fixed-bootstrap"
 
 var errFixedBootstrap = errors.New("fixed probe bootstrap unavailable")
@@ -39,8 +39,24 @@ func main() {
 	}
 }
 
+func parseProbeTimeout(args []string) (time.Duration, bool) {
+	if len(args) < 2 || len(args) > 3 || args[0] == "" || args[1] == "" {
+		return 0, false
+	}
+	timeout := defaultProbeTimeout
+	if len(args) == 3 {
+		var err error
+		timeout, err = time.ParseDuration(args[2])
+		if err != nil || timeout <= 0 || timeout > 30*time.Second {
+			return 0, false
+		}
+	}
+	return timeout, true
+}
+
 func run(args []string) probeResult {
-	if len(args) != 2 || args[0] == "" || args[1] == "" {
+	timeout, valid := parseProbeTimeout(args)
+	if !valid {
 		return probeResult{CandidateProbeResult: hcore.CandidateProbeResult{FailureKind: "invalid_request"}}
 	}
 	file, err := os.Open(args[0])
@@ -61,7 +77,7 @@ func run(args []string) probeResult {
 		return probeResult{CandidateProbeResult: hcore.CandidateProbeResult{FailureKind: "invalid_profile"}, Stage: "bootstrap_dns"}
 	}
 	stage := ""
-	result := hcore.ProbeCandidate(string(profile), "fixed-probe", probeTimeout, args[1], nil, nil,
+	result := hcore.ProbeCandidate(string(profile), "fixed-probe", timeout, args[1], nil, nil,
 		func(name string) { stage = name })
 	if result.Success {
 		stage = ""
