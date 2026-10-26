@@ -113,6 +113,7 @@ func PrepareWindowsLocalDpiProfile(configJSON, publicKeysJSON, audience, bindInt
 	sort.Strings(serviceIDs)
 	prepared := windowsDpiPreparation{ExpiresAt: envelope.Payload.ExpiresAt}
 	localRules := make(map[int]map[string]json.RawMessage)
+	quicRules := make(map[int]map[string]json.RawMessage)
 	for _, serviceID := range serviceIDs {
 		host := metadata.Services[serviceID]
 		if !daemon.VerifyWindowsLocalDpiCatalog(metadata.Envelope, publicKeysJSON, audience, metadata.Digest,
@@ -192,8 +193,9 @@ func PrepareWindowsLocalDpiProfile(configJSON, publicKeysJSON, audience, bindInt
 		if !controlInScope {
 			return "", errWindowsDpiScope
 		}
+		preferTCP := serviceID == "youtube"
 		encoded, _ := json.Marshal(map[string]any{"type": "pokrov-local-dpi", "tag": tag, "windows_direct": true,
-			"bind_interface": bindInterface, "vpn_outbound": fallback, "service_id": serviceID})
+			"bind_interface": bindInterface, "vpn_outbound": fallback, "service_id": serviceID, "prefer_tcp": preferTCP})
 		var local map[string]json.RawMessage
 		_ = json.Unmarshal(encoded, &local)
 		outbounds = append(outbounds, local)
@@ -207,6 +209,20 @@ func PrepareWindowsLocalDpiProfile(configJSON, publicKeysJSON, audience, bindInt
 			localRule["outbound"], _ = json.Marshal(tag)
 			localRule["ip_version"] = json.RawMessage("4")
 			localRules[ruleIndex] = localRule
+			// Generated catalog rules have no network/port constraint. Preserve
+			// the original address family for QUIC: only the admitted holder
+			// rejects it, while IPv6 TCP still uses the unchanged VPN rule.
+			original := rules[ruleIndex]
+			if preferTCP && original["network"] == nil && original["port"] == nil && original["port_range"] == nil {
+				quicRule := make(map[string]json.RawMessage, len(original)+2)
+				for key, value := range original {
+					quicRule[key] = value
+				}
+				quicRule["outbound"], _ = json.Marshal(tag)
+				quicRule["network"] = json.RawMessage(`"udp"`)
+				quicRule["port"] = json.RawMessage("443")
+				quicRules[ruleIndex] = quicRule
+			}
 		}
 		prepared.Services = append(prepared.Services, selected)
 	}
@@ -214,8 +230,11 @@ func PrepareWindowsLocalDpiProfile(configJSON, publicKeysJSON, audience, bindInt
 		return "", errWindowsDpiScope
 	}
 	config["outbounds"], _ = json.Marshal(outbounds)
-	preparedRules := make([]map[string]json.RawMessage, 0, len(rules)+len(localRules))
+	preparedRules := make([]map[string]json.RawMessage, 0, len(rules)+len(localRules)+len(quicRules))
 	for index, rule := range rules {
+		if quicRule := quicRules[index]; quicRule != nil {
+			preparedRules = append(preparedRules, quicRule)
+		}
 		if localRule := localRules[index]; localRule != nil {
 			preparedRules = append(preparedRules, localRule)
 		}

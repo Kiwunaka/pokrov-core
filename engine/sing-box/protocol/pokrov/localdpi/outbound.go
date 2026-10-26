@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/sagernet/sing-box/adapter"
@@ -56,6 +57,7 @@ func RegisterOutbound(registry *outbound.Registry) {
 }
 
 var _ adapter.ConnectionHandler = (*Outbound)(nil)
+var _ adapter.PacketConnectionHandler = (*Outbound)(nil)
 
 type Outbound struct {
 	outbound.Adapter
@@ -65,6 +67,7 @@ type Outbound struct {
 	vpnTag            string
 	vpn               adapter.Outbound
 	serviceID         string
+	preferTCP         bool
 	admissionID       string
 	admission         atomic.Uint32
 	withdrawCtx       context.Context
@@ -72,9 +75,11 @@ type Outbound struct {
 	mu                sync.Mutex
 	closed            bool
 	flows             map[*flow]struct{}
+	quicFlows         map[*packetFlow]struct{}
 	withdrawCompleted bool
 	localHandoffs     uint64
 	vpnHandoffs       uint64
+	quicRejected      uint64
 	failureReason     admissionFailure // First ready-to-failed cause; guarded by mu.
 }
 
@@ -83,13 +88,15 @@ type Observation struct {
 	WithdrawCompleted bool   `json:"withdraw_completed"`
 	LocalHandoffs     uint64 `json:"local_handoffs"`
 	VPNHandoffs       uint64 `json:"vpn_handoffs"`
+	QUICRejected      uint64 `json:"quic_rejected"`
 	FailureReason     string `json:"failure_reason"`
 }
 
 func NewOutbound(ctx context.Context, _ adapter.Router, _ log.ContextLogger, tag string,
 	options option.PokrovLocalDPIOutboundOptions) (adapter.Outbound, error) {
 	if tag == "" ||
-		options.ServiceID == "" || options.VPNOutbound == "" || options.VPNOutbound == tag || options.Detour != "" {
+		options.ServiceID == "" || options.VPNOutbound == "" || options.VPNOutbound == tag || options.Detour != "" ||
+		(options.PreferTCP && options.ServiceID != "youtube") {
 		return nil, errScope
 	}
 	var server netip.Addr
@@ -128,8 +135,8 @@ func NewOutbound(ctx context.Context, _ adapter.Router, _ log.ContextLogger, tag
 		Adapter: outbound.NewAdapter(Type, tag, []string{N.NetworkTCP, N.NetworkUDP}, []string{options.VPNOutbound}),
 		manager: manager, connection: connection,
 		proxy:  proxy,
-		vpnTag: options.VPNOutbound, serviceID: options.ServiceID, admissionID: hex.EncodeToString(identity[:]),
-		withdrawCtx: withdrawCtx, withdrawCancel: withdrawCancel, flows: make(map[*flow]struct{}),
+		vpnTag: options.VPNOutbound, serviceID: options.ServiceID, preferTCP: options.PreferTCP, admissionID: hex.EncodeToString(identity[:]),
+		withdrawCtx: withdrawCtx, withdrawCancel: withdrawCancel, flows: make(map[*flow]struct{}), quicFlows: make(map[*packetFlow]struct{}),
 	}, nil
 }
 
@@ -147,7 +154,7 @@ func (h *Outbound) ReadObservation() Observation {
 	}
 	return Observation{
 		State: states[h.admission.Load()], WithdrawCompleted: h.withdrawCompleted,
-		LocalHandoffs: h.localHandoffs, VPNHandoffs: h.vpnHandoffs, FailureReason: reason,
+		LocalHandoffs: h.localHandoffs, VPNHandoffs: h.vpnHandoffs, QUICRejected: h.quicRejected, FailureReason: reason,
 	}
 }
 
@@ -162,7 +169,20 @@ func (h *Outbound) failAdmission(reason admissionFailure) {
 // Only the trusted native publisher may admit the freshly constructed runtime
 // after its proof. A failed or withdrawn admission cannot be reopened.
 func (h *Outbound) AdmitAdmission(expectedID string) bool {
-	return expectedID == h.admissionID && h.admission.CompareAndSwap(admissionUnpublished, admissionReady)
+	h.mu.Lock()
+	if h.closed || expectedID != h.admissionID || !h.admission.CompareAndSwap(admissionUnpublished, admissionReady) {
+		h.mu.Unlock()
+		return false
+	}
+	flows := make([]*packetFlow, 0, len(h.quicFlows))
+	for f := range h.quicFlows {
+		flows = append(flows, f)
+	}
+	h.mu.Unlock()
+	for _, f := range flows {
+		f.close()
+	}
+	return true
 }
 
 func (h *Outbound) WithdrawAdmission(expectedID string) bool {
@@ -246,9 +266,16 @@ func (h *Outbound) Close() error {
 	for f := range h.flows {
 		flows = append(flows, f)
 	}
+	packets := make([]*packetFlow, 0, len(h.quicFlows))
+	for f := range h.quicFlows {
+		packets = append(packets, f)
+	}
 	h.mu.Unlock()
 	h.WithdrawAdmission(h.admissionID)
 	for _, f := range flows {
+		f.close()
+	}
+	for _, f := range packets {
 		f.close()
 	}
 	return nil
@@ -261,6 +288,54 @@ func (h *Outbound) DialContext(ctx context.Context, network string, destination 
 
 func (h *Outbound) ListenPacket(ctx context.Context, destination M.Socksaddr) (net.PacketConn, error) {
 	return h.vpn.ListenPacket(ctx, destination)
+}
+
+// Only routed, signed YouTube traffic can prefer TCP. Raw dialers keep their
+// VPN behavior, and unavailable admissions never deny the ordinary UDP path.
+func (h *Outbound) NewPacketConnection(ctx context.Context, conn N.PacketConn, metadata adapter.InboundContext, onClose N.CloseHandlerFunc) {
+	h.mu.Lock()
+	closed := h.closed
+	preferTCP := !closed && h.preferTCP && metadata.Destination.Port == 443
+	reject := preferTCP && h.IsReady()
+	var pending *packetFlow
+	if preferTCP && h.admission.Load() == admissionUnpublished {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithCancel(ctx)
+		pending = &packetFlow{client: conn, cancel: cancel}
+		h.quicFlows[pending] = struct{}{}
+	}
+	if reject {
+		h.quicRejected++
+	}
+	h.mu.Unlock()
+	if closed {
+		N.CloseOnHandshakeFailure(conn, onClose, errClosed)
+		return
+	}
+	if pending != nil {
+		stopCancel := context.AfterFunc(ctx, pending.close)
+		finish := N.OnceClose(func(err error) {
+			stopCancel()
+			pending.close()
+			h.mu.Lock()
+			delete(h.quicFlows, pending)
+			h.mu.Unlock()
+			if onClose != nil {
+				onClose(err)
+			}
+		})
+		if ctx.Err() != nil {
+			N.CloseOnHandshakeFailure(conn, finish, ctx.Err())
+			return
+		}
+		h.connection.NewPacketConnection(ctx, h.vpn, conn, metadata, finish)
+		return
+	}
+	if reject {
+		N.CloseOnHandshakeFailure(conn, onClose, syscall.ECONNREFUSED)
+		return
+	}
+	h.connection.NewPacketConnection(ctx, h.vpn, conn, metadata, onClose)
 }
 
 func (h *Outbound) NewConnection(ctx context.Context, conn net.Conn, metadata adapter.InboundContext, onClose N.CloseHandlerFunc) {

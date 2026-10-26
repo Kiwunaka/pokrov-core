@@ -31,6 +31,11 @@ func (s *CommandServer) ReadLocalDpiAdmissionID(outboundTag string) (string, err
 	return s.StartedService.ReadLocalDpiAdmissionID(outboundTag)
 }
 
+// Only closed state and counters leave the current captured admission holder.
+func (s *CommandServer) ReadLocalDpiObservation(admissionID string) (string, error) {
+	return s.StartedService.ReadLocalDpiObservation(admissionID)
+}
+
 func (s *CommandServer) AdmitLocalDpiAdmission(admissionID string) (bool, error) {
 	return s.StartedService.AdmitLocalDpiAdmission(admissionID)
 }

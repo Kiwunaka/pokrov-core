@@ -7,6 +7,8 @@ type PokrovLocalDPIOutboundOptions struct {
 	ServerOptions
 	VPNOutbound string `json:"vpn_outbound"`
 	ServiceID   string `json:"service_id"`
+	// YouTube's signed local route uses TCP after native admission succeeds.
+	PreferTCP bool `json:"prefer_tcp,omitempty"`
 	// Windows packet filters process the physically bound connection directly.
 	// This is not a SOCKS endpoint or permission to admit the runtime.
 	WindowsDirect bool `json:"windows_direct,omitempty"`

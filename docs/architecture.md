@@ -170,6 +170,15 @@ the encrypted fallback instead of reaching final direct. A browser's unused
 speculative TCP socket reaching EOF before any client write does not retire the
 service; failures after a client write retain the existing terminal admission.
 
+Native Selective compilers set `prefer_tcp` only on the signed YouTube holder.
+While that holder is ready, routed UDP/443 connections receive the existing TUN
+handshake rejection so the application can retry over TCP. The first admission
+also closes only that holder's UDP/443 sessions opened during proof. Pending,
+failed and withdrawn admissions keep new UDP on the original VPN; other
+services, ports and raw dialers are unchanged. Windows adds the QUIC rule with
+the original signed address-family scope while keeping direct TCP IPv4-only.
+This is neither a global QUIC/IPv6 policy nor proof of playback or an ad filter.
+
 The optional Windows descriptor `windows_local_dpi_observation_version:1` and
 caller-owned `pokrovCoreReadLocalDpiObservation(captured_admission_id)` expose
 only the current holder's latch state, completed withdrawal and successful
@@ -181,8 +190,11 @@ no raw error or address. Older artifacts omit this diagnostic field.
 Stale IDs and stopped runtimes return empty;
 same-profile reloads start fresh counters. Withdrawal completion follows closure
 of old local streams, while a VPN handoff after withdrawal requires a fresh
-request. Raw dialers, UDP and native probes do not count; the snapshot contains
+request. Raw dialers, UDP and native probes do not count towards TCP handoffs; the snapshot contains
 no routing identities or connection material and does not prove TLS/HTTP success.
+Libbox `CommandServer.ReadLocalDpiObservation` exposes the same captured-holder
+snapshot to Android. The additive `quic_rejected` counter counts denied routed
+UDP/443 connection attempts, not packets, TCP success or native control probes.
 
 The device-local WARP path registers on the device and caches its material by
 `install_unique_id`; a caller must use its own authenticated installation ID
@@ -550,7 +562,9 @@ The exact eleven-field JSON object uses schema
 `api_base_url`, `dns_resolver`, `capability`, `issued_at`, `expires_at` and
 `lease_keys_by_id`. The host forwards its local public lease pins and a backend
 restriction-only delegation; it supplies no account access/refresh token.
-Windows first-provider QA uses a distinct bounded `saqa1.` capability; ordinary
+Android and Windows first-provider QA use a distinct bounded `saqa1.` capability;
+the signed control platform must match the worker. This does not enable public
+provider capabilities. Ordinary
 `pkr_src1.` capabilities retain their existing Android/Windows scope. The shared
 runtime-control endpoint dispatches QA authority on the backend, while Core
 retains the same host-supplied lease pins, signed response, nonce/token/profile

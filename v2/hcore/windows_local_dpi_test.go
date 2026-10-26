@@ -125,6 +125,56 @@ func TestWindowsLocalDpiPreparationRetainsVPNAndExactSignedScope(t *testing.T) {
 	if string(retained.Route.Rules[1]) != string(originalRule) {
 		t.Fatal("IPv6 fallback lost the original domain, VPN or signed window")
 	}
+	// Only the signed YouTube service gets a dynamic QUIC route. Its TCP
+	// override remains IPv4 and the original IPv6 VPN rule stays intact.
+	youtubePayload := []byte(strings.ReplaceAll(string(payload), `"service-a"`, `"youtube"`))
+	youtubeDigest := sha256.Sum256(youtubePayload)
+	youtubeEnvelope, _ := json.Marshal(map[string]any{"algorithm": "Ed25519", "key_id": "test",
+		"payload_sha256": hex.EncodeToString(youtubeDigest[:]), "payload": json.RawMessage(youtubePayload),
+		"signature_b64": base64.RawURLEncoding.EncodeToString(ed25519.Sign(private,
+			append([]byte("pokrov-routing-catalog-v1\n"), youtubePayload...)))})
+	var youtubeConfig map[string]any
+	_ = json.Unmarshal(encoded, &youtubeConfig)
+	youtubeConfig["_meta"] = map[string]any{"local_dpi": windowsDpiMetadata{Mode: "selective", Platform: "windows",
+		Envelope: string(youtubeEnvelope), Digest: hex.EncodeToString(youtubeDigest[:]), Revision: 7, SecurityRevision: 3,
+		AccessState: "paid_unlimited", Services: map[string]string{"youtube": "control.example"}}}
+	youtubeRules := youtubeConfig["route"].(map[string]any)["rules"].([]any)
+	for _, value := range youtubeRules {
+		value.(map[string]any)["pokrov_catalog_window"].(map[string]any)["service_id"] = "youtube"
+	}
+	checkYouTube := func(wantRules int, wantFamily int) {
+		t.Helper()
+		input, _ := json.Marshal(youtubeConfig)
+		result, err := PrepareWindowsLocalDpiProfile(string(input), string(keys), "lab", "physical-fixture")
+		var receipt windowsDpiPreparation
+		var profile struct {
+			Outbounds []struct {
+				PreferTCP bool `json:"prefer_tcp"`
+			}
+			Route struct {
+				Rules []struct {
+					Outbound  string
+					Network   string
+					Port      int
+					IPVersion int `json:"ip_version"`
+				}
+			}
+		}
+		if err != nil || json.Unmarshal([]byte(result), &receipt) != nil || json.Unmarshal(receipt.Profile, &profile) != nil ||
+			!profile.Outbounds[3].PreferTCP || len(profile.Route.Rules) != wantRules {
+			t.Fatal("YouTube preparation lost the scoped TCP preference")
+		}
+		if wantRules == 4 && (profile.Route.Rules[0].Network != "udp" || profile.Route.Rules[0].Port != 443 ||
+			profile.Route.Rules[0].IPVersion != wantFamily || profile.Route.Rules[1].IPVersion != 4 || profile.Route.Rules[2].Outbound != "group") {
+			t.Fatal("YouTube QUIC scope widened or IPv6 TCP lost its VPN route")
+		}
+	}
+	checkYouTube(4, 0)
+	youtubeRule := youtubeRules[0].(map[string]any)
+	youtubeRule["ip_version"] = 4
+	checkYouTube(4, 4)
+	youtubeRule["network"] = "tcp"
+	checkYouTube(3, 4)
 	rule["ip_version"] = 6
 	encoded, _ = json.Marshal(config)
 	if result, err = PrepareWindowsLocalDpiProfile(string(encoded), string(keys), "lab", "physical-fixture"); err == nil || result != "" {
