@@ -82,8 +82,15 @@ func TestFirstProviderQARuntimeControlBoundary(t *testing.T) {
 		t.Fatal("expired QA control was accepted")
 	}
 	config["platform"] = "android"
-	if _, err = parse(); err == nil {
-		t.Fatal("Windows-only QA capability admitted Android")
+	android, err := parse()
+	if err != nil {
+		t.Fatal("Core rejected the App-shaped Android QA control config:", err)
+	}
+	if _, _, ok := android.verify(response(qaCapability, "android", "none", "current"), nonce, now, now); !ok {
+		t.Fatal("signed Android QA control was rejected")
+	}
+	if _, _, ok := android.verify(current, nonce, now, now); ok {
+		t.Fatal("Windows QA control authorized an Android worker")
 	}
 	config["capability"] = standardCapability
 	ordinary, err := parse()

@@ -114,7 +114,7 @@ func parseSmartAccessRuntimeControl(raw string, now time.Time) (*smartAccessRunt
 		!routingCatalogServiceID.MatchString(config.DNSResolver) ||
 		len(config.Capability) > 4096 ||
 		(!smartAccessRuntimeCapability.MatchString(config.Capability) &&
-			!(config.Platform == "windows" && smartAccessFirstProviderQACapability.MatchString(config.Capability))) { return nil, invalid }
+			!smartAccessFirstProviderQACapability.MatchString(config.Capability)) { return nil, invalid }
 	base, err := url.Parse(config.APIBaseURL)
 	if err != nil || base.Scheme != "https" || base.Hostname() == "" || base.User != nil ||
 		base.RawQuery != "" || base.ForceQuery || base.Fragment != "" || base.RawFragment != "" ||
