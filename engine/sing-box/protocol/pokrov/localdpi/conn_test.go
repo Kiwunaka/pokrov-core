@@ -19,6 +19,7 @@ import (
 type observedTestConn struct {
 	net.Conn
 	readByte   bool
+	readError  error
 	writeError error
 }
 
@@ -231,6 +232,9 @@ func TestYouTubeTCPTriesAdmittedLocalBeforeVPNAndSharesDeadline(t *testing.T) {
 }
 
 func (c *observedTestConn) Read(p []byte) (int, error) {
+	if c.readError != nil {
+		return 0, c.readError
+	}
 	if c.readByte {
 		c.readByte = false
 		p[0] = 1
@@ -265,6 +269,15 @@ func TestIdleLocalDpiEOFKeepsAdmissionAndUsedFlowFailureIsRetained(t *testing.T)
 		t.Fatal("unused speculative socket retired the service")
 	}
 	_ = idleConn.Close()
+
+	reset, resetConn := newConnection(&observedTestConn{readError: syscall.ECONNRESET})
+	if _, err := resetConn.Read(buffer); !errors.Is(err, syscall.ECONNRESET) {
+		t.Fatal("idle fixture did not reset")
+	}
+	if !reset.IsReady() || reset.ReadObservation().FailureReason != "none" {
+		t.Fatal("unused speculative socket reset retired the service")
+	}
+	_ = resetConn.Close()
 
 	used, usedConn := newConnection(&observedTestConn{})
 	_, _ = usedConn.Write([]byte{1})

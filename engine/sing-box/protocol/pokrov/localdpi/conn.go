@@ -3,7 +3,6 @@ package localdpi
 import (
 	"context"
 	"errors"
-	"io"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -27,8 +26,8 @@ func (c *observedConn) Read(p []byte) (int, error) {
 		c.responded.Store(true)
 	}
 	// Browsers can open speculative TCP sockets without sending a request.
-	// An idle peer closing such a socket has not exercised the DPI strategy.
-	if !errors.Is(err, io.EOF) || c.wrote.Load() {
+	// A read failure before any client payload has not exercised the strategy.
+	if c.wrote.Load() {
 		c.observe(err, failureEarlyRead)
 	}
 	return n, err
