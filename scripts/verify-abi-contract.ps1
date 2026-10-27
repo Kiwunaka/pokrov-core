@@ -113,10 +113,11 @@ $windowsDescriptorConstant = [regex]::Match(
 )
 $windowsDpi = $contract.windows_local_dpi_admission
 $windowsDpiObservation = $contract.windows_local_dpi_observation
+$windowsDpiRetry = $contract.windows_local_dpi_runtime_retry
 $telegramWS = $contract.telegram_ws_admission
 $expectedWindowsDescriptor = $expectedDescriptor.Replace(
   '"local_dpi_admission_version":1,',
-  '"local_dpi_admission_version":1,"' + $windowsDpi.descriptor_field + '":' + $windowsDpi.version + ',"' + $windowsDpiObservation.descriptor_field + '":' + $windowsDpiObservation.version + ',"' + $telegramWS.descriptor_field + '":' + $telegramWS.version + ','
+  '"local_dpi_admission_version":1,"' + $windowsDpi.descriptor_field + '":' + $windowsDpi.version + ',"' + $windowsDpiObservation.descriptor_field + '":' + $windowsDpiObservation.version + ',"' + $windowsDpiRetry.descriptor_field + '":' + $windowsDpiRetry.version + ',"' + $telegramWS.descriptor_field + '":' + $telegramWS.version + ','
 )
 if (-not $windowsDescriptorConstant.Success -or
     $windowsDescriptorConstant.Groups[1].Value -ne $expectedWindowsDescriptor) {

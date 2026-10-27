@@ -197,6 +197,13 @@ Libbox `CommandServer.ReadLocalDpiObservation` exposes the same captured-holder
 snapshot to Android. The additive `quic_rejected` counter counts denied routed
 UDP/443 connection attempts, not packets, TCP success or native control probes.
 
+Windows runtime retry can replace the complete batch of captured local-DPI
+holders once after an eligible runtime failure. It closes old local streams,
+keeps existing VPN streams and sends new flows straight to VPN until the native
+owner verifies and admits the fresh IDs. The owner still checks signed authority,
+session and network identity, and limits attempts to the two existing strategies.
+Handoff counters remain cumulative across the retry within that runtime.
+
 The device-local WARP path registers on the device and caches its material by
 `install_unique_id`; a caller must use its own authenticated installation ID
 and cannot reuse another installation's material. First TCP and UDP operations

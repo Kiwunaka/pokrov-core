@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"regexp"
+	"strings"
 
 	"github.com/sagernet/sing-box/protocol/pokrov/localdpi"
 	"github.com/sagernet/sing-box/protocol/pokrov/smartaccess"
@@ -11,6 +12,7 @@ import (
 )
 
 var routingCatalogServiceID = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
+var localDpiAdmissionID = regexp.MustCompile(`^[0-9a-f]{32}$`)
 
 func (s *StartedService) ReadLocalDpiAdmissionID(outboundTag string) (string, error) {
 	s.serviceAccess.RLock()
@@ -41,6 +43,51 @@ func (s *StartedService) ReadLocalDpiObservation(admissionID string) (string, er
 		}
 	}
 	return "", nil
+}
+
+// Only a complete set of captured Windows holders may be replaced together.
+func (s *StartedService) PrepareWindowsLocalDpiRetry(csv string) (string, error) {
+	ids := strings.Split(csv, ",")
+	if len(ids) > 256 {
+		return "", nil
+	}
+	indexes := make(map[string]int, len(ids))
+	for i, id := range ids {
+		if !localDpiAdmissionID.MatchString(id) {
+			return "", nil
+		}
+		if _, found := indexes[id]; found {
+			return "", nil
+		}
+		indexes[id] = i
+	}
+	s.serviceAccess.Lock()
+	defer s.serviceAccess.Unlock()
+	if s.closed || s.serviceStatus.Status != ServiceStatus_STARTED || s.instance == nil {
+		return "", errors.New("local_dpi_runtime_unavailable")
+	}
+	holders := make([]*localdpi.Outbound, len(ids))
+	count := 0
+	for _, outbound := range s.instance.instance.Outbound().Outbounds() {
+		local, ok := outbound.(*localdpi.Outbound)
+		if !ok || !local.WindowsDirect() {
+			continue
+		}
+		count++
+		i, found := indexes[local.AdmissionID()]
+		if !found || holders[i] != nil {
+			return "", nil
+		}
+		holders[i] = local
+	}
+	if count != len(ids) {
+		return "", nil
+	}
+	newIDs, ok := localdpi.PrepareWindowsRetry(holders, ids)
+	if !ok {
+		return "", nil
+	}
+	return strings.Join(newIDs, ","), nil
 }
 
 // A native proof can admit only the exact holder it read from this runtime.

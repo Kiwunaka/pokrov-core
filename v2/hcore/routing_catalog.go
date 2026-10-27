@@ -20,6 +20,15 @@ func ReadLocalDpiObservation(admissionID string) (string, error) {
 	return static.StartedService.ReadLocalDpiObservation(admissionID)
 }
 
+func PrepareWindowsLocalDpiRetry(csv string) (string, error) {
+	static.lock.Lock()
+	defer static.lock.Unlock()
+	if WindowsLocalDpiAdmissionVersion() != 1 || static.StartedService == nil {
+		return "", errors.New("local_dpi_runtime_unavailable")
+	}
+	return static.StartedService.PrepareWindowsLocalDpiRetry(csv)
+}
+
 func AdmitLocalDpiAdmission(admissionID string) (bool, error) {
 	static.lock.Lock()
 	defer static.lock.Unlock()

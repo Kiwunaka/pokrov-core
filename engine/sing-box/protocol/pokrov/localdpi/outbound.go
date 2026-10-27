@@ -68,6 +68,8 @@ type Outbound struct {
 	vpn               adapter.Outbound
 	serviceID         string
 	preferTCP         bool
+	windowsDirect     bool
+	runtimeCtx        context.Context
 	admissionID       string
 	admission         atomic.Uint32
 	admissionResolved chan struct{}
@@ -76,6 +78,7 @@ type Outbound struct {
 	withdrawCancel    context.CancelFunc
 	mu                sync.Mutex
 	closed            bool
+	retryPrepared     bool
 	flows             map[*flow]struct{}
 	withdrawCompleted bool
 	localHandoffs     uint64
@@ -136,14 +139,20 @@ func NewOutbound(ctx context.Context, _ adapter.Router, _ log.ContextLogger, tag
 		Adapter: outbound.NewAdapter(Type, tag, []string{N.NetworkTCP, N.NetworkUDP}, []string{options.VPNOutbound}),
 		manager: manager, connection: connection,
 		proxy:  proxy,
-		vpnTag: options.VPNOutbound, serviceID: options.ServiceID, preferTCP: options.PreferTCP, admissionID: hex.EncodeToString(identity[:]),
+		vpnTag: options.VPNOutbound, serviceID: options.ServiceID, preferTCP: options.PreferTCP,
+		windowsDirect: options.WindowsDirect, runtimeCtx: ctx, admissionID: hex.EncodeToString(identity[:]),
 		admissionResolved: make(chan struct{}), withdrawCtx: withdrawCtx, withdrawCancel: withdrawCancel, flows: make(map[*flow]struct{}),
 	}, nil
 }
 
-func (h *Outbound) AdmissionID() string { return h.admissionID }
+func (h *Outbound) AdmissionID() string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.admissionID
+}
 func (h *Outbound) ServiceID() string   { return h.serviceID }
 func (h *Outbound) IsReady() bool       { return h.admission.Load() == admissionReady }
+func (h *Outbound) WindowsDirect() bool { return h.windowsDirect }
 
 func (h *Outbound) ReadObservation() Observation {
 	h.mu.Lock()
@@ -159,10 +168,10 @@ func (h *Outbound) ReadObservation() Observation {
 	}
 }
 
-func (h *Outbound) failAdmission(reason admissionFailure) {
+func (h *Outbound) failAdmission(expectedID string, reason admissionFailure) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if h.admission.CompareAndSwap(admissionReady, admissionFailed) {
+	if expectedID == h.admissionID && h.admission.CompareAndSwap(admissionReady, admissionFailed) {
 		h.failureReason = reason
 	}
 }
@@ -194,6 +203,7 @@ func (h *Outbound) WithdrawAdmission(expectedID string) bool {
 	if previous == admissionUnpublished {
 		close(h.admissionResolved)
 	}
+	cancel := h.withdrawCancel
 	flows := make([]*flow, 0, len(h.flows))
 	for f := range h.flows {
 		if f.local {
@@ -203,7 +213,7 @@ func (h *Outbound) WithdrawAdmission(expectedID string) bool {
 	h.mu.Unlock()
 	// Deny before the native owner stops its filter or SOCKS child. Close only
 	// offloaded streams; ordinary VPN streams remain owned by the runtime.
-	h.withdrawCancel()
+	cancel()
 	for _, f := range flows {
 		h.mu.Lock()
 		if f.local {
@@ -212,7 +222,9 @@ func (h *Outbound) WithdrawAdmission(expectedID string) bool {
 		h.mu.Unlock()
 	}
 	h.mu.Lock()
-	h.withdrawCompleted = true
+	if h.admissionID == expectedID {
+		h.withdrawCompleted = true
+	}
 	h.mu.Unlock()
 	return true
 }
@@ -274,8 +286,9 @@ func (h *Outbound) Close() error {
 	for f := range h.flows {
 		flows = append(flows, f)
 	}
+	id := h.admissionID
 	h.mu.Unlock()
-	h.WithdrawAdmission(h.admissionID)
+	h.WithdrawAdmission(id)
 	for _, f := range flows {
 		f.close()
 	}
@@ -302,13 +315,14 @@ func (h *Outbound) waitYouTubeAdmission(ctx context.Context) error {
 	}
 	waiting := h.serviceID == "youtube" && h.preferTCP && h.admission.Load() == admissionUnpublished
 	deadline := h.admissionDeadline
+	id, resolved, withdraw := h.admissionID, h.admissionResolved, h.withdrawCtx
 	h.mu.Unlock()
 	if waiting && time.Until(deadline) > 0 {
 		timer := time.NewTimer(time.Until(deadline))
 		defer timer.Stop()
 		select {
-		case <-h.admissionResolved:
-		case <-h.withdrawCtx.Done():
+		case <-resolved:
+		case <-withdraw.Done():
 		case <-ctx.Done():
 		case <-timer.C:
 		}
@@ -318,7 +332,7 @@ func (h *Outbound) waitYouTubeAdmission(ctx context.Context) error {
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if h.closed || (h.withdrawCtx.Err() != nil && h.admission.Load() != admissionWithdrawn) {
+	if h.closed || (id == h.admissionID && withdraw.Err() != nil && h.admission.Load() != admissionWithdrawn) {
 		return errClosed
 	}
 	return nil
@@ -365,6 +379,7 @@ func (h *Outbound) NewConnection(ctx context.Context, conn net.Conn, metadata ad
 	f := &flow{client: conn, cancel: cancel, local: eligible && h.IsReady()}
 	h.flows[f] = struct{}{}
 	local := f.local
+	id, withdraw := h.admissionID, h.withdrawCtx
 	h.mu.Unlock()
 	stopCancel := context.AfterFunc(flowCtx, f.close)
 	finish := N.OnceClose(func(err error) {
@@ -394,6 +409,7 @@ func (h *Outbound) NewConnection(ctx context.Context, conn net.Conn, metadata ad
 		}
 		f.local = h.IsReady()
 		local = f.local
+		id, withdraw = h.admissionID, h.withdrawCtx
 		h.mu.Unlock()
 	}
 	if !local {
@@ -401,12 +417,12 @@ func (h *Outbound) NewConnection(ctx context.Context, conn net.Conn, metadata ad
 		return
 	}
 	setupCtx, stopSetup := context.WithTimeout(flowCtx, setupTimeout)
-	stopWithdraw := context.AfterFunc(h.withdrawCtx, stopSetup)
+	stopWithdraw := context.AfterFunc(withdraw, stopSetup)
 	remote, err := h.proxy.DialContext(setupCtx, N.NetworkTCP, metadata.Destination)
 	setupErr := setupCtx.Err()
 	stopWithdraw()
 	stopSetup()
-	if flowCtx.Err() != nil || h.withdrawCtx.Err() != nil || errors.Is(err, context.Canceled) {
+	if flowCtx.Err() != nil || withdraw.Err() != nil || errors.Is(err, context.Canceled) {
 		if remote != nil {
 			_ = remote.Close()
 		}
@@ -432,8 +448,11 @@ func (h *Outbound) NewConnection(ctx context.Context, conn net.Conn, metadata ad
 				reason = failureConnectTimeoutIPv4
 			}
 		}
-		h.failAdmission(reason)
-		if h.admission.Load() == admissionWithdrawn {
+		h.failAdmission(id, reason)
+		h.mu.Lock()
+		unavailable := h.admissionID != id || h.admission.Load() == admissionWithdrawn
+		h.mu.Unlock()
+		if unavailable || withdraw.Err() != nil {
 			N.CloseOnHandshakeFailure(conn, finish, errUnavailable)
 			return
 		}
@@ -442,9 +461,9 @@ func (h *Outbound) NewConnection(ctx context.Context, conn net.Conn, metadata ad
 	}
 	// SOCKS CONNECT and direct TCP setup contain no client payload. After handoff,
 	// every write (including a partial write) belongs to it; no retry exists.
-	observed := &observedConn{Conn: remote, ctx: flowCtx, owner: h}
+	observed := &observedConn{Conn: remote, ctx: flowCtx, owner: h, admissionID: id}
 	h.mu.Lock()
-	attached := !h.closed && h.IsReady() && flowCtx.Err() == nil && f.attach(observed)
+	attached := !h.closed && h.admissionID == id && h.IsReady() && flowCtx.Err() == nil && f.attach(observed)
 	if attached {
 		h.localHandoffs++
 	}

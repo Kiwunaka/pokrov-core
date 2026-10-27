@@ -5,6 +5,7 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -308,5 +309,38 @@ func TestLocalDpiWithdrawalPreservesOtherAdmissionAndCatalog(t *testing.T) {
 	s.serviceStatus.Status = ServiceStatus_IDLE
 	if encoded, err := s.ReadLocalDpiObservation(nextID); encoded != "" || err == nil {
 		t.Fatal("stopped runtime supplied a holder observation")
+	}
+}
+
+func TestWindowsLocalDpiRetryRejectsIncompleteBatch(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows direct holders are Windows-only")
+	}
+	s, options := localDpiCatalogFixture(t)
+	for i := 1; i < len(options.Outbounds); i++ {
+		local := options.Outbounds[i].Options.(*option.PokrovLocalDPIOutboundOptions)
+		local.ServerOptions = option.ServerOptions{}
+		local.WindowsDirect = true
+		local.BindInterface = "fixture-interface"
+	}
+	next, err := s.newInstanceOptions(options, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := s.instance
+	s.instance = next
+	defer func() { _ = old.Close() }()
+	a, b := localDpiFixtureOutbound(t, s, "local-a"), localDpiFixtureOutbound(t, s, "local-b")
+	idA, idB := a.AdmissionID(), b.AdmissionID()
+	if !a.AdmitAdmission(idA) || !b.AdmitAdmission(idB) {
+		t.Fatal("fixture admission failed")
+	}
+	for _, csv := range []string{idA, idA + "," + idA, strings.ToUpper(idA) + "," + idB, idA + "," + strings.Repeat("0", 32), idA + "," + idB} {
+		if got, err := s.PrepareWindowsLocalDpiRetry(csv); err != nil || got != "" {
+			t.Fatal("invalid batch or batch without failure accepted")
+		}
+		if a.AdmissionID() != idA || b.AdmissionID() != idB || !a.IsReady() || !b.IsReady() {
+			t.Fatal("rejected batch changed a holder")
+		}
 	}
 }

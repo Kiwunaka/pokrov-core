@@ -258,7 +258,7 @@ func TestIdleLocalDpiEOFKeepsAdmissionAndUsedFlowFailureIsRetained(t *testing.T)
 		t.Cleanup(cancel)
 		h := &Outbound{admissionID: "fixture", withdrawCtx: withdraw, withdrawCancel: cancel}
 		h.admission.Store(admissionReady)
-		return h, &observedConn{Conn: remote, ctx: context.Background(), owner: h}
+		return h, &observedConn{Conn: remote, ctx: context.Background(), owner: h, admissionID: "fixture"}
 	}
 	buffer := make([]byte, 1)
 	idle, idleConn := newConnection(&observedTestConn{})
@@ -285,7 +285,7 @@ func TestIdleLocalDpiEOFKeepsAdmissionAndUsedFlowFailureIsRetained(t *testing.T)
 	if used.IsReady() || used.ReadObservation().FailureReason != "early_read" {
 		t.Fatal("EOF after client payload lost its failed admission and closed reason")
 	}
-	used.failAdmission(failureConnectErrorIPv6)
+	used.failAdmission("fixture", failureConnectErrorIPv6)
 	used.WithdrawAdmission("fixture")
 	if observed := used.ReadObservation(); observed.State != "withdrawn" || observed.FailureReason != "early_read" {
 		t.Fatal("later failures or withdrawal overwrote the first reason")

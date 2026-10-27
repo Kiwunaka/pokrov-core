@@ -12,12 +12,13 @@ import (
 // Read and Write methods. Remote bytes are not a decrypted protocol proof.
 type observedConn struct {
 	net.Conn
-	ctx       context.Context
-	owner     *Outbound
-	wrote     atomic.Bool
-	responded atomic.Bool
-	closed    atomic.Bool
-	once      sync.Once
+	ctx         context.Context
+	owner       *Outbound
+	admissionID string
+	wrote       atomic.Bool
+	responded   atomic.Bool
+	closed      atomic.Bool
+	once        sync.Once
 }
 
 func (c *observedConn) Read(p []byte) (int, error) {
@@ -34,7 +35,10 @@ func (c *observedConn) Read(p []byte) (int, error) {
 }
 
 func (c *observedConn) Write(p []byte) (int, error) {
-	if c.owner.admission.Load() == admissionWithdrawn || c.ctx.Err() != nil {
+	c.owner.mu.Lock()
+	available := c.owner.admissionID == c.admissionID && c.owner.admission.Load() != admissionWithdrawn
+	c.owner.mu.Unlock()
+	if !available || c.ctx.Err() != nil {
 		return 0, errUnavailable
 	}
 	if len(p) > 0 {
@@ -48,7 +52,7 @@ func (c *observedConn) Write(p []byte) (int, error) {
 func (c *observedConn) observe(err error, reason admissionFailure) {
 	if err != nil && !c.responded.Load() && !c.closed.Load() && c.ctx.Err() == nil &&
 		!errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
-		c.owner.failAdmission(reason)
+		c.owner.failAdmission(c.admissionID, reason)
 	}
 }
 

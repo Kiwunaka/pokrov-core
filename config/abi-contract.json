@@ -32,6 +32,7 @@
       "pokrovCorePrepareWindowsLocalDpiProfile",
       "pokrovCoreReadLocalDpiAdmissionID",
       "pokrovCoreReadLocalDpiObservation",
+      "pokrovCorePrepareWindowsLocalDpiRetry",
       "pokrovCoreAdmitLocalDpiAdmission",
       "pokrovCoreWithdrawLocalDpiAdmission",
       "pokrovCoreTelegramWSAdmissionVersion",
@@ -194,7 +195,15 @@
     "version": 1,
     "arguments": "Captured Core-generated local DPI admission ID; read only the exact current holder under the running service lock.",
     "returns": "Caller-owned UTF-8 JSON {state:unpublished|ready|failed|withdrawn,withdraw_completed:bool,local_handoffs:uint64,vpn_handoffs:uint64}; empty for null input, stale ID or unavailable runtime. Release every returned string with freeString. No IDs, tags, service IDs, domains, endpoints or configuration are returned.",
-    "scope": "Optional additive desktop ABI 2 export and Windows descriptor field; required admission version 1 is unchanged. State comes from the admission latch. Completion becomes true only after successful exact-holder withdrawal finishes closing old local flows. Counters record successful TCP connection-manager handoffs after local/protected VPN dial and attach, and reset with each holder. Raw dialers, UDP and native probes do not count. No replay, mutation or proof of TLS/HTTP readiness."
+    "scope": "Optional additive desktop ABI 2 export and Windows descriptor field; required admission version 1 is unchanged. State comes from the admission latch. Completion becomes true only after successful exact-holder withdrawal finishes closing old local flows. Counters record successful TCP connection-manager handoffs after local/protected VPN dial and attach; they reset with a new runtime and remain cumulative across an in-runtime retry. Raw dialers, UDP and native probes do not count. No replay, mutation or proof of TLS/HTTP readiness."
+  },
+  "windows_local_dpi_runtime_retry": {
+    "prepare_symbol": "pokrovCorePrepareWindowsLocalDpiRetry",
+    "descriptor_field": "windows_local_dpi_runtime_retry_version",
+    "version": 1,
+    "arguments": "CSV of every current Windows direct holder ID, each exactly 32 lowercase hex characters, without duplicates. At least one holder must have a runtime early read/write or IPv4 connect failure.",
+    "returns": "Caller-owned CSV of fresh unpublished IDs in the input order, or an empty string if the batch is invalid or unavailable; release with freeString. The operation atomically replaces the full batch, closes old local flows and leaves VPN flows open.",
+    "scope": "Windows only, once per runtime. New flows use the existing protected VPN without waiting during the new proof. The native owner controls the bounded strategy budget, fresh proof, signed authority and session lifecycle before admitting new IDs. Additive desktop ABI 2."
   },
   "telegram_ws_admission": {
     "version_symbol": "pokrovCoreTelegramWSAdmissionVersion",
