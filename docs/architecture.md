@@ -143,9 +143,9 @@ child; established ordinary VPN flows keep running.
 Libbox `VerifyLocalDpiCatalog` uses Core's Ed25519 implementation and native
 compiled key pins to verify the original canonical payload bytes, current signed
 lifetime and exact Android Selective VPN intent with a nonshared exact control
-host. It does not admit a holder or perform the TLS proof. Signed Selective
-authority and native proof integration remain separate, with the feature
-disabled; existing Full and expiry behavior is unchanged.
+host. The additive `VerifyLocalDpiCatalogMode` also verifies the requested
+Smart Safe intent for signed YouTube only; the legacy entrypoint remains
+Selective. Both retain the signed lifetime, native proof and exact host checks.
 
 Windows local-DPI preparation and runtime fallback validation follow encrypted
 bridge detours and the existing `pokrov-ats-lease` wrapper recursively, rejecting
@@ -155,8 +155,8 @@ and detours; ATS admission, expiry and revocation remain enforced by that wrappe
 Windows source has a separate `WindowsLocalDpiAdmissionVersion` and desktop
 `windows_local_dpi_admission_version:1` descriptor. Native
 `PrepareWindowsLocalDpiProfile` verifies Windows authority with the host's
-compiled pins and prepares only matching nonshared Selective domain rules,
-including the exact control host, with a physically bound TCP:443 local path
+compiled pins and prepares matching nonshared Selective or signed YouTube
+Smart Safe domain rules, including the exact control host, with a physically bound TCP:443 local path
 and the original encrypted VPN fallback. It does not start winws, perform proof
 or admit a holder. Android retains its loopback SOCKS path. Setup failure uses
 one VPN dial; transmitted streams are never replayed. Windows service executor,
@@ -170,13 +170,13 @@ the encrypted fallback instead of reaching final direct. A browser's unused
 speculative TCP socket reaching EOF before any client write does not retire the
 service; failures after a client write retain the existing terminal admission.
 
-Native Selective compilers set `prefer_tcp` only on the signed YouTube holder.
-While that holder is ready, routed UDP/443 connections receive the existing TUN
-handshake rejection so the application can retry over TCP. The first admission
-also closes only that holder's UDP/443 sessions opened during proof. Pending,
-failed and withdrawn admissions keep new UDP on the original VPN; other
-services, ports and raw dialers are unchanged. Windows adds the QUIC rule with
-the original signed address-family scope while keeping direct TCP IPv4-only.
+Native compilers set `prefer_tcp` only on the signed YouTube holder. Eligible
+TCP and UDP/443 wait for unpublished proof only until one shared five-second
+holder deadline. A ready holder uses local TCP and rejects QUIC so the client
+can retry over TCP; failure or expiry keeps the original protected VPN fallback.
+Stop and caller cancellation wake waiting flows. Other services, ports and raw
+dialers are unchanged. Smart Safe additionally requires the original rule and
+final route to use the same protected VPN. Windows keeps local TCP IPv4-only.
 This is neither a global QUIC/IPv6 policy nor proof of playback or an ad filter.
 
 The optional Windows descriptor `windows_local_dpi_observation_version:1` and

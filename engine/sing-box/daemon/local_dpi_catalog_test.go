@@ -186,3 +186,46 @@ func TestLocalDpiCatalogRejectsCryptoAndCallerFenceMismatch(t *testing.T) {
 		})
 	}
 }
+
+func TestLocalDpiCatalogModeBindsSignedYouTubeIntent(t *testing.T) {
+	now := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(localDpiVerifierPayload(now)), &payload); err != nil {
+		t.Fatal(err)
+	}
+	service := payload["services"].([]any)[0].(map[string]any)
+	service["service_id"] = "youtube"
+	service["domains"] = append(service["domains"].([]any), map[string]any{
+		"name": "smart.example", "match": "exact", "role": "web", "shared": false, "source_ids": []string{"source-a"},
+	})
+	selective := map[string]any{"mode": "selective", "action": "vpn", "local_dpi_control_host": "control.example"}
+	smart := map[string]any{"mode": "smart_safe", "action": "vpn", "local_dpi_control_host": "smart.example"}
+	service["route_intents"] = []any{selective, smart}
+	verify := func(serviceID, host, mode string) bool {
+		encoded, _ := json.Marshal(payload)
+		envelope, keys, digest := localDpiSignedCatalog(string(encoded))
+		return verifyLocalDpiCatalogPlatform(envelope, keys, "lab", digest, 7, 3,
+			serviceID, host, "trial_premium", "android", mode, now)
+	}
+	if !verify("youtube", "smart.example", "smart_safe") || !verify("youtube", "control.example", "selective") {
+		t.Fatal("signed mode-specific YouTube control hosts were rejected")
+	}
+	encoded, _ := json.Marshal(payload)
+	envelope, keys, digest := localDpiSignedCatalog(string(encoded))
+	if !verifyLocalDpiCatalog(envelope, keys, "lab", digest, 7, 3, "youtube", "control.example", "trial_premium", now) {
+		t.Fatal("legacy Selective verifier rejected its signed scope")
+	}
+	if verify("youtube", "control.example", "smart_safe") || verify("youtube", "smart.example", "selective") ||
+		verify("youtube", "smart.example", "full") {
+		t.Fatal("admission escaped its signed mode and host")
+	}
+	smart["action"] = "direct"
+	if verify("youtube", "smart.example", "smart_safe") {
+		t.Fatal("Smart Safe admitted a non-VPN intent")
+	}
+	smart["action"] = "vpn"
+	service["service_id"] = "other"
+	if verify("other", "smart.example", "smart_safe") {
+		t.Fatal("Smart Safe admitted a service other than YouTube")
+	}
+}

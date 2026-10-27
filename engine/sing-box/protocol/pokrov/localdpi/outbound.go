@@ -70,12 +70,13 @@ type Outbound struct {
 	preferTCP         bool
 	admissionID       string
 	admission         atomic.Uint32
+	admissionResolved chan struct{}
+	admissionDeadline time.Time
 	withdrawCtx       context.Context
 	withdrawCancel    context.CancelFunc
 	mu                sync.Mutex
 	closed            bool
 	flows             map[*flow]struct{}
-	quicFlows         map[*packetFlow]struct{}
 	withdrawCompleted bool
 	localHandoffs     uint64
 	vpnHandoffs       uint64
@@ -136,7 +137,7 @@ func NewOutbound(ctx context.Context, _ adapter.Router, _ log.ContextLogger, tag
 		manager: manager, connection: connection,
 		proxy:  proxy,
 		vpnTag: options.VPNOutbound, serviceID: options.ServiceID, preferTCP: options.PreferTCP, admissionID: hex.EncodeToString(identity[:]),
-		withdrawCtx: withdrawCtx, withdrawCancel: withdrawCancel, flows: make(map[*flow]struct{}), quicFlows: make(map[*packetFlow]struct{}),
+		admissionResolved: make(chan struct{}), withdrawCtx: withdrawCtx, withdrawCancel: withdrawCancel, flows: make(map[*flow]struct{}),
 	}, nil
 }
 
@@ -174,22 +175,24 @@ func (h *Outbound) AdmitAdmission(expectedID string) bool {
 		h.mu.Unlock()
 		return false
 	}
-	flows := make([]*packetFlow, 0, len(h.quicFlows))
-	for f := range h.quicFlows {
-		flows = append(flows, f)
-	}
+	close(h.admissionResolved)
 	h.mu.Unlock()
-	for _, f := range flows {
-		f.close()
-	}
 	return true
 }
 
 func (h *Outbound) WithdrawAdmission(expectedID string) bool {
 	h.mu.Lock()
-	if expectedID != h.admissionID || h.admission.Swap(admissionWithdrawn) == admissionWithdrawn {
+	if expectedID != h.admissionID {
 		h.mu.Unlock()
 		return false
+	}
+	previous := h.admission.Swap(admissionWithdrawn)
+	if previous == admissionWithdrawn {
+		h.mu.Unlock()
+		return false
+	}
+	if previous == admissionUnpublished {
+		close(h.admissionResolved)
 	}
 	flows := make([]*flow, 0, len(h.flows))
 	for f := range h.flows {
@@ -220,6 +223,11 @@ func (h *Outbound) Start() error {
 		return errScope
 	}
 	h.vpn = vpn
+	h.mu.Lock()
+	if h.admissionDeadline.IsZero() {
+		h.admissionDeadline = time.Now().Add(setupTimeout)
+	}
+	h.mu.Unlock()
 	return nil
 }
 
@@ -266,16 +274,9 @@ func (h *Outbound) Close() error {
 	for f := range h.flows {
 		flows = append(flows, f)
 	}
-	packets := make([]*packetFlow, 0, len(h.quicFlows))
-	for f := range h.quicFlows {
-		packets = append(packets, f)
-	}
 	h.mu.Unlock()
 	h.WithdrawAdmission(h.admissionID)
 	for _, f := range flows {
-		f.close()
-	}
-	for _, f := range packets {
 		f.close()
 	}
 	return nil
@@ -290,45 +291,58 @@ func (h *Outbound) ListenPacket(ctx context.Context, destination M.Socksaddr) (n
 	return h.vpn.ListenPacket(ctx, destination)
 }
 
+// Wait only for the current YouTube holder, with one deadline shared by all
+// flows. Withdrawal resumes the protected VPN fallback; runtime cancellation
+// or closure must not start a fallback connection.
+func (h *Outbound) waitYouTubeAdmission(ctx context.Context) error {
+	h.mu.Lock()
+	if h.closed {
+		h.mu.Unlock()
+		return errClosed
+	}
+	waiting := h.serviceID == "youtube" && h.preferTCP && h.admission.Load() == admissionUnpublished
+	deadline := h.admissionDeadline
+	h.mu.Unlock()
+	if waiting && time.Until(deadline) > 0 {
+		timer := time.NewTimer(time.Until(deadline))
+		defer timer.Stop()
+		select {
+		case <-h.admissionResolved:
+		case <-h.withdrawCtx.Done():
+		case <-ctx.Done():
+		case <-timer.C:
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.closed || (h.withdrawCtx.Err() != nil && h.admission.Load() != admissionWithdrawn) {
+		return errClosed
+	}
+	return nil
+}
+
 // Only routed, signed YouTube traffic can prefer TCP. Raw dialers keep their
 // VPN behavior, and unavailable admissions never deny the ordinary UDP path.
 func (h *Outbound) NewPacketConnection(ctx context.Context, conn N.PacketConn, metadata adapter.InboundContext, onClose N.CloseHandlerFunc) {
+	preferTCP := h.preferTCP && h.serviceID == "youtube" && metadata.Destination.Port == 443
+	if preferTCP {
+		if err := h.waitYouTubeAdmission(ctx); err != nil {
+			N.CloseOnHandshakeFailure(conn, onClose, err)
+			return
+		}
+	}
 	h.mu.Lock()
 	closed := h.closed
-	preferTCP := !closed && h.preferTCP && metadata.Destination.Port == 443
-	reject := preferTCP && h.IsReady()
-	var pending *packetFlow
-	if preferTCP && h.admission.Load() == admissionUnpublished {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithCancel(ctx)
-		pending = &packetFlow{client: conn, cancel: cancel}
-		h.quicFlows[pending] = struct{}{}
-	}
+	reject := !closed && preferTCP && h.IsReady()
 	if reject {
 		h.quicRejected++
 	}
 	h.mu.Unlock()
 	if closed {
 		N.CloseOnHandshakeFailure(conn, onClose, errClosed)
-		return
-	}
-	if pending != nil {
-		stopCancel := context.AfterFunc(ctx, pending.close)
-		finish := N.OnceClose(func(err error) {
-			stopCancel()
-			pending.close()
-			h.mu.Lock()
-			delete(h.quicFlows, pending)
-			h.mu.Unlock()
-			if onClose != nil {
-				onClose(err)
-			}
-		})
-		if ctx.Err() != nil {
-			N.CloseOnHandshakeFailure(conn, finish, ctx.Err())
-			return
-		}
-		h.connection.NewPacketConnection(ctx, h.vpn, conn, metadata, finish)
 		return
 	}
 	if reject {
@@ -366,6 +380,21 @@ func (h *Outbound) NewConnection(ctx context.Context, conn net.Conn, metadata ad
 	if flowCtx.Err() != nil {
 		N.CloseOnHandshakeFailure(conn, finish, flowCtx.Err())
 		return
+	}
+	if eligible && h.preferTCP && h.serviceID == "youtube" {
+		if err := h.waitYouTubeAdmission(flowCtx); err != nil {
+			N.CloseOnHandshakeFailure(conn, finish, err)
+			return
+		}
+		h.mu.Lock()
+		if h.closed {
+			h.mu.Unlock()
+			N.CloseOnHandshakeFailure(conn, finish, errClosed)
+			return
+		}
+		f.local = h.IsReady()
+		local = f.local
+		h.mu.Unlock()
 	}
 	if !local {
 		h.connectVPN(flowCtx, f, metadata, finish)

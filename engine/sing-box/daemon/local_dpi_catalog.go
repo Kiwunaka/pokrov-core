@@ -20,27 +20,42 @@ func VerifyLocalDpiCatalog(envelopeJSON, publicKeysJSON, audience, expectedPaylo
 		expectedRevision, expectedSecurityRevision, serviceID, controlHost, accessState, time.Now())
 }
 
+// VerifyLocalDpiCatalogMode binds Android admission to the signed route mode.
+// The legacy entrypoint above remains Selective-only.
+func VerifyLocalDpiCatalogMode(envelopeJSON, publicKeysJSON, audience, expectedPayloadSHA256 string,
+	expectedRevision, expectedSecurityRevision int64, serviceID, controlHost, accessState, mode string) bool {
+	return verifyLocalDpiCatalogPlatform(envelopeJSON, publicKeysJSON, audience, expectedPayloadSHA256,
+		expectedRevision, expectedSecurityRevision, serviceID, controlHost, accessState, "android", mode, time.Now())
+}
+
 // The platform is fixed by this native entrypoint, not caller catalog metadata.
 func VerifyWindowsLocalDpiCatalog(envelopeJSON, publicKeysJSON, audience, expectedPayloadSHA256 string,
 	expectedRevision, expectedSecurityRevision int64, serviceID, controlHost, accessState string) bool {
+	return VerifyWindowsLocalDpiCatalogMode(envelopeJSON, publicKeysJSON, audience, expectedPayloadSHA256,
+		expectedRevision, expectedSecurityRevision, serviceID, controlHost, accessState, "selective")
+}
+
+func VerifyWindowsLocalDpiCatalogMode(envelopeJSON, publicKeysJSON, audience, expectedPayloadSHA256 string,
+	expectedRevision, expectedSecurityRevision int64, serviceID, controlHost, accessState, mode string) bool {
 	return verifyLocalDpiCatalogPlatform(envelopeJSON, publicKeysJSON, audience, expectedPayloadSHA256,
-		expectedRevision, expectedSecurityRevision, serviceID, controlHost, accessState, "windows", time.Now())
+		expectedRevision, expectedSecurityRevision, serviceID, controlHost, accessState, "windows", mode, time.Now())
 }
 
 func verifyLocalDpiCatalog(envelopeJSON, publicKeysJSON, audience, expectedPayloadSHA256 string,
 	expectedRevision, expectedSecurityRevision int64, serviceID, controlHost, accessState string, now time.Time) bool {
 	return verifyLocalDpiCatalogPlatform(envelopeJSON, publicKeysJSON, audience, expectedPayloadSHA256,
-		expectedRevision, expectedSecurityRevision, serviceID, controlHost, accessState, "android", now)
+		expectedRevision, expectedSecurityRevision, serviceID, controlHost, accessState, "android", "selective", now)
 }
 
 func verifyLocalDpiCatalogPlatform(envelopeJSON, publicKeysJSON, audience, expectedPayloadSHA256 string,
-	expectedRevision, expectedSecurityRevision int64, serviceID, controlHost, accessState, platform string, now time.Time) bool {
-	if !localDpiCatalogHost(controlHost) {
+	expectedRevision, expectedSecurityRevision int64, serviceID, controlHost, accessState, platform, mode string, now time.Time) bool {
+	if (mode != "selective" && mode != "smart_safe") || (mode == "smart_safe" && serviceID != "youtube") ||
+		!localDpiCatalogHost(controlHost) {
 		return false
 	}
 	verified := verifiedRoutingCatalogService(envelopeJSON, publicKeysJSON, audience, expectedPayloadSHA256,
 		expectedRevision, expectedSecurityRevision, serviceID, accessState, now)
-	return verified != nil && localDpiCatalogService(verified.service, controlHost, accessState, platform)
+	return verified != nil && localDpiCatalogService(verified.service, serviceID, controlHost, accessState, platform, mode)
 }
 
 type verifiedCatalogService struct {
@@ -170,7 +185,7 @@ func localDpiCatalogPinnedKey(raw, keyID string) (ed25519.PublicKey, bool) {
 	return selected, selected != nil
 }
 
-func localDpiCatalogService(service map[string]json.RawMessage, host, accessState, platform string) bool {
+func localDpiCatalogService(service map[string]json.RawMessage, serviceID, host, accessState, platform, requestedMode string) bool {
 	evidenceStatus, _ := localDpiCatalogString(service["evidence_status"])
 	if string(service["enabled"]) != "true" || evidenceStatus != "verified" ||
 		!localDpiCatalogContains(service["platforms"], platform) || !localDpiCatalogContains(service["access_states"], accessState) {
@@ -181,7 +196,7 @@ func localDpiCatalogService(service map[string]json.RawMessage, host, accessStat
 		return false
 	}
 	seenModes := make(map[string]bool, len(intents))
-	selectiveVPN := false
+	modeVPN := false
 	for _, raw := range intents {
 		intent, valid := catalogNativeRouteIntent(raw)
 		mode, _ := localDpiCatalogString(intent["mode"])
@@ -197,18 +212,22 @@ func localDpiCatalogService(service map[string]json.RawMessage, host, accessStat
 		}
 		if rawHost, present := intent["local_dpi_control_host"]; present {
 			intentHost, _ := localDpiCatalogString(rawHost)
-			if mode != "selective" || action != "vpn" || intentHost != host {
+			if (mode != "selective" && (mode != "smart_safe" || serviceID != "youtube")) ||
+				action != "vpn" || !localDpiCatalogHost(intentHost) {
 				return false
 			}
-			selectiveVPN = true
+			if mode == requestedMode {
+				if intentHost != host {
+					return false
+				}
+				modeVPN = true
+			}
 		}
-		if mode == "selective" {
-			if action != "vpn" {
-				return false
-			}
+		if mode == requestedMode && action != "vpn" {
+			return false
 		}
 	}
-	if !selectiveVPN {
+	if !modeVPN {
 		return false
 	}
 	domains, ok := localDpiCatalogArray(service["domains"], 0, 256)

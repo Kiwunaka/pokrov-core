@@ -68,8 +68,13 @@ func PrepareWindowsLocalDpiProfile(configJSON, publicKeysJSON, audience, bindInt
 	if json.Unmarshal([]byte(configJSON), &config) != nil || config == nil ||
 		json.Unmarshal(config["_meta"], &hostMeta) != nil ||
 		json.Unmarshal(hostMeta["local_dpi"], &metadata) != nil ||
-		metadata.Mode != "selective" || metadata.Platform != "windows" || len(metadata.Services) == 0 || len(metadata.Services) > 256 {
+		(metadata.Mode != "selective" && metadata.Mode != "smart_safe") || metadata.Platform != "windows" || len(metadata.Services) == 0 || len(metadata.Services) > 256 {
 		return "", errWindowsDpiScope
+	}
+	if metadata.Mode == "smart_safe" {
+		if _, ok := metadata.Services["youtube"]; !ok || len(metadata.Services) != 1 {
+			return "", errWindowsDpiScope
+		}
 	}
 	var envelope struct {
 		Payload struct {
@@ -102,8 +107,13 @@ func PrepareWindowsLocalDpiProfile(configJSON, publicKeysJSON, audience, bindInt
 		}
 		byTag[tag] = outbound
 	}
-	final := byTag[windowsDpiString(route["final"])]
-	if windowsDpiString(final["type"]) != "direct" || windowsDpiString(final["detour"]) != "" {
+	finalTag := windowsDpiString(route["final"])
+	final := byTag[finalTag]
+	if metadata.Mode == "selective" {
+		if windowsDpiString(final["type"]) != "direct" || windowsDpiString(final["detour"]) != "" {
+			return "", errWindowsDpiScope
+		}
+	} else if !windowsDpiProtectedVPN(byTag, finalTag, make(map[string]bool)) {
 		return "", errWindowsDpiScope
 	}
 	serviceIDs := make([]string, 0, len(metadata.Services))
@@ -116,8 +126,8 @@ func PrepareWindowsLocalDpiProfile(configJSON, publicKeysJSON, audience, bindInt
 	quicRules := make(map[int]map[string]json.RawMessage)
 	for _, serviceID := range serviceIDs {
 		host := metadata.Services[serviceID]
-		if !daemon.VerifyWindowsLocalDpiCatalog(metadata.Envelope, publicKeysJSON, audience, metadata.Digest,
-			metadata.Revision, metadata.SecurityRevision, serviceID, host, metadata.AccessState) {
+		if !daemon.VerifyWindowsLocalDpiCatalogMode(metadata.Envelope, publicKeysJSON, audience, metadata.Digest,
+			metadata.Revision, metadata.SecurityRevision, serviceID, host, metadata.AccessState, metadata.Mode) {
 			return "", errWindowsDpiScope
 		}
 		var domains []windowsDpiDomain
@@ -175,7 +185,8 @@ func PrepareWindowsLocalDpiProfile(configJSON, publicKeysJSON, audience, bindInt
 					continue
 				}
 				vpn := windowsDpiString(rule["outbound"])
-				if !windowsDpiProtectedVPN(byTag, vpn, make(map[string]bool)) || (fallback != "" && fallback != vpn) {
+				if !windowsDpiProtectedVPN(byTag, vpn, make(map[string]bool)) || (fallback != "" && fallback != vpn) ||
+					(metadata.Mode == "smart_safe" && vpn != finalTag) {
 					return "", errWindowsDpiScope
 				}
 				fallback = vpn

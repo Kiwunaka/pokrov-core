@@ -290,3 +290,73 @@ func TestWindowsLocalDpiPreparationRetainsVPNAndExactSignedScope(t *testing.T) {
 		t.Fatal("unprotected fallback was prepared")
 	}
 }
+
+func TestWindowsSmartSafeYouTubeRequiresSignedModeAndSameProtectedFallback(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows admission unavailable")
+	}
+	public, private, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	issued, expires := now.Add(-time.Minute).Format(time.RFC3339), now.Add(time.Minute).Format(time.RFC3339)
+	payload, _ := json.Marshal(map[string]any{
+		"schema_version": "pokrov-routing-catalog-v1", "audience": "lab", "revision": 7, "security_revision": 3,
+		"issued_at": issued, "expires_at": expires, "sources": []any{map[string]any{}}, "evidence": []any{},
+		"services": []any{map[string]any{
+			"service_id": "youtube", "enabled": true, "evidence_status": "verified", "platforms": []string{"windows"},
+			"display_name": "YouTube", "categories": []string{"media"}, "classification": "ordinary", "reason": "test",
+			"source_ids": []string{"test"}, "evidence_ids": []string{"test"}, "android": []any{}, "windows": []any{},
+			"networks": []any{}, "provider_capability_refs": []any{}, "external_gateway_policy": "forbidden",
+			"access_states": []string{"paid_unlimited"},
+			"route_intents": []any{map[string]any{"mode": "smart_safe", "action": "vpn", "local_dpi_control_host": "control.example"}},
+			"domains":       []any{map[string]any{"name": "control.example", "match": "exact", "shared": false, "role": "web", "source_ids": []string{"test"}}},
+		}},
+	})
+	digest := sha256.Sum256(payload)
+	envelope, _ := json.Marshal(map[string]any{"algorithm": "Ed25519", "key_id": "test", "payload_sha256": hex.EncodeToString(digest[:]),
+		"payload": json.RawMessage(payload), "signature_b64": base64.RawURLEncoding.EncodeToString(ed25519.Sign(private,
+			append([]byte("pokrov-routing-catalog-v1\n"), payload...)))})
+	keys, _ := json.Marshal(map[string]string{"test": base64.StdEncoding.EncodeToString(public)})
+	metadata := windowsDpiMetadata{Mode: "smart_safe", Platform: "windows", Envelope: string(envelope),
+		Digest: hex.EncodeToString(digest[:]), Revision: 7, SecurityRevision: 3, AccessState: "paid_unlimited",
+		Services: map[string]string{"youtube": "control.example"}}
+	rule := map[string]any{"action": "route", "domain": []string{"control.example"}, "outbound": "vpn",
+		"pokrov_catalog_window": map[string]any{"service_id": "youtube", "issued_at": issued, "expires_at": expires}}
+	route := map[string]any{"final": "vpn", "rules": []any{rule}}
+	config := map[string]any{"_meta": map[string]any{"local_dpi": metadata},
+		"outbounds": []any{map[string]any{"type": "direct", "tag": "direct"},
+			map[string]any{"type": "vless", "tag": "vpn", "tls": map[string]any{"enabled": true}},
+			map[string]any{"type": "vless", "tag": "other-vpn", "tls": map[string]any{"enabled": true}}},
+		"route": route}
+	prepare := func() (string, error) {
+		encoded, _ := json.Marshal(config)
+		return PrepareWindowsLocalDpiProfile(string(encoded), string(keys), "lab", "physical-fixture")
+	}
+	result, err := prepare()
+	var receipt windowsDpiPreparation
+	var prepared struct {
+		Outbounds []struct {
+			VPNOutbound string `json:"vpn_outbound"`
+		}
+		Route struct{ Final string }
+	}
+	if err != nil || json.Unmarshal([]byte(result), &receipt) != nil || json.Unmarshal(receipt.Profile, &prepared) != nil ||
+		prepared.Route.Final != "vpn" || len(prepared.Outbounds) != 4 || prepared.Outbounds[3].VPNOutbound != "vpn" {
+		t.Fatal("signed Smart Safe YouTube did not preserve its protected VPN")
+	}
+	route["final"] = "direct"
+	if _, err := prepare(); err == nil {
+		t.Fatal("Smart Safe allowed a direct final")
+	}
+	route["final"] = "other-vpn"
+	if _, err := prepare(); err == nil {
+		t.Fatal("Smart Safe allowed a different rule fallback")
+	}
+	route["final"] = "vpn"
+	metadata.Services["other"] = "control.example"
+	if _, err := prepare(); err == nil {
+		t.Fatal("Smart Safe allowed another service")
+	}
+}

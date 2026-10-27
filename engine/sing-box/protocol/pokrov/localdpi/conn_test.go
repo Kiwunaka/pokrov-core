@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/sagernet/sing-box/adapter"
 	M "github.com/sagernet/sing/common/metadata"
@@ -32,65 +33,201 @@ func (c *packetTestConn) HandshakeFailure(err error) error { c.failed = err; ret
 
 type packetTestManager struct {
 	adapter.ConnectionManager
-	dials    int
-	finishes []N.CloseHandlerFunc
-	contexts []context.Context
+	dials atomic.Int32
 }
 
-func (m *packetTestManager) NewPacketConnection(ctx context.Context, _ N.Dialer, _ N.PacketConn, _ adapter.InboundContext, onClose N.CloseHandlerFunc) {
-	m.dials++
-	m.finishes = append(m.finishes, onClose)
-	m.contexts = append(m.contexts, ctx)
+func (m *packetTestManager) NewPacketConnection(_ context.Context, _ N.Dialer, _ N.PacketConn, _ adapter.InboundContext, _ N.CloseHandlerFunc) {
+	m.dials.Add(1)
 }
 
-func TestYouTubeQUICMovesToTCPOnlyWhileAdmitted(t *testing.T) {
-	manager := &packetTestManager{}
+func newPendingTestOutbound(manager adapter.ConnectionManager, deadline time.Time) *Outbound {
 	withdraw, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	h := &Outbound{connection: manager, preferTCP: true, admissionID: "fixture", withdrawCtx: withdraw,
-		withdrawCancel: cancel, quicFlows: make(map[*packetFlow]struct{})}
+	return &Outbound{connection: manager, serviceID: "youtube", preferTCP: true, admissionID: "fixture",
+		admissionResolved: make(chan struct{}), admissionDeadline: deadline,
+		withdrawCtx: withdraw, withdrawCancel: cancel, flows: make(map[*flow]struct{})}
+}
+
+func TestYouTubeQUICWaitsForProofAndRetainsVPNFallback(t *testing.T) {
+	manager := &packetTestManager{}
 	metadata := adapter.InboundContext{Network: N.NetworkUDP,
 		Destination: M.Socksaddr{Addr: netip.MustParseAddr("8.8.8.8"), Port: 443}}
-	oldQUIC := &packetTestConn{}
-	h.NewPacketConnection(context.Background(), oldQUIC, metadata, nil)
-	otherUDP := &packetTestConn{}
-	other := metadata
-	other.Destination.Port = 8443
-	h.NewPacketConnection(context.Background(), otherUDP, other, nil)
-	if manager.dials != 2 || oldQUIC.closed.Load() || otherUDP.closed.Load() {
-		t.Fatal("pending proof changed the ordinary VPN path")
+	start := func(h *Outbound, ctx context.Context, conn *packetTestConn) chan struct{} {
+		done := make(chan struct{})
+		go func() { h.NewPacketConnection(ctx, conn, metadata, nil); close(done) }()
+		return done
 	}
-	if !h.AdmitAdmission("fixture") || !oldQUIC.closed.Load() || manager.contexts[0].Err() == nil || otherUDP.closed.Load() {
-		t.Fatal("admission did not retire only the pre-proof QUIC session")
-	}
-	manager.finishes[0](nil)
-	for _, ip := range []string{"8.8.8.8", "2001:4860:4860::8888"} {
-		metadata.Destination.Addr = netip.MustParseAddr(ip)
-		metadata.UDPConnect = true
-		conn := &packetTestConn{}
-		h.NewPacketConnection(context.Background(), conn, metadata, nil)
-		if !conn.closed.Load() || !errors.Is(conn.failed, syscall.ECONNREFUSED) || manager.dials != 2 {
-			t.Fatal("ready QUIC escaped rejection or opened a VPN connection")
+	await := func(done <-chan struct{}) {
+		t.Helper()
+		select {
+		case <-done:
+		case <-time.After(time.Second):
+			t.Fatal("pending QUIC did not wake")
 		}
 	}
-	if h.ReadObservation().QUICRejected != 2 || h.ReadObservation().LocalHandoffs != 0 {
-		t.Fatal("QUIC rejection was reported as a successful TCP handoff")
+
+	ready := newPendingTestOutbound(manager, time.Now().Add(time.Second))
+	pending := &packetTestConn{}
+	done := start(ready, context.Background(), pending)
+	select {
+	case <-done:
+		t.Fatal("pending QUIC escaped before proof")
+	case <-time.After(20 * time.Millisecond):
 	}
-	h.failAdmission(failureEarlyRead)
-	afterFailure := &packetTestConn{}
-	h.NewPacketConnection(context.Background(), afterFailure, metadata, nil)
-	h.WithdrawAdmission("fixture")
-	afterWithdrawal := &packetTestConn{}
-	h.NewPacketConnection(context.Background(), afterWithdrawal, metadata, nil)
-	if manager.dials != 4 || afterFailure.closed.Load() || afterWithdrawal.closed.Load() || otherUDP.closed.Load() {
-		t.Fatal("failed or withdrawn admission blocked the VPN fallback")
+	other := metadata
+	other.Destination.Port = 8443
+	ready.NewPacketConnection(context.Background(), &packetTestConn{}, other, nil)
+	if manager.dials.Load() != 1 || !ready.AdmitAdmission("fixture") {
+		t.Fatal("ordinary UDP waited or YouTube admission failed")
 	}
-	ordinary := &Outbound{connection: manager}
-	ordinary.admission.Store(admissionReady)
-	ordinary.NewPacketConnection(context.Background(), &packetTestConn{}, metadata, nil)
-	if manager.dials != 5 {
-		t.Fatal("another local-DPI service inherited YouTube's TCP policy")
+	await(done)
+	if !pending.closed.Load() || !errors.Is(pending.failed, syscall.ECONNREFUSED) || manager.dials.Load() != 1 {
+		t.Fatal("proved YouTube QUIC was not rejected before VPN handoff")
 	}
+
+	failed := newPendingTestOutbound(manager, time.Now().Add(time.Second))
+	fallback := &packetTestConn{}
+	done = start(failed, context.Background(), fallback)
+	if !failed.WithdrawAdmission("fixture") {
+		t.Fatal("withdrawal failed")
+	}
+	await(done)
+	if fallback.closed.Load() || manager.dials.Load() != 2 {
+		t.Fatal("failed proof did not hand QUIC to the protected VPN")
+	}
+
+	expired := newPendingTestOutbound(manager, time.Now().Add(-time.Millisecond))
+	expired.NewPacketConnection(context.Background(), &packetTestConn{}, metadata, nil)
+	if manager.dials.Load() != 3 {
+		t.Fatal("an expired holder restarted its wait")
+	}
+
+	stopped := newPendingTestOutbound(manager, time.Now().Add(time.Second))
+	closed := &packetTestConn{}
+	done = start(stopped, context.Background(), closed)
+	select {
+	case <-done:
+		t.Fatal("QUIC did not wait before Stop")
+	case <-time.After(20 * time.Millisecond):
+	}
+	if err := stopped.Close(); err != nil {
+		t.Fatal(err)
+	}
+	await(done)
+	if !closed.closed.Load() || manager.dials.Load() != 3 {
+		t.Fatal("Stop left QUIC waiting or started a VPN flow")
+	}
+}
+
+type admissionTestDialer struct {
+	name   string
+	events chan string
+}
+
+func (d *admissionTestDialer) DialContext(context.Context, string, M.Socksaddr) (net.Conn, error) {
+	d.events <- d.name
+	return nil, errors.New("synthetic dial failure")
+}
+func (d *admissionTestDialer) ListenPacket(context.Context, M.Socksaddr) (net.PacketConn, error) {
+	return nil, errors.New("unexpected packet dial")
+}
+
+type admissionTestVPN struct {
+	adapter.Outbound
+	dialer *admissionTestDialer
+}
+
+func (v *admissionTestVPN) DialContext(ctx context.Context, network string, address M.Socksaddr) (net.Conn, error) {
+	return v.dialer.DialContext(ctx, network, address)
+}
+
+func TestYouTubeTCPTriesAdmittedLocalBeforeVPNAndSharesDeadline(t *testing.T) {
+	events := make(chan string, 4)
+	metadata := adapter.InboundContext{Network: N.NetworkTCP,
+		Destination: M.Socksaddr{Addr: netip.MustParseAddr("8.8.8.8"), Port: 443}}
+	start := func(h *Outbound, ctx context.Context) <-chan struct{} {
+		client, peer := net.Pipe()
+		t.Cleanup(func() { _ = peer.Close() })
+		done := make(chan struct{})
+		go func() { h.NewConnection(ctx, client, metadata, nil); close(done) }()
+		return done
+	}
+	setup := func(deadline time.Time) *Outbound {
+		h := newPendingTestOutbound(nil, deadline)
+		h.proxy = &admissionTestDialer{name: "local", events: events}
+		h.vpn = &admissionTestVPN{dialer: &admissionTestDialer{name: "vpn", events: events}}
+		return h
+	}
+	h := setup(time.Now().Add(time.Second))
+	done := start(h, context.Background())
+	select {
+	case <-events:
+		t.Fatal("TCP escaped before proof")
+	case <-time.After(20 * time.Millisecond):
+	}
+	if !h.AdmitAdmission("fixture") {
+		t.Fatal("admission failed")
+	}
+	readEvent := func() string {
+		t.Helper()
+		select {
+		case event := <-events:
+			return event
+		case <-time.After(time.Second):
+			t.Fatal("dial did not start")
+			return ""
+		}
+	}
+	if got := readEvent(); got != "local" {
+		t.Fatalf("first dial: %s", got)
+	}
+	if got := readEvent(); got != "vpn" {
+		t.Fatalf("fallback dial: %s", got)
+	}
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("failed local proof did not finish")
+	}
+
+	expiring := setup(time.Now().Add(50 * time.Millisecond))
+	done = start(expiring, context.Background())
+	if got := readEvent(); got != "vpn" {
+		t.Fatalf("expired holder dialed %s", got)
+	}
+	<-done
+	done = start(expiring, context.Background())
+	if got := readEvent(); got != "vpn" {
+		t.Fatalf("later flow restarted the holder wait: %s", got)
+	}
+	<-done
+
+	cancelled := setup(time.Now().Add(time.Second))
+	ctx, cancel := context.WithCancel(context.Background())
+	done = start(cancelled, ctx)
+	select {
+	case <-done:
+		t.Fatal("TCP did not wait before cancellation")
+	case <-time.After(20 * time.Millisecond):
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("cancel left TCP waiting")
+	}
+	select {
+	case <-events:
+		t.Fatal("cancel started a local or VPN dial")
+	default:
+	}
+
+	other := setup(time.Now().Add(time.Second))
+	other.serviceID, other.preferTCP = "other", false
+	done = start(other, context.Background())
+	if got := readEvent(); got != "vpn" {
+		t.Fatalf("ordinary service used %s", got)
+	}
+	<-done
 }
 
 func (c *observedTestConn) Read(p []byte) (int, error) {

@@ -27,6 +27,13 @@ func VerifyLocalDpiCatalog(envelopeJSON, publicKeysJSON, audience, expectedPaylo
 		expectedRevision, expectedSecurityRevision, serviceID, controlHost, accessState)
 }
 
+// VerifyLocalDpiCatalogMode also admits the signed Smart Safe YouTube scope.
+func VerifyLocalDpiCatalogMode(envelopeJSON, publicKeysJSON, audience, expectedPayloadSHA256 string,
+	expectedRevision, expectedSecurityRevision int64, serviceID, controlHost, accessState, mode string) bool {
+	return daemon.VerifyLocalDpiCatalogMode(envelopeJSON, publicKeysJSON, audience, expectedPayloadSHA256,
+		expectedRevision, expectedSecurityRevision, serviceID, controlHost, accessState, mode)
+}
+
 func (s *CommandServer) ReadLocalDpiAdmissionID(outboundTag string) (string, error) {
 	return s.StartedService.ReadLocalDpiAdmissionID(outboundTag)
 }

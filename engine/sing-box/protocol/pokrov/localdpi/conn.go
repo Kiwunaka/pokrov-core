@@ -7,8 +7,6 @@ import (
 	"net"
 	"sync"
 	"sync/atomic"
-
-	N "github.com/sagernet/sing/common/network"
 )
 
 // Embedding only net.Conn keeps buffer/syscall/unwrap fast paths behind these
@@ -94,21 +92,6 @@ func (f *flow) close() {
 		if remote != nil {
 			_ = remote.Close()
 		}
-		_ = f.client.Close()
-	})
-}
-
-// A QUIC session opened during native proof must not keep its old VPN path
-// after local admission. Other UDP sessions are not retained here.
-type packetFlow struct {
-	client N.PacketConn
-	cancel context.CancelFunc
-	once   sync.Once
-}
-
-func (f *packetFlow) close() {
-	f.once.Do(func() {
-		f.cancel()
 		_ = f.client.Close()
 	})
 }
