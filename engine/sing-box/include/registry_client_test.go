@@ -26,7 +26,7 @@ func TestClientRegistryExcludesUnusedProtocolsAndServers(t *testing.T) {
 			t.Errorf("client lost local inbound %q", protocol)
 		}
 	}
-	for _, protocol := range []string{"direct", "vless", "dnstt", "naive", "selector", "pokrov-telegram-ws", "pokrov-local-dpi"} {
+	for _, protocol := range []string{"direct", "vless", "dnstt", "slipstream", "naive", "selector", "pokrov-telegram-ws", "pokrov-local-dpi"} {
 		if _, exists := outbounds.CreateOptions(protocol); !exists {
 			t.Errorf("client lost outbound %q", protocol)
 		}
@@ -42,5 +42,8 @@ func TestClientRegistryExcludesUnusedProtocolsAndServers(t *testing.T) {
 	}
 	if slices.Contains(inventory.Features, "singbox_naive_h2_v1") != pokrovTransportNaiveH2 {
 		t.Fatal("Naive H2 inventory does not match the compiled transport")
+	}
+	if slices.Contains(inventory.Features, "slipstream_vless_v1") != pokrovTransportSlipstream {
+		t.Fatal("Slipstream inventory does not match the compiled transport")
 	}
 }

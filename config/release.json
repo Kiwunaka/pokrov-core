@@ -13,6 +13,15 @@
     "sing": "0.9.6-0.20260922013354-87c33f17688f",
     "gomobile": "0.1.12",
     "android_ndk": "29.0.14206865",
+    "slipstream": {
+      "repository": "https://github.com/Mygod/slipstream-rust",
+      "revision": "c7b265c11dd13d6dfd601bc81d54d61ee9bdde23",
+      "tag": "v0.1.1",
+      "license": "Apache-2.0",
+      "windows_amd64_asset": "slipstream-windows-x86_64.zip",
+      "android_min_api": 23,
+      "android_features": "openssl-vendored,picoquic-minimal-build"
+    },
     "cronet_distribution": "caller_supplied_sha256_pinned_binary",
     "cronet_windows_amd64": {
       "module_version": "v0.0.0-20260912104006-c10c03c318db",

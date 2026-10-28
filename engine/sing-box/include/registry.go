@@ -118,6 +118,7 @@ func OutboundRegistry() *outbound.Registry {
 	hinvalid.RegisterOutbound(registry)
 	xray.RegisterOutbound(registry)
 	dnstt.RegisterOutbound(registry)
+	registerSlipstreamOutbound(registry)
 	balancer.RegisterLoadBalance(registry)
 
 	registerQUICOutbounds(registry)

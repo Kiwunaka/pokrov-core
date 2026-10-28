@@ -13,6 +13,7 @@ import (
 	"github.com/sagernet/sing-box/include"
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
+	"github.com/sagernet/sing-box/protocol/pokrov/slipstream"
 	tun "github.com/sagernet/sing-tun"
 	"github.com/sagernet/sing/common/control"
 	E "github.com/sagernet/sing/common/exceptions"
@@ -37,6 +38,7 @@ func FromContext(ctx context.Context, platformInterface PlatformInterface) conte
 	}
 
 	ctx = filemanager.WithDefault(ctx, sWorkingPath, sTempPath, sUserID, sGroupID)
+	ctx = service.ContextWith[slipstream.ExecutablePath](ctx, slipstream.ExecutablePath(slipstreamClientPath()))
 	return box.Context(ctx, include.InboundRegistry(), include.OutboundRegistry(), include.EndpointRegistry(), dnsRegistry, include.ServiceRegistry(), include.CertificateProviderRegistry())
 }
 

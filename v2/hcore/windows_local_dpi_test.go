@@ -4,9 +4,12 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"encoding/pem"
+	"math/big"
 	"runtime"
 	"strings"
 	"testing"
@@ -265,6 +268,34 @@ func TestWindowsLocalDpiPreparationRetainsVPNAndExactSignedScope(t *testing.T) {
 	if _, err = PrepareWindowsLocalDpiProfile(string(encoded), string(keys), "lab", "physical-fixture"); err == nil {
 		t.Fatal("Noise exception widened to an arbitrary plaintext VLESS server")
 	}
+	vpn["server_port"] = 12543
+	certificate := &x509.Certificate{SerialNumber: big.NewInt(1), NotBefore: now.Add(-time.Minute), NotAfter: now.Add(time.Hour)}
+	der, err := x509.CreateCertificate(rand.Reader, certificate, certificate, public, private)
+	if err != nil {
+		t.Fatal(err)
+	}
+	carrier = map[string]any{"type": "slipstream", "tag": "dns-tunnel", "domain": "s.t.example.test",
+		"certificate": string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})),
+		"resolvers":   []string{"192.0.2.1:53"}, "network": "tcp"}
+	config["outbounds"] = append(originalOutbounds, carrier)
+	meta["telegram_ws"] = map[string]any{"schema_version": 1, "mode": "selective", "platform": "windows", "catalog_envelope": string(envelope),
+		"catalog_sha256": hex.EncodeToString(digest[:]), "revision": 7, "security_revision": 3, "access_state": "paid_unlimited", "services": map[string]string{"service-a": "group"}}
+	encoded, _ = json.Marshal(config)
+	if _, err = PrepareWindowsLocalDpiProfile(string(encoded), string(keys), "lab", "physical-fixture"); err != nil {
+		t.Fatal("fixed certificate-pinned Slipstream fallback was rejected by local DPI")
+	}
+	if _, err = PrepareWindowsTelegramWSProfile(string(encoded), string(keys), "lab", "physical-fixture"); err != nil {
+		t.Fatal("fixed certificate-pinned Slipstream fallback was rejected by Telegram WS")
+	}
+	vpn["server_port"] = 443
+	encoded, _ = json.Marshal(config)
+	if _, err = PrepareWindowsLocalDpiProfile(string(encoded), string(keys), "lab", "physical-fixture"); err == nil {
+		t.Fatal("Slipstream exception admitted an arbitrary plaintext VLESS server")
+	}
+	if _, err = PrepareWindowsTelegramWSProfile(string(encoded), string(keys), "lab", "physical-fixture"); err == nil {
+		t.Fatal("Telegram WS admitted the wrong Slipstream backend graph")
+	}
+	delete(meta, "telegram_ws")
 	config["outbounds"] = originalOutbounds
 	for _, field := range []string{"server", "server_port", "network", "uuid", "detour"} {
 		delete(vpn, field)

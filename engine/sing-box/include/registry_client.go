@@ -63,6 +63,7 @@ func OutboundRegistry() *outbound.Registry {
 	direct.RegisterOutbound(registry)
 	atslease.RegisterOutbound(registry)
 	dnstt.RegisterOutbound(registry)
+	registerSlipstreamOutbound(registry)
 	smartaccess.RegisterOutbound(registry)
 	telegramws.RegisterOutbound(registry)
 	localdpi.RegisterOutbound(registry)

@@ -159,6 +159,11 @@ func pokrovCoreTransportCapabilities() *C.char {
 	return C.CString(libbox.TransportCapabilities())
 }
 
+//export pokrovCoreSetSlipstreamClientPath
+func pokrovCoreSetSlipstreamClientPath(path *C.char) *C.char {
+	return emptyOrErrorC(libbox.SetSlipstreamClientPath(C.GoString(path)))
+}
+
 //export pokrovCoreLocalDpiAdmissionVersion
 func pokrovCoreLocalDpiAdmissionVersion() C.int {
 	return C.int(libbox.LocalDpiAdmissionVersion())

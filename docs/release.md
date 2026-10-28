@@ -160,6 +160,19 @@ dependency and licensing evidence.
 and fails when any contract export is absent; `scripts/build-android.ps1` fails
 when an Android ABI is missing.
 
+Slipstream remains optional. `build-windows.ps1 -SlipstreamClient <absolute
+slipstream-client.exe>` enables `with_slipstream` and copies that pinned native
+dependency and its Apache-2.0 license alongside the SDK. The default build does
+not advertise it. `build-android.ps1 -SlipstreamNativeDirectory <directory>`
+requires a native CLI named `<ABI>/libslipstream.so` for every selected ABI
+before enabling the feature and adding those executables to the AAR. A JNI
+shared library is not a substitute. Native Android clients must be built with
+the configured NDK and 16 KiB ELF page alignment; the consuming app must extract
+native libraries for execution and supply the installed path through host setup.
+`config/release.json` pins the upstream client source; its `v0.1.1` Windows
+archive is available upstream, while Android CLI compilation and packaging are
+separate build inputs. These options do not select or publish new client artifacts.
+
 Post-`1.0.3` working source requires Go `1.26.8` and the remediated dependency
 floor recorded in both Go modules: gRPC `1.83.2`, CIRCL `1.6.3`,
 `golang.org/x/crypto` `0.56.0`, `x/net` `0.58.0`, and `x/text` `0.41.0`.

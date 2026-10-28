@@ -13,6 +13,7 @@ const (
 	TypeAwg            = "awg"      //H
 	TypeBalancer       = "balancer" //H
 	TypeDNSTT          = "dnstt"    //H
+	TypeSlipstream     = "slipstream"
 
 	TypeTun                = "tun"
 	TypeRedirect           = "redirect"
@@ -95,6 +96,8 @@ func ProxyDisplayName(proxyType string) string {
 		return "Trojan"
 	case TypeNaive:
 		return "Naive"
+	case TypeSlipstream:
+		return "Slipstream"
 	case TypeWireGuard:
 		return "WireGuard"
 	case TypeHysteria:

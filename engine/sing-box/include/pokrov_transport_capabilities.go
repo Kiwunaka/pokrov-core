@@ -19,6 +19,9 @@ func TransportCapabilities() string {
 	if pokrovTransportNaiveH2 {
 		features = append(features, "singbox_naive_h2_v1")
 	}
+	if pokrovTransportSlipstream {
+		features = append(features, "slipstream_vless_v1")
+	}
 	if pokrovTransportAWG {
 		features = append(features, "pokrov_awg31_endpoint_v1")
 	}

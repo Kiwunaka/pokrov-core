@@ -27,6 +27,7 @@
       "pokrovCoreVersion",
       "pokrovCoreCapabilities",
       "pokrovCoreTransportCapabilities",
+      "pokrovCoreSetSlipstreamClientPath",
       "pokrovCoreLocalDpiAdmissionVersion",
       "pokrovCoreWindowsLocalDpiAdmissionVersion",
       "pokrovCorePrepareWindowsLocalDpiProfile",
@@ -101,6 +102,7 @@
     "returns": "Caller-owned UTF-8 JSON, at most 4096 bytes, release desktop string with freeString. Closed shape: schema=1, features=sorted unique ASCII feature IDs. Absent symbol/null/invalid or unknown schema means unavailable, never inferred support. This optional additive export does not change desktop ABI 2 or the existing exact capability descriptor.",
     "features": {
       "dnstt_vless_v1": "TCP-only VLESS detour over pinned Noise/KCP/smux DNS tunnel, one numeric UDP resolver and fixed server upstream. Compiled support only; host entitlement, owned delegated endpoint and server-side Premium authorization remain required.",
+      "slipstream_vless_v1": "TCP-only VLESS detour over certificate-pinned Slipstream QUIC/DNS. Only with_slipstream on Windows/Android/Linux; requires a bundled native client supplied by the trusted host. Core owns process lifetime and the protected outer DNS socket. Compiled support does not establish endpoint, packaging, entitlement or TUN readiness.",
       "pokrov_ats_lease_v1": "Core outbound wrapper for a single VLESS ATS endpoint. New TCP/UDP flows stop within 10 minutes of issue; admitted flows close within one hour. The host must bind and revoke the exact running profile/lease.",
       "pokrov_telegram_ws_v1": "Native obfuscated Telegram TCP:443 to TLS-verified binary WSS with encrypted VPN fallback. Implementation support only; signed DC route authority, lifetime gate and matching App consumer remain required.",
       "singbox_tls_v1": "Native TLS client implementation; per-profile validation still required",
@@ -114,6 +116,13 @@
       "pokrov_awg31_endpoint_v1": "Bounded pokrov.awg31.endpoint.v1 subset, only with_awg"
     },
     "scope": "No artifact digest, opaque signed capability reference/revision, IP-family reachability, endpoint lease, entitlement, proof or production readiness. Those bindings remain independent requirements. The inventory reports selected transport implementation support, not every engine registration or authority to use Telegram DC egress."
+  },
+  "slipstream_client_host": {
+    "desktop_symbol": "pokrovCoreSetSlipstreamClientPath",
+    "mobile_setup_field": "libbox.SetupOptions.SlipstreamClientPath",
+    "arguments": "Trusted host passes the absolute installed bundled client path after setup and before start. Windows uses slipstream-client.exe; Android uses nativeLibraryDir/libslipstream.so with executable native-library extraction enabled. Empty clears the path for future runtime contexts; relative, missing and non-file paths fail. The path is never a connection-profile field.",
+    "returns": "Desktop returns a caller-owned empty UTF-8 string on success or a fixed error message on failure; release with freeString. Null is a host failure. Additive optional desktop ABI 2 export; older hosts remain usable for other transports. The loaded transport inventory must also contain slipstream_vless_v1.",
+    "lifetime": "An initialized outbound captures the host path. Changing it does not mutate a running client. Core lazily starts one client per outbound, exposes only loopback TCP/DNS to it, protects the remote resolver socket through its platform dialer, pins one exact server leaf certificate, and kills/waits for the client on Close or interface reset. No native endpoint/configuration output is forwarded to logs."
   },
   "linux_expected_identity_start": {
     "protocol": "pokrov-linux-core-v1",

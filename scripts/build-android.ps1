@@ -4,7 +4,8 @@ param(
   [string]$AndroidNdk,
   [string]$GomobileBinDirectory,
   [string]$OutputDirectory,
-  [switch]$Arm64Only
+  [switch]$Arm64Only,
+  [string]$SlipstreamNativeDirectory
 )
 
 $ErrorActionPreference = "Stop"
@@ -61,6 +62,14 @@ $gomobile = Join-Path $GomobileBinDirectory "gomobile$goExecutableSuffix"
 $outputPath = Join-Path $OutputDirectory $release.artifacts.android
 $target = if ($Arm64Only) { "android/arm64" } else { "android" }
 $expectedAbis = if ($Arm64Only) { @("arm64-v8a") } else { @("armeabi-v7a", "arm64-v8a", "x86", "x86_64") }
+if ($SlipstreamNativeDirectory) {
+  $SlipstreamNativeDirectory = [IO.Path]::GetFullPath($SlipstreamNativeDirectory)
+  foreach ($abi in $expectedAbis) {
+    if (-not (Test-Path -LiteralPath (Join-Path $SlipstreamNativeDirectory "$abi/libslipstream.so") -PathType Leaf)) {
+      throw "Slipstream native CLI is missing $abi/libslipstream.so."
+    }
+  }
+}
 
 function Test-GomobileTool {
   param([string]$Path, [string]$Name)
@@ -124,7 +133,9 @@ try {
     "tfogo_checklinkname0",
     "with_naive_outbound",
     "with_conntrack"
-  ) -join ","
+  )
+  if ($SlipstreamNativeDirectory) { $tags += "with_slipstream" }
+  $tags = $tags -join ","
 
   Push-Location $root
   try {
@@ -168,6 +179,20 @@ try {
 foreach ($abi in $expectedAbis) {
   if ($aarEntries -notcontains "jni/$abi/libpokrov-core.so") {
     throw "Android artifact is missing $abi/libpokrov-core.so."
+  }
+}
+
+if ($SlipstreamNativeDirectory) {
+  $archive = [IO.Compression.ZipFile]::Open($outputPath, [IO.Compression.ZipArchiveMode]::Update)
+  try {
+    foreach ($abi in $expectedAbis) {
+      [IO.Compression.ZipFileExtensions]::CreateEntryFromFile($archive,
+        (Join-Path $SlipstreamNativeDirectory "$abi/libslipstream.so"), "jni/$abi/libslipstream.so") | Out-Null
+    }
+    [IO.Compression.ZipFileExtensions]::CreateEntryFromFile($archive,
+      (Join-Path $root 'third_party/slipstream/LICENSE'), 'META-INF/licenses/slipstream/LICENSE') | Out-Null
+  } finally {
+    $archive.Dispose()
   }
 }
 

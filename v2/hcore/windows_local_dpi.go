@@ -11,6 +11,7 @@ import (
 	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing-box/protocol/naive"
 	"github.com/sagernet/sing-box/protocol/pokrov/dnstt"
+	"github.com/sagernet/sing-box/protocol/pokrov/slipstream"
 )
 
 // Core support is separate from Android's SOCKS admission API and from a host's
@@ -273,6 +274,14 @@ func windowsDpiProtectedVPN(byTag map[string]map[string]json.RawMessage, tag str
 	visiting[tag] = true
 	defer delete(visiting, tag)
 	if detour := windowsDpiString(outbound["detour"]); detour != "" {
+		if windowsDpiString(outbound["type"]) == "vless" && windowsDpiString(byTag[detour]["type"]) == "slipstream" {
+			var leaf option.VLESSOutboundOptions
+			var carrier option.SlipstreamOptions
+			leafJSON, _ := json.Marshal(outbound)
+			carrierJSON, _ := json.Marshal(byTag[detour])
+			return json.Unmarshal(leafJSON, &leaf) == nil && json.Unmarshal(carrierJSON, &carrier) == nil &&
+				slipstream.ProtectedVLESSDetour(&leaf, &carrier)
+		}
 		if windowsDpiString(outbound["type"]) == "vless" && windowsDpiString(byTag[detour]["type"]) == "dnstt" {
 			var leaf option.VLESSOutboundOptions
 			var carrier option.DnsttOptions

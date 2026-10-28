@@ -1,8 +1,11 @@
 package libbox
 
 import (
+	"errors"
 	"os"
+	"path/filepath"
 	"runtime/debug"
+	"sync/atomic"
 	"time"
 
 	C "github.com/sagernet/sing-box/constant"
@@ -15,6 +18,7 @@ var (
 	sBasePath                string
 	sWorkingPath             string
 	sTempPath                string
+	sSlipstreamClientPath    atomic.Pointer[string]
 	sUserID                  int
 	sGroupID                 int
 	sFixAndroidStack         bool
@@ -33,6 +37,7 @@ type SetupOptions struct {
 	BasePath                string
 	WorkingPath             string
 	TempPath                string
+	SlipstreamClientPath    string
 	FixAndroidStack         bool
 	CommandServerListenPort int32
 	CommandServerSecret     string
@@ -44,6 +49,9 @@ func Setup(options *SetupOptions) error {
 	sBasePath = options.BasePath
 	sWorkingPath = options.WorkingPath
 	sTempPath = options.TempPath
+	if err := SetSlipstreamClientPath(options.SlipstreamClientPath); err != nil {
+		return err
+	}
 
 	sUserID = os.Getuid()
 	sGroupID = os.Getgid()
@@ -60,6 +68,32 @@ func Setup(options *SetupOptions) error {
 	os.MkdirAll(sWorkingPath, 0o777)
 	os.MkdirAll(sTempPath, 0o777)
 	return nil
+}
+
+// SetSlipstreamClientPath is a trusted host setup input. It affects only new
+// runtime contexts; connection profiles cannot select or replace executables.
+func SetSlipstreamClientPath(path string) error {
+	if path != "" {
+		if !filepath.IsAbs(path) {
+			return errors.New("slipstream client path must be absolute")
+		}
+		info, err := os.Stat(path)
+		if err != nil || !info.Mode().IsRegular() {
+			return errors.New("slipstream bundled client is unavailable")
+		}
+		if !C.IsWindows && info.Mode().Perm()&0o111 == 0 {
+			return errors.New("slipstream bundled client is not executable")
+		}
+	}
+	sSlipstreamClientPath.Store(&path)
+	return nil
+}
+
+func slipstreamClientPath() string {
+	if path := sSlipstreamClientPath.Load(); path != nil {
+		return *path
+	}
+	return ""
 }
 
 func SetLocale(localeId string) {

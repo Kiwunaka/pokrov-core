@@ -12,6 +12,7 @@ import (
 	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing-box/protocol/naive"
 	"github.com/sagernet/sing-box/protocol/pokrov/dnstt"
+	"github.com/sagernet/sing-box/protocol/pokrov/slipstream"
 )
 
 type preparedScope struct {
@@ -163,6 +164,20 @@ func FallbackDefinitions(options option.Options, tag string) (map[string]string,
 				return errScope
 			}
 		case *option.VLESSOutboundOptions:
+			if carrier, ok := byTag[value.Detour]; ok && carrier.kind == "slipstream" {
+				tunnel, ok := carrier.options.(*option.SlipstreamOptions)
+				if !ok || !slipstream.ProtectedVLESSDetour(value, tunnel) {
+					return errScope
+				}
+				encoded, err := json.Marshal(tunnel)
+				if err != nil {
+					return errScope
+				}
+				// The existing preparation binds the exact server leaf, zone
+				// and resolver together with the personal VLESS leaf.
+				definitions[value.Detour] = carrier.kind + "\n" + string(encoded)
+				break
+			}
 			if carrier, ok := byTag[value.Detour]; ok && carrier.kind == "dnstt" {
 				tunnel, ok := carrier.options.(*option.DnsttOptions)
 				if !ok || !dnstt.ProtectedVLESSDetour(value, tunnel) {

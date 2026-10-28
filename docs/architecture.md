@@ -16,6 +16,27 @@ POKROV Core is one client runtime with three layers:
 
 ## Runtime selection and Android preparation
 
+The optional `with_slipstream` build registers a separate `slipstream` TCP
+carrier and reports `slipstream_vless_v1` on Windows, Android and Linux. It uses
+the pinned Apache-2.0 [Slipstream Rust v0.1.1](https://github.com/Mygod/slipstream-rust/releases/tag/v0.1.1)
+client; that upstream is archived. The trusted host supplies its installed
+client path through `libbox.SetupOptions.SlipstreamClientPath` or, after setup
+and before start, `pokrovCoreSetSlipstreamClientPath`. The profile supplies one
+numeric UDP resolver, `domain`, one PEM `certificate` for exact server leaf
+pinning, and `network: "tcp"`; it cannot select an executable. Core owns one
+lazy native process and a loopback DNS relay whose outer socket uses the normal
+protected/bound dialer. Close and interface reset kill and wait for that process,
+close streams and sockets, and remove the temporary public certificate. Native
+output is discarded. A personal flowless VLESS leaf detours through this carrier
+to the existing fixed Premium backend `127.0.0.1:12543`; Slipstream itself supplies
+neither destination framing nor account authorization. Content DNS must use TCP
+through that VLESS leaf. Android requires an executable native CLI packaged as
+`nativeLibraryDir/libslipstream.so`; a JNI shared library is a different artifact.
+The existing Windows LocalDPI and Telegram WS fallback guards accept only this
+fixed VLESS graph; Telegram preparation binds the exact certificate, zone and
+resolver in its existing one-use fallback snapshot.
+No selected runtime artifact or server endpoint is implied by this source support.
+
 The client registry exposes `dnstt_vless_v1` through the existing transport
 inventory. This is the first SlipNet-compatible DNSTT transport slice, using
 the already pinned CC0 `mahsanet/dnstt` codec/Noise implementation with KCP and

@@ -2,7 +2,8 @@ param(
   [string]$GoExecutable = "go",
   [string]$CCompiler = "x86_64-w64-mingw32-gcc",
   [string]$OutputDirectory,
-  [string]$CronetLibrary
+  [string]$CronetLibrary,
+  [string]$SlipstreamClient
 )
 
 $ErrorActionPreference = "Stop"
@@ -48,6 +49,12 @@ if (-not $objdumpPath) {
 }
 
 $outputPath = Join-Path $OutputDirectory $release.artifacts.windows
+if ($SlipstreamClient) {
+  $SlipstreamClient = [IO.Path]::GetFullPath($SlipstreamClient)
+  if (-not (Test-Path -LiteralPath $SlipstreamClient -PathType Leaf)) {
+    throw 'Pass the pinned upstream slipstream-client.exe.'
+  }
+}
 $tags = @(
   "pokrov_client",
   "with_gvisor",
@@ -61,7 +68,9 @@ $tags = @(
   "with_naive_outbound",
   "with_conntrack",
   "with_purego"
-) -join ","
+)
+if ($SlipstreamClient) { $tags += "with_slipstream" }
+$tags = $tags -join ","
 
 $previousGoos = $env:GOOS
 $previousGoarch = $env:GOARCH
@@ -161,6 +170,15 @@ if ($CronetLibrary) {
 
 if (-not (Test-CronetIdentity -Path $cronetOutput)) {
   throw "Windows Cronet dependency failed its final identity check."
+}
+
+if ($SlipstreamClient) {
+  $slipstreamOutput = Join-Path $OutputDirectory 'slipstream-client.exe'
+  if ($SlipstreamClient -ne $slipstreamOutput) {
+    Copy-Item -Force -LiteralPath $SlipstreamClient -Destination $slipstreamOutput
+  }
+  Copy-Item -Force -LiteralPath (Join-Path $root 'third_party/slipstream/LICENSE') `
+    -Destination (Join-Path $OutputDirectory 'slipstream-LICENSE.txt')
 }
 
 Get-FileHash -Algorithm SHA256 -LiteralPath $outputPath, $cronetOutput |
