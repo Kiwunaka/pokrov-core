@@ -60,8 +60,8 @@ New-Item -ItemType Directory -Force -Path $GomobileBinDirectory | Out-Null
 $goExecutableSuffix = if ($IsWindows) { ".exe" } else { "" }
 $gomobile = Join-Path $GomobileBinDirectory "gomobile$goExecutableSuffix"
 $outputPath = Join-Path $OutputDirectory $release.artifacts.android
-$target = if ($Arm64Only) { "android/arm64" } else { "android" }
-$expectedAbis = if ($Arm64Only) { @("arm64-v8a") } else { @("armeabi-v7a", "arm64-v8a", "x86", "x86_64") }
+$target = if ($Arm64Only) { "android/arm64" } else { "android/arm,android/arm64,android/amd64" }
+$expectedAbis = if ($Arm64Only) { @("arm64-v8a") } else { @("armeabi-v7a", "arm64-v8a", "x86_64") }
 if ($SlipstreamNativeDirectory) {
   $SlipstreamNativeDirectory = [IO.Path]::GetFullPath($SlipstreamNativeDirectory)
   foreach ($abi in $expectedAbis) {

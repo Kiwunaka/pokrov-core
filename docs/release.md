@@ -173,6 +173,16 @@ native libraries for execution and supply the installed path through host setup.
 archive is available upstream, while Android CLI compilation and packaging are
 separate build inputs. These options do not select or publish new client artifacts.
 
+`scripts/build-slipstream-android.ps1` builds the current `armeabi-v7a`,
+`arm64-v8a`, and `x86_64` native CLIs from the pinned initialized upstream checkout.
+Pass `-SourceDirectory`, `-OutputDirectory`, the pinned `-AndroidNdk`, and
+`-ToolDirectories` containing Cargo, CMake/Ninja, and complete MSYS Unix
+Perl/make/pkgconf/cygpath tools. `-Abis` restricts a build to selected current
+ABIs. The Windows-host helper obtains the locked OpenSSL source through Cargo
+metadata, builds static OpenSSL and picoquic with NDK, then builds the CLI without
+upstream's Unix-shell auto-build. It checks the ELF machine, PIE, 16 KiB alignment
+and system-only dynamic dependencies before copying `<ABI>/libslipstream.so`.
+
 Post-`1.0.3` working source requires Go `1.26.8` and the remediated dependency
 floor recorded in both Go modules: gRPC `1.83.2`, CIRCL `1.6.3`,
 `golang.org/x/crypto` `0.56.0`, `x/net` `0.58.0`, and `x/text` `0.41.0`.
