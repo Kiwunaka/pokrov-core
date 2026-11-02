@@ -426,7 +426,8 @@ other service groups; production admission still requires its capability proofs.
 Desktop ABI 2 exposes the same checks through `pokrovCoreProbeSelectedOutbound`
 and `pokrovCoreProbeRuntimeEgressV1`; `smart_access_probe_version=1` identifies
 support. Startup retains its existing selected-probe budget; the periodic call
-accepts at most 3000 ms and joins its cancellation observer before return.
+accepts at most the existing 15000 ms TCP timeout and joins its cancellation
+observer before return.
 An owned HEAD probe with a valid 204 and marker remains successful when its
 measured latency rounds to zero milliseconds; latency alone cannot reject it.
 Only an empty caller-owned string means healthy; fixed errors disclose no
@@ -829,7 +830,7 @@ A successful URL test whose selected leaf changed returns the existing closed
 verify the current leaf. It supplies no replacement proof and does not reclassify
 real transport errors or expired/cancelled contexts as a selection change.
 Periodic Android checks use `CommandServer.ProbeRuntimeEgress(tag, timeoutMs,
-cancellation)` with a maximum 3000 ms budget for the selected group or endpoint,
+cancellation)` with a maximum 15000 ms budget for the selected group or endpoint,
 without the startup endpoint initialization wait. Cancellation reaches the probe
 context, and its native callback watcher is joined before return. The captured
 runtime and exact selected leaf must still be current. The existing transport

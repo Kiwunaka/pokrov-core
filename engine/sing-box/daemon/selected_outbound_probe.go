@@ -65,7 +65,7 @@ func probeRuntimeEgress(parent context.Context, timeout time.Duration, interrupt
 	tag string, lookup func(string) (adapter.Outbound, bool),
 	probe func(context.Context, adapter.Outbound) (uint16, error),
 ) (healthy bool, err error) {
-	if timeout <= 0 || timeout > 3*time.Second || interrupted == nil {
+	if timeout <= 0 || timeout > C.TCPTimeout || interrupted == nil {
 		return false, errors.New("invalid runtime egress probe request")
 	}
 	ctx, cancel := context.WithTimeout(parent, timeout)

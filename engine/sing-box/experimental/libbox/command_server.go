@@ -227,7 +227,7 @@ type RuntimeProbeCancellation interface {
 	IsCancelled() bool
 }
 
-// ProbeRuntimeEgress checks a selected group or endpoint within 1..3000ms.
+// ProbeRuntimeEgress checks a selected group or endpoint within 1..15000ms.
 // It cancels the probe context and joins its callback watcher, not the active
 // transport's shared workers. Late results cannot settle another invocation.
 func (s *CommandServer) ProbeRuntimeEgress(tag string, timeoutMs int32, cancellation RuntimeProbeCancellation) (bool, error) {

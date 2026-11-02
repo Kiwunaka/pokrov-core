@@ -95,3 +95,39 @@ func TestSelectedProbeCannotConfirmChangedRouteOrDirectLeaf(t *testing.T) {
 		t.Fatal("old leaf confirmed its replacement with the same tag")
 	}
 }
+
+func TestRuntimeEgressAllowsSlowProofAndStillCancels(t *testing.T) {
+	leaf := &probeLeaf{tag: "proxy", kind: "vless"}
+	lookup := func(string) (adapter.Outbound, bool) { return leaf, true }
+	neverInterrupted := func() bool { return false }
+	probe := func(ctx context.Context, _ adapter.Outbound) (uint16, error) {
+		timer := time.NewTimer(3100 * time.Millisecond)
+		defer timer.Stop()
+		select {
+		case <-timer.C:
+			return 3100, nil
+		case <-ctx.Done():
+			return 0, ctx.Err()
+		}
+	}
+	healthy, err := probeRuntimeEgress(context.Background(), C.TCPTimeout, neverInterrupted, "proxy", lookup, probe)
+	if !healthy || err != nil {
+		t.Fatalf("slow protected egress was rejected: healthy=%v err=%v", healthy, err)
+	}
+	if _, err = probeRuntimeEgress(context.Background(), C.TCPTimeout+time.Millisecond, neverInterrupted, "proxy", lookup, probe); err == nil {
+		t.Fatal("runtime egress accepted a budget beyond the startup limit")
+	}
+	blocked := func(ctx context.Context, _ adapter.Outbound) (uint16, error) {
+		<-ctx.Done()
+		return 0, ctx.Err()
+	}
+	var cancelled atomic.Bool
+	timer := time.AfterFunc(30*time.Millisecond, func() { cancelled.Store(true) })
+	defer timer.Stop()
+	if healthy, err = probeRuntimeEgress(context.Background(), C.TCPTimeout, cancelled.Load, "proxy", lookup, blocked); healthy || !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled egress was not stopped: healthy=%v err=%v", healthy, err)
+	}
+	if healthy, err = probeRuntimeEgress(context.Background(), 30*time.Millisecond, neverInterrupted, "proxy", lookup, blocked); healthy || !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("unreachable egress did not time out: healthy=%v err=%v", healthy, err)
+	}
+}
