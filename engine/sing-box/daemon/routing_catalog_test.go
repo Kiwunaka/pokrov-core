@@ -4,7 +4,13 @@ package daemon
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
+	"math/big"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -18,6 +24,7 @@ import (
 	"github.com/sagernet/sing-box/protocol/pokrov/atslease"
 	"github.com/sagernet/sing-box/protocol/pokrov/dnstt"
 	"github.com/sagernet/sing-box/protocol/pokrov/localdpi"
+	"github.com/sagernet/sing-box/protocol/pokrov/slipstream"
 	"github.com/sagernet/sing-box/protocol/pokrov/telegramws"
 	"github.com/sagernet/sing-box/protocol/socks"
 	"github.com/sagernet/sing-box/protocol/vless"
@@ -157,10 +164,21 @@ func TestLocalDpiATSFallbackKeepsLeaseRevocation(t *testing.T) {
 	localdpi.RegisterOutbound(registry)
 	atslease.RegisterOutbound(registry)
 	dnstt.RegisterOutbound(registry)
+	slipstream.RegisterOutbound(registry)
 	vless.RegisterOutbound(registry)
 	direct.RegisterOutbound(registry)
 	ctx := service.ContextWith[adapter.OutboundRegistry](context.Background(), registry)
 	ctx = service.ContextWith[option.OutboundOptionsRegistry](ctx, registry)
+	ctx = service.ContextWith[slipstream.ExecutablePath](ctx, slipstream.ExecutablePath(filepath.Join(t.TempDir(), "slipstream-client")))
+	public, private, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	certificate := &x509.Certificate{SerialNumber: big.NewInt(1)}
+	der, err := x509.CreateCertificate(rand.Reader, certificate, certificate, public, private)
+	if err != nil {
+		t.Fatal(err)
+	}
 	s := NewStartedService(ServiceOptions{Context: ctx, LogMaxLines: 1})
 	t.Cleanup(func() { _ = s.Close() })
 	options := option.Options{Log: &option.LogOptions{Disabled: true}, Outbounds: []option.Outbound{
@@ -192,9 +210,22 @@ func TestLocalDpiATSFallbackKeepsLeaseRevocation(t *testing.T) {
 			ServerOptions: option.ServerOptions{Server: "127.0.0.1", ServerPort: 1},
 			ServiceID:     "test-raw", VPNOutbound: "dns-tunnel",
 		}},
+		{Type: C.TypeVLESS, Tag: "slip-vpn", Options: &option.VLESSOutboundOptions{
+			DialerOptions: option.DialerOptions{Detour: "slip-tunnel"},
+			ServerOptions: option.ServerOptions{Server: "127.0.0.1", ServerPort: 12543},
+			UUID:          "00000000-0000-4000-8000-000000000001", Network: "tcp",
+		}},
+		{Type: C.TypeSlipstream, Tag: "slip-tunnel", Options: &option.SlipstreamOptions{
+			Domain: "s.example.test", Certificate: string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})),
+			Resolvers: []string{"192.0.2.1:53"}, Network: "tcp",
+		}},
+		{Type: localdpi.Type, Tag: "local-raw-slipstream", Options: &option.PokrovLocalDPIOutboundOptions{
+			ServerOptions: option.ServerOptions{Server: "127.0.0.1", ServerPort: 1},
+			ServiceID:     "test-raw-slipstream", VPNOutbound: "slip-tunnel",
+		}},
 	}, Route: &option.RouteOptions{Final: "vpn"}}
 	now := time.Now().UTC()
-	for _, upstream := range []string{"vpn", "direct", "unsafe", "dns-vpn"} {
+	for _, upstream := range []string{"vpn", "direct", "unsafe", "dns-vpn", "slip-vpn"} {
 		options.Outbounds = append(options.Outbounds,
 			option.Outbound{Type: atslease.Type, Tag: "lease-" + upstream, Options: &option.PokrovATSLeaseOutboundOptions{
 				UpstreamTag: upstream, LeaseID: "lease_0123456789abcdef0123456789abcdef",
@@ -232,6 +263,12 @@ func TestLocalDpiATSFallbackKeepsLeaseRevocation(t *testing.T) {
 	if err := localDpiFixtureOutbound(t, s, "local-raw-dnstt").Start(); err == nil {
 		t.Fatal("local DPI admitted a raw DNSTT transport as an exit")
 	}
+	if err := localDpiFixtureOutbound(t, s, "local-slip-vpn").Start(); err != nil {
+		t.Fatal("local DPI rejected the typed VLESS/Slipstream dependency")
+	}
+	if err := localDpiFixtureOutbound(t, s, "local-raw-slipstream").Start(); err == nil {
+		t.Fatal("local DPI admitted a raw Slipstream transport as an exit")
+	}
 	lease.Revoke(true)
 	conn, err := local.DialContext(context.Background(), "tcp", M.ParseSocksaddr("127.0.0.1:1"))
 	if conn != nil {
@@ -254,7 +291,7 @@ func TestLocalDpiWithdrawalPreservesOtherAdmissionAndCatalog(t *testing.T) {
 	}
 	encoded, err := s.ReadLocalDpiObservation(idA)
 	var observation localdpi.Observation
-	if err != nil || json.Unmarshal([]byte(encoded), &observation) != nil || observation != (localdpi.Observation{State: "unpublished"}) {
+	if err != nil || json.Unmarshal([]byte(encoded), &observation) != nil || observation != (localdpi.Observation{State: "unpublished", FailureReason: "none"}) {
 		t.Fatal("fresh holder observation unavailable")
 	}
 	for _, id := range []string{idA, b.AdmissionID()} {
@@ -270,7 +307,7 @@ func TestLocalDpiWithdrawalPreservesOtherAdmissionAndCatalog(t *testing.T) {
 		t.Fatal("withdrawn admission reopened")
 	}
 	encoded, err = s.ReadLocalDpiObservation(idA)
-	if err != nil || json.Unmarshal([]byte(encoded), &observation) != nil || observation != (localdpi.Observation{State: "withdrawn", WithdrawCompleted: true}) {
+	if err != nil || json.Unmarshal([]byte(encoded), &observation) != nil || observation != (localdpi.Observation{State: "withdrawn", WithdrawCompleted: true, FailureReason: "none"}) {
 		t.Fatal("current withdrawn holder observation unavailable")
 	}
 	if current, found := s.instance.instance.Outbound().Outbound("vpn"); !found || current != vpn {
@@ -303,7 +340,7 @@ func TestLocalDpiWithdrawalPreservesOtherAdmissionAndCatalog(t *testing.T) {
 		t.Fatal("same-profile successor reused its admission ID")
 	}
 	encoded, err = s.ReadLocalDpiObservation(nextID)
-	if err != nil || json.Unmarshal([]byte(encoded), &observation) != nil || observation != (localdpi.Observation{State: "unpublished"}) {
+	if err != nil || json.Unmarshal([]byte(encoded), &observation) != nil || observation != (localdpi.Observation{State: "unpublished", FailureReason: "none"}) {
 		t.Fatal("successor inherited old holder observation")
 	}
 	s.serviceStatus.Status = ServiceStatus_IDLE

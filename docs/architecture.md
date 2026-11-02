@@ -33,7 +33,9 @@ neither destination framing nor account authorization. Content DNS must use TCP
 through that VLESS leaf. Android requires an executable native CLI packaged as
 `nativeLibraryDir/libslipstream.so`; a JNI shared library is a different artifact.
 The existing Windows LocalDPI and Telegram WS fallback guards accept only this
-fixed VLESS graph; Telegram preparation binds the exact certificate, zone and
+fixed VLESS graph; LocalDPI runtime startup also recognizes its constructed
+Slipstream carrier, including behind an ATS lease, while raw carriers remain
+ineligible as exits. Telegram preparation binds the exact certificate, zone and
 resolver in its existing one-use fallback snapshot.
 No selected runtime artifact or server endpoint is implied by this source support.
 

@@ -21,6 +21,7 @@ import (
 	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing-box/protocol/pokrov/atslease"
 	"github.com/sagernet/sing-box/protocol/pokrov/dnstt"
+	"github.com/sagernet/sing-box/protocol/pokrov/slipstream"
 	M "github.com/sagernet/sing/common/metadata"
 	N "github.com/sagernet/sing/common/network"
 	"github.com/sagernet/sing/protocol/socks"
@@ -264,11 +265,12 @@ func protectedFallback(manager adapter.OutboundManager, target adapter.Outbound,
 	}
 	for _, tag := range target.Dependencies() {
 		child, found := manager.Outbound(tag)
-		// The native preparation checks the exact VLESS/DNSTT options. Here
+		// The native preparation checks the exact VLESS/DNS carrier options. Here
 		// require the constructed carrier as that leaf's dependency; a group
-		// containing a standalone raw DNSTT transport remains forbidden.
+		// containing a standalone raw DNS transport remains forbidden.
 		if found && target.Type() == C.TypeVLESS {
-			if _, valid := child.(*dnstt.Outbound); valid {
+			switch child.(type) {
+			case *dnstt.Outbound, *slipstream.Outbound:
 				continue
 			}
 		}
