@@ -65,8 +65,14 @@ $expectedAbis = if ($Arm64Only) { @("arm64-v8a") } else { @("armeabi-v7a", "arm6
 if ($SlipstreamNativeDirectory) {
   $SlipstreamNativeDirectory = [IO.Path]::GetFullPath($SlipstreamNativeDirectory)
   foreach ($abi in $expectedAbis) {
-    if (-not (Test-Path -LiteralPath (Join-Path $SlipstreamNativeDirectory "$abi/libslipstream.so") -PathType Leaf)) {
+    $nativePath = Join-Path $SlipstreamNativeDirectory "$abi/libslipstream.so"
+    if (-not (Test-Path -LiteralPath $nativePath -PathType Leaf)) {
       throw "Slipstream native CLI is missing $abi/libslipstream.so."
+    }
+    $nativePin = $release.engine.slipstream.android.$abi
+    if ((Get-Item -LiteralPath $nativePath).Length -ne $nativePin.size -or
+        (Get-FileHash -Algorithm SHA256 -LiteralPath $nativePath).Hash -ne $nativePin.sha256) {
+      throw "Slipstream $abi native client does not match config/release.json."
     }
   }
 }
@@ -188,6 +194,13 @@ if ($SlipstreamNativeDirectory) {
     foreach ($abi in $expectedAbis) {
       [IO.Compression.ZipFileExtensions]::CreateEntryFromFile($archive,
         (Join-Path $SlipstreamNativeDirectory "$abi/libslipstream.so"), "jni/$abi/libslipstream.so") | Out-Null
+      $stream = $archive.GetEntry("jni/$abi/libslipstream.so").Open()
+      try {
+        $nativeHash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($stream))
+        if ($nativeHash -ne $release.engine.slipstream.android.$abi.sha256) {
+          throw "Packaged Slipstream $abi native client does not match config/release.json."
+        }
+      } finally { $stream.Dispose() }
     }
     [IO.Compression.ZipFileExtensions]::CreateEntryFromFile($archive,
       (Join-Path $root 'third_party/slipstream/LICENSE'), 'META-INF/licenses/slipstream/LICENSE') | Out-Null

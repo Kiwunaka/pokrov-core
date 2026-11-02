@@ -44,6 +44,10 @@ import (
 
 var _ ConfigCompat = (*RealityClientConfig)(nil)
 
+// Wire layout follows the audited Xray v26.6.27 REALITY client, rather than
+// tracking the server's minClientVer or claiming a newer untested protocol.
+var realityClientVersion = [3]byte{26, 6, 27}
+
 type RealityClientConfig struct {
 	ctx       context.Context
 	uClient   *UTLSClientConfig
@@ -155,6 +159,20 @@ func (e *RealityClientConfig) ClientHandshake(ctx context.Context, conn net.Conn
 	if err := uConn.BuildHandshakeState(); err != nil {
 		return nil, err
 	}
+	hybridShare := false
+	for _, share := range uConn.HandshakeState.Hello.KeyShares {
+		if share.Group == utls.X25519 {
+			break
+		}
+		if share.Group == utls.X25519MLKEM768 {
+			hybridShare = true
+			break
+		}
+	}
+	if !hybridShare || uConn.HandshakeState.State13.KeyShareKeys == nil ||
+		uConn.HandshakeState.State13.KeyShareKeys.MlkemEcdhe == nil {
+		return nil, E.New("REALITY fingerprint requires an X25519MLKEM768 key share")
+	}
 	if len(uConfig.NextProtos) > 0 {
 		for _, extension := range uConn.Extensions {
 			if alpnExtension, isALPN := extension.(*utls.ALPNExtension); isALPN {
@@ -174,12 +192,8 @@ func (e *RealityClientConfig) ClientHandshake(ctx context.Context, conn net.Conn
 	} else {
 		nowTime = time.Now()
 	}
-	binary.BigEndian.PutUint64(hello.SessionId, uint64(nowTime.Unix()))
-
-	hello.SessionId[0] = 26
-	hello.SessionId[1] = 3
-	hello.SessionId[2] = 27
-	binary.BigEndian.PutUint32(hello.SessionId[4:], uint32(time.Now().Unix()))
+	copy(hello.SessionId, realityClientVersion[:])
+	binary.BigEndian.PutUint32(hello.SessionId[4:], uint32(nowTime.Unix()))
 	copy(hello.SessionId[8:], e.shortID[:])
 	if debug.Enabled {
 		fmt.Printf("REALITY hello.sessionId[:16]: %v\n", hello.SessionId[:16])

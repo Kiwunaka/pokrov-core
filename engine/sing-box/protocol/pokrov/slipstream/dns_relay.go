@@ -11,24 +11,32 @@ import (
 type dnsRelay struct {
 	local    *net.UDPConn
 	remote   net.Conn
+	auth     localAuth
 	peer     netip.AddrPort
 	peerLock sync.Mutex
+	queries  replayWindow
 	once     sync.Once
 	wait     sync.WaitGroup
 	done     chan struct{}
 }
 
-func newDNSRelay(remote net.Conn) (*dnsRelay, error) {
+func newDNSRelay(remote net.Conn, auth localAuth) (*dnsRelay, error) {
 	local, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
 	if err != nil {
 		remote.Close()
 		return nil, err
 	}
-	r := &dnsRelay{local: local, remote: remote, done: make(chan struct{})}
+	r := &dnsRelay{local: local, remote: remote, auth: auth, done: make(chan struct{})}
 	r.wait.Add(2)
 	go r.forwardQueries()
 	go r.forwardReplies()
 	return r, nil
+}
+
+func (r *dnsRelay) setPeer(peer netip.AddrPort) {
+	r.peerLock.Lock()
+	r.peer = peer
+	r.peerLock.Unlock()
 }
 
 func (r *dnsRelay) stop() {
@@ -53,14 +61,15 @@ func (r *dnsRelay) forwardQueries() {
 		if err != nil {
 			return
 		}
-		r.peerLock.Lock()
-		if !r.peer.IsValid() {
-			r.peer = peer
+		payload, sequence, valid := r.auth.openDNS(dnsQuery, packet[:n])
+		if !valid {
+			continue
 		}
-		accepted := r.peer == peer
+		r.peerLock.Lock()
+		accepted := r.peer == peer && r.queries.accept(sequence)
 		r.peerLock.Unlock()
 		if accepted {
-			if _, err = r.remote.Write(packet[:n]); err != nil {
+			if _, err = r.remote.Write(payload); err != nil {
 				return
 			}
 		}
@@ -70,7 +79,8 @@ func (r *dnsRelay) forwardQueries() {
 func (r *dnsRelay) forwardReplies() {
 	defer r.wait.Done()
 	defer r.stop()
-	packet := make([]byte, 65535)
+	packet := make([]byte, 65507-dnsFrameSize)
+	var sequence uint64
 	for {
 		n, err := r.remote.Read(packet)
 		if err != nil {
@@ -80,7 +90,8 @@ func (r *dnsRelay) forwardReplies() {
 		peer := r.peer
 		r.peerLock.Unlock()
 		if peer.IsValid() {
-			if _, err = r.local.WriteToUDPAddrPort(packet[:n], peer); err != nil {
+			sequence++
+			if _, err = r.local.WriteToUDPAddrPort(r.auth.sealDNS(dnsReply, sequence, packet[:n]), peer); err != nil {
 				return
 			}
 		}

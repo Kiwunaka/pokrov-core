@@ -1,5 +1,6 @@
 param(
-  [string]$GoExecutable = "go"
+  [string]$GoExecutable = "go",
+  [string]$GovulncheckExecutable
 )
 
 $ErrorActionPreference = "Stop"
@@ -24,7 +25,7 @@ $previousToolchain = $env:GOTOOLCHAIN
 $clientTags = @(
   "pokrov_client", "with_gvisor", "with_quic", "with_wireguard", "with_utls",
   "with_clash_api", "with_grpc", "with_awg", "tfogo_checklinkname0",
-  "with_naive_outbound", "with_conntrack", "with_purego"
+  "with_naive_outbound", "with_conntrack", "with_purego", "with_slipstream"
 ) -join ","
 try {
   $env:GOTOOLCHAIN = "local"
@@ -63,11 +64,20 @@ try {
     Pop-Location
   }
 
-  Push-Location (Join-Path $root "engine\sing-box")
+  Push-Location $root
   try {
-    & $goCommand.Source test -count=1 -tags with_awg,with_utls,with_quic . ./protocol/awg ./common/tls ./common/urltest ./daemon ./experimental/libbox ./dns ./protocol/pokrov/dnstt ./protocol/pokrov/slipstream ./protocol/group ./transport/v2rayxhttp
+    $engine = "github.com/sagernet/sing-box"
+    & $goCommand.Source test -count=1 -ldflags=-checklinkname=0 -tags $clientTags $engine "$engine/protocol/awg" "$engine/common/tls" "$engine/common/urltest" "$engine/daemon" "$engine/experimental/libbox" "$engine/dns" "$engine/protocol/pokrov/dnstt" "$engine/protocol/pokrov/slipstream" "$engine/protocol/group" "$engine/transport/v2rayxhttp"
     if ($LASTEXITCODE -ne 0) {
       throw "Engine tests failed."
+    }
+    if ($GovulncheckExecutable) {
+      $previousPath = $env:PATH
+      try {
+        $env:PATH = (Split-Path -Parent $goCommand.Source) + [IO.Path]::PathSeparator + $env:PATH
+        & $GovulncheckExecutable -scan=package -tags $clientTags ./...
+        if ($LASTEXITCODE -ne 0) { throw "Core package vulnerability scan failed." }
+      } finally { $env:PATH = $previousPath }
     }
   } finally {
     Pop-Location

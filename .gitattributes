@@ -9,4 +9,5 @@
 *.yml text eol=lf
 *.yaml text eol=lf
 *.ps1 text eol=crlf
+third_party/slipstream/pokrov-local-io.patch text eol=lf whitespace=-blank-at-eol
 engine/sing-box/replace/sing-tun/LICENSE-WINTUN-BINARIES.txt -text whitespace=cr-at-eol

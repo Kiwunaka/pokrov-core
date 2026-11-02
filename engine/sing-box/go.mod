@@ -12,7 +12,7 @@ require (
 	github.com/cretz/bine v0.2.0
 	github.com/database64128/tfo-go/v2 v2.3.3
 	github.com/enfein/mieru/v3 v3.27.0
-	github.com/go-chi/chi/v5 v5.2.5
+	github.com/go-chi/chi/v5 v5.3.0
 	github.com/go-chi/render v1.0.3
 	github.com/godbus/dbus/v5 v5.2.2
 	github.com/gofrs/uuid/v5 v5.5.1
@@ -55,11 +55,11 @@ require (
 	github.com/vishvananda/netns v0.0.5
 	go.uber.org/zap v1.27.1
 	go4.org/netipx v0.0.0-20231129151722-fdeea329fbba
-	golang.org/x/crypto v0.56.0
+	golang.org/x/crypto v0.57.0
 	golang.org/x/exp v0.0.0-20260410095643-746e56fc9e2f
-	golang.org/x/mod v0.38.0
-	golang.org/x/net v0.58.0
-	golang.org/x/sys v0.47.0
+	golang.org/x/mod v0.41.0
+	golang.org/x/net v0.60.0
+	golang.org/x/sys v0.48.0
 	golang.zx2c4.com/wireguard/wgctrl v0.0.0-20241231184526-a9ab2273dd10
 	google.golang.org/grpc v1.83.2
 	google.golang.org/protobuf v1.36.11
@@ -74,9 +74,9 @@ require (
 	github.com/pires/go-proxyproto v0.8.1
 	github.com/tidwall/match v1.1.1 // indirect
 	github.com/tidwall/pretty v1.2.1 // indirect
-	golang.org/x/sync v0.22.0
-	golang.org/x/text v0.41.0
-	golang.org/x/tools v0.48.0 // indirect
+	golang.org/x/sync v0.23.0
+	golang.org/x/text v0.42.0
+	golang.org/x/tools v0.49.0 // indirect
 )
 
 //replace github.com/sagernet/sing => ../sing
@@ -269,7 +269,7 @@ require (
 	go.uber.org/zap/exp v0.3.0 // indirect
 	go4.org/mem v0.0.0-20240501181205-ae6ca9944745 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
-	golang.org/x/term v0.45.0 // indirect
+	golang.org/x/term v0.46.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
 	golang.zx2c4.com/wintun v0.0.0-20230126152724-0fa3db229ce2 // indirect
 	golang.zx2c4.com/wireguard v0.0.0-20231211153847-12269c276173 // indirect

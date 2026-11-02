@@ -10,6 +10,7 @@
   "android_package": "space.pokrov.core",
   "engine": {
     "sing_box": "1.14.2",
+    "sing_box_revision": "af6e64c3b69e6132ebaee0e1a3d24e93903f6709",
     "sing": "0.9.6-0.20260922013354-87c33f17688f",
     "gomobile": "0.1.12",
     "android_ndk": "29.0.14206865",
@@ -20,7 +21,25 @@
       "license": "Apache-2.0",
       "windows_amd64_asset": "slipstream-windows-x86_64.zip",
       "android_min_api": 23,
-      "android_features": "openssl-vendored,picoquic-minimal-build"
+      "android_features": "openssl-vendored,picoquic-minimal-build",
+      "windows_amd64": {
+        "size": 5694464,
+        "sha256": "318b8fe2b65b03c7aa4ff302856c8312f88b27a2452eb54ef519546387bf7f3a"
+      },
+      "android": {
+        "armeabi-v7a": {
+          "size": 4139688,
+          "sha256": "d1d5d4fde3db6842d97d0ed927d4d2e98b6694e72de8f167051a3b6ee56e7186"
+        },
+        "arm64-v8a": {
+          "size": 6152200,
+          "sha256": "08ba529ec58b7aabadb0812b47cddee76c55c2052230e125a05b11b2844bda49"
+        },
+        "x86_64": {
+          "size": 6793312,
+          "sha256": "3769f73b6a1be545be2f120af6449dd6ecae64335464358af89f3e55f36dbfee"
+        }
+      }
     },
     "cronet_distribution": "caller_supplied_sha256_pinned_binary",
     "cronet_windows_amd64": {

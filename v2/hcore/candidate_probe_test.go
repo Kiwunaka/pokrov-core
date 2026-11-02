@@ -3,11 +3,20 @@ package hcore
 import (
 	"bufio"
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"io"
+	"math/big"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
@@ -15,12 +24,138 @@ import (
 
 	coreconfig "github.com/Kiwunaka/POKROV-core/v2/config"
 	box "github.com/sagernet/sing-box"
+	"github.com/sagernet/sing-box/adapter"
+	"github.com/sagernet/sing-box/adapter/outbound"
 	"github.com/sagernet/sing-box/common/urltest"
 	"github.com/sagernet/sing-box/experimental/libbox"
+	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
 	M "github.com/sagernet/sing/common/metadata"
+	"github.com/sagernet/sing/service"
 	"github.com/sagernet/sing/service/filemanager"
 )
+
+type candidateProbeTestOutbound struct {
+	outbound.Adapter
+	address string
+	close   func()
+}
+
+func (p *candidateProbeTestOutbound) DialContext(ctx context.Context, network string, destination M.Socksaddr) (net.Conn, error) {
+	return (&net.Dialer{}).DialContext(ctx, network, p.address)
+}
+
+func (*candidateProbeTestOutbound) ListenPacket(context.Context, M.Socksaddr) (net.PacketConn, error) {
+	return nil, net.ErrClosed
+}
+
+func (p *candidateProbeTestOutbound) Close() error {
+	p.close()
+	return nil
+}
+
+// Use a real Box and certificate store from the shipped root module graph.
+// Only the outbound's wire destination and slow Close are local fixtures.
+func candidateProbeFixture(t *testing.T, closeOutbound func()) (context.Context, string) {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	certificate := &x509.Certificate{SerialNumber: big.NewInt(1),
+		Subject:   pkix.Name{CommonName: "candidate probe fixture"},
+		DNSNames:  []string{"api.pokrov.space", "pokrov.space"},
+		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour),
+		KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}
+	der, err := x509.CreateCertificate(rand.Reader, certificate, certificate, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Pokrov-Egress-Probe", candidateProbeMarker)
+		if strings.Contains(r.URL.Path, "64k") {
+			w.Header().Set("Content-Length", fmt.Sprint(candidatePayloadBytes))
+			w.Write(make([]byte, candidatePayloadBytes))
+		} else {
+			w.WriteHeader(http.StatusNoContent)
+		}
+	}))
+	server.TLS = &tls.Config{Certificates: []tls.Certificate{{Certificate: [][]byte{der}, PrivateKey: key}}}
+	server.StartTLS()
+	t.Cleanup(server.Close)
+	registry := outbound.NewRegistry()
+	outbound.Register[struct{}](registry, "probe-fixture", func(_ context.Context, _ adapter.Router, _ log.ContextLogger, tag string, _ struct{}) (adapter.Outbound, error) {
+		return &candidateProbeTestOutbound{outbound.NewAdapter("probe-fixture", tag, []string{"tcp"}, nil), server.Listener.Addr().String(), closeOutbound}, nil
+	})
+	ctx := libbox.BaseContext(nil)
+	ctx = service.ContextWith[adapter.OutboundRegistry](ctx, registry)
+	ctx = service.ContextWith[option.OutboundOptionsRegistry](ctx, registry)
+	profile, err := json.Marshal(map[string]any{
+		"certificate": map[string]any{"store": "none", "certificate": []string{string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}))}},
+		"outbounds":   []map[string]any{{"type": "probe-fixture", "tag": "candidate"}}, "route": map[string]any{"final": "candidate"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ctx, string(profile)
+}
+
+func TestCandidateProbeFreezesHTTPVerdictBeforeClose(t *testing.T) {
+	closing, release := make(chan struct{}), make(chan struct{})
+	ctx, profile := candidateProbeFixture(t, func() { close(closing); <-release })
+	result := make(chan CandidateProbeResult, 1)
+	started := time.Now()
+	go func() { result <- probeCandidate(ctx, profile, "slow-close", time.Second, "", nil, nil) }()
+	select {
+	case <-closing:
+	case <-time.After(3 * time.Second):
+		close(release)
+		t.Fatal("probe did not complete HTTP")
+	}
+	// Cancellation cannot wait for an unrelated component's 10-second Close.
+	cancelled := make(chan struct{})
+	go func() { CancelCandidateProbe("slow-close"); close(cancelled) }()
+	select {
+	case <-cancelled:
+	case <-time.After(250 * time.Millisecond):
+		close(release)
+		t.Fatal("cancellation waited for instance Close")
+	}
+	// The deadline also expires while Close is in flight.
+	<-time.After(time.Until(started.Add(time.Second + 20*time.Millisecond)))
+	close(release)
+	got := <-result
+	if !got.Success || got.FailureKind != "" || got.DurationMS >= 1000 {
+		t.Fatalf("shutdown changed an already completed probe: %+v", got)
+	}
+}
+
+func TestCandidateProbeKeepsCertificateFailureDuringClose(t *testing.T) {
+	closing, release := make(chan struct{}), make(chan struct{})
+	ctx, profile := candidateProbeFixture(t, func() { close(closing); <-release })
+	var raw map[string]any
+	if err := json.Unmarshal([]byte(profile), &raw); err != nil {
+		t.Fatal(err)
+	}
+	raw["certificate"] = map[string]any{"store": "none"}
+	encoded, _ := json.Marshal(raw)
+	result := make(chan CandidateProbeResult, 1)
+	go func() {
+		result <- probeCandidate(ctx, string(encoded), "certificate-failure", time.Second, "", nil, nil)
+	}()
+	select {
+	case <-closing:
+	case <-time.After(3 * time.Second):
+		close(release)
+		t.Fatal("certificate failure did not complete")
+	}
+	CancelCandidateProbe("certificate-failure")
+	close(release)
+	got := <-result
+	if got.Success || got.FailureKind != "tls_failed" || got.ProbeError == nil || got.ProbeError.Cause != "tls_certificate" {
+		t.Fatalf("cancellation erased the certificate failure: %+v", got)
+	}
+}
 
 func TestCandidateProbeRetainsPrimaryBeforeReserveCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())

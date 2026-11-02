@@ -1,0 +1,632 @@
+diff --git a/crates/slipstream-client/src/dns/poll.rs b/crates/slipstream-client/src/dns/poll.rs
+index 22ffeb8..939e685 100644
+--- a/crates/slipstream-client/src/dns/poll.rs
++++ b/crates/slipstream-client/src/dns/poll.rs
+@@ -1,4 +1,5 @@
+ use crate::error::ClientError;
++use crate::local_io::DnsSocket;
+ use slipstream_core::net::is_transient_udp_error;
+ use slipstream_dns::{build_qname, encode_query, QueryParams, CLASS_IN, RR_TXT};
+ use slipstream_ffi::picoquic::{
+@@ -6,7 +7,6 @@ use slipstream_ffi::picoquic::{
+ };
+ use slipstream_ffi::{ClientConfig, ResolverMode};
+ use std::collections::HashMap;
+-use tokio::net::UdpSocket as TokioUdpSocket;
+ 
+ use super::path::refresh_resolver_path;
+ use super::resolver::{sockaddr_storage_to_socket_addr, PeerAddrMode, ResolverState};
+@@ -32,7 +32,7 @@ pub(crate) fn expire_inflight_polls(inflight_poll_ids: &mut HashMap<u16, u64>, n
+ #[allow(clippy::too_many_arguments)]
+ pub(crate) async fn send_poll_queries(
+     cnx: *mut picoquic_cnx_t,
+-    udp: &TokioUdpSocket,
++    udp: &DnsSocket,
+     config: &ClientConfig<'_>,
+     local_addr_storage: &mut slipstream_ffi::SockaddrStorage,
+     dns_id: &mut u16,
+diff --git a/crates/slipstream-client/src/local_io.rs b/crates/slipstream-client/src/local_io.rs
+new file mode 100644
+index 0000000..6dcd4a8
+--- /dev/null
++++ b/crates/slipstream-client/src/local_io.rs
+@@ -0,0 +1,348 @@
++//! POKROV's parent/child-only local transport. The remote DNS/QUIC protocol is unchanged.
++use openssl::{hash::MessageDigest, memcmp, pkey::PKey, rand::rand_bytes, sign::Signer};
++use std::io::{self, Read, Write};
++use std::net::SocketAddr;
++use std::sync::atomic::{AtomicU64, Ordering};
++use std::sync::{mpsc, Arc, Mutex};
++use std::time::Duration;
++use tokio::io::{AsyncReadExt, AsyncWriteExt};
++use tokio::net::{TcpStream, UdpSocket};
++
++const FRAME_SIZE: usize = 64;
++const CHILD: &[u8] = b"pokrov/slipstream/local/v1/tcp/child\0";
++const PARENT: &[u8] = b"pokrov/slipstream/local/v1/tcp/parent\0";
++const QUERY: &[u8] = b"pokrov/slipstream/local/v1/dns/query\0";
++const REPLY: &[u8] = b"pokrov/slipstream/local/v1/dns/reply\0";
++
++fn auth_error() -> io::Error {
++    io::Error::new(
++        io::ErrorKind::PermissionDenied,
++        "local authentication failed",
++    )
++}
++
++pub(crate) struct LocalAuth {
++    key: [u8; 32],
++    generation: [u8; 16],
++}
++
++impl LocalAuth {
++    pub(crate) fn read_bootstrap() -> io::Result<Arc<Self>> {
++        // Bound a malformed launch even if stdin never supplies a bootstrap.
++        let (tx, rx) = mpsc::sync_channel(1);
++        std::thread::spawn(move || {
++            let mut message = [0u8; 56];
++            let result = io::stdin().read_exact(&mut message).map(|_| message);
++            let _ = tx.send(result);
++        });
++        let message = rx
++            .recv_timeout(Duration::from_secs(5))
++            .map_err(|_| auth_error())??;
++        if &message[..8] != b"PKRVIPC1" {
++            return Err(auth_error());
++        }
++        let mut auth = Self {
++            key: [0; 32],
++            generation: [0; 16],
++        };
++        auth.key.copy_from_slice(&message[8..40]);
++        auth.generation.copy_from_slice(&message[40..]);
++        Ok(Arc::new(auth))
++    }
++
++    fn mac(&self, domain: &[u8], parts: &[&[u8]]) -> io::Result<Vec<u8>> {
++        let key = PKey::hmac(&self.key).map_err(|_| auth_error())?;
++        let mut signer = Signer::new(MessageDigest::sha256(), &key).map_err(|_| auth_error())?;
++        signer.update(domain).map_err(|_| auth_error())?;
++        signer.update(&self.generation).map_err(|_| auth_error())?;
++        for part in parts {
++            signer.update(part).map_err(|_| auth_error())?;
++        }
++        signer.sign_to_vec().map_err(|_| auth_error())
++    }
++
++    pub(crate) fn report_ready(&self, tcp_port: u16, udp_port: u16) -> io::Result<()> {
++        let mut message = Vec::from(&b"PKRVRDY1"[..]);
++        message.extend_from_slice(&self.generation);
++        message.extend_from_slice(&tcp_port.to_be_bytes());
++        message.extend_from_slice(&udp_port.to_be_bytes());
++        let mut output = io::stdout().lock();
++        output.write_all(&message)?;
++        output.flush()
++    }
++
++    pub(crate) async fn authenticate(&self, stream: &mut TcpStream) -> io::Result<()> {
++        let mut hello = [0u8; 56];
++        stream.read_exact(&mut hello).await?;
++        if &hello[..8] != b"PKRVTCP1" || hello[8..24] != self.generation {
++            return Err(auth_error());
++        }
++        let parent_nonce = &hello[24..];
++        let mut child_nonce = [0u8; 32];
++        rand_bytes(&mut child_nonce).map_err(|_| auth_error())?;
++        let proof = self.mac(CHILD, &[parent_nonce, &child_nonce])?;
++        stream.write_all(&child_nonce).await?;
++        stream.write_all(&proof).await?;
++        let mut proof = [0u8; 32];
++        stream.read_exact(&mut proof).await?;
++        if !memcmp::eq(&proof, &self.mac(PARENT, &[parent_nonce, &child_nonce])?) {
++            return Err(auth_error());
++        }
++        Ok(())
++    }
++
++    fn seal(&self, sequence: u64, payload: &[u8]) -> io::Result<Vec<u8>> {
++        let mut frame = Vec::with_capacity(payload.len() + FRAME_SIZE);
++        frame.extend_from_slice(b"PKRVDNS1");
++        frame.extend_from_slice(&self.generation);
++        frame.extend_from_slice(&sequence.to_be_bytes());
++        frame.extend_from_slice(payload);
++        frame.extend_from_slice(&self.mac(QUERY, &[&frame])?);
++        Ok(frame)
++    }
++
++    fn open<'a>(&self, frame: &'a [u8]) -> io::Result<Option<(&'a [u8], u64)>> {
++        if frame.len() <= FRAME_SIZE
++            || &frame[..8] != b"PKRVDNS1"
++            || frame[8..24] != self.generation
++        {
++            return Ok(None);
++        }
++        let end = frame.len() - 32;
++        if !memcmp::eq(&frame[end..], &self.mac(REPLY, &[&frame[..end]])?) {
++            return Ok(None);
++        }
++        let sequence = u64::from_be_bytes(frame[24..32].try_into().map_err(|_| auth_error())?);
++        Ok(Some((&frame[32..end], sequence)))
++    }
++}
++
++#[derive(Default)]
++struct ReplayWindow {
++    highest: u64,
++    bitmap: u64,
++}
++
++impl ReplayWindow {
++    fn accept(&mut self, sequence: u64) -> bool {
++        if sequence == 0 {
++            return false;
++        }
++        if sequence > self.highest {
++            let shift = sequence - self.highest;
++            self.bitmap = self
++                .bitmap
++                .checked_shl(shift.try_into().unwrap_or(u32::MAX))
++                .unwrap_or(0)
++                | 1;
++            self.highest = sequence;
++            return true;
++        }
++        let distance = self.highest - sequence;
++        if distance >= 64 || self.bitmap & (1u64 << distance) != 0 {
++            return false;
++        }
++        self.bitmap |= 1u64 << distance;
++        true
++    }
++}
++
++// Keep the existing DNS loop and codec intact; authenticate only the local hop.
++pub(crate) struct DnsSocket {
++    socket: UdpSocket,
++    auth: Option<(Arc<LocalAuth>, SocketAddr)>,
++    sequence: AtomicU64,
++    received: Mutex<ReplayWindow>,
++}
++
++impl DnsSocket {
++    pub(crate) fn new(socket: UdpSocket, auth: Option<(Arc<LocalAuth>, SocketAddr)>) -> Self {
++        Self {
++            socket,
++            auth,
++            sequence: AtomicU64::new(0),
++            received: Mutex::new(ReplayWindow::default()),
++        }
++    }
++
++    pub(crate) fn local_addr(&self) -> io::Result<SocketAddr> {
++        self.socket.local_addr()
++    }
++
++    pub(crate) async fn send_to(&self, payload: &[u8], peer: SocketAddr) -> io::Result<usize> {
++        if let Some((auth, expected)) = &self.auth {
++            if peer != *expected {
++                return Err(auth_error());
++            }
++            let sequence = self
++                .sequence
++                .fetch_add(1, Ordering::Relaxed)
++                .wrapping_add(1);
++            if sequence == 0 {
++                return Err(auth_error());
++            }
++            self.socket
++                .send_to(&auth.seal(sequence, payload)?, peer)
++                .await?;
++            Ok(payload.len())
++        } else {
++            self.socket.send_to(payload, peer).await
++        }
++    }
++
++    fn decode(
++        &self,
++        frame: &[u8],
++        peer: SocketAddr,
++        output: &mut [u8],
++    ) -> io::Result<Option<usize>> {
++        let Some((auth, expected)) = &self.auth else {
++            return Err(auth_error());
++        };
++        if peer != *expected {
++            return Ok(None);
++        }
++        let Some((payload, sequence)) = auth.open(frame)? else {
++            return Ok(None);
++        };
++        if !self
++            .received
++            .lock()
++            .map_err(|_| auth_error())?
++            .accept(sequence)
++        {
++            return Ok(None);
++        }
++        output[..payload.len()].copy_from_slice(payload);
++        Ok(Some(payload.len()))
++    }
++
++    pub(crate) async fn recv_from(&self, output: &mut [u8]) -> io::Result<(usize, SocketAddr)> {
++        if self.auth.is_none() {
++            return self.socket.recv_from(output).await;
++        }
++        let mut frame = vec![0u8; output.len() + FRAME_SIZE];
++        loop {
++            let (size, peer) = self.socket.recv_from(&mut frame).await?;
++            if let Some(size) = self.decode(&frame[..size], peer, output)? {
++                return Ok((size, peer));
++            }
++            tokio::task::yield_now().await;
++        }
++    }
++
++    pub(crate) fn try_recv_from(&self, output: &mut [u8]) -> io::Result<(usize, SocketAddr)> {
++        if self.auth.is_none() {
++            return self.socket.try_recv_from(output);
++        }
++        let mut frame = vec![0u8; output.len() + FRAME_SIZE];
++        for _ in 0..64 {
++            let (size, peer) = self.socket.try_recv_from(&mut frame)?;
++            if let Some(size) = self.decode(&frame[..size], peer, output)? {
++                return Ok((size, peer));
++            }
++        }
++        Err(io::ErrorKind::WouldBlock.into())
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn authenticated_peers_release_handshake_slots_before_quic_credit() {
++        let runtime = tokio::runtime::Builder::new_current_thread()
++            .enable_io()
++            .enable_time()
++            .build()
++            .expect("build runtime");
++        runtime.block_on(async {
++            let auth = Arc::new(LocalAuth {
++                key: [1; 32],
++                generation: [2; 16],
++            });
++            let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
++                .await
++                .expect("bind listener");
++            let address = listener.local_addr().expect("listener address");
++            let (commands, mut received) = tokio::sync::mpsc::unbounded_channel();
++            let acceptor = crate::streams::acceptor::ClientAcceptor::new();
++            acceptor.reset(); // No remote QUIC credit is available.
++            acceptor.spawn_authenticated(listener, commands, Arc::clone(&auth));
++            tokio::time::timeout(Duration::from_secs(2), async {
++                let mut streams = Vec::new();
++                for index in 0..33u8 {
++                    let mut stream = TcpStream::connect(address).await.expect("connect parent");
++                    let nonce = [index; 32];
++                    let mut hello = Vec::from(&b"PKRVTCP1"[..]);
++                    hello.extend_from_slice(&auth.generation);
++                    hello.extend_from_slice(&nonce);
++                    stream.write_all(&hello).await.expect("write hello");
++                    let mut proof = [0; 64];
++                    stream
++                        .read_exact(&mut proof)
++                        .await
++                        .expect("read child proof");
++                    assert!(memcmp::eq(
++                        &proof[32..],
++                        &auth
++                            .mac(CHILD, &[&nonce, &proof[..32]])
++                            .expect("child proof")
++                    ));
++                    stream
++                        .write_all(
++                            &auth
++                                .mac(PARENT, &[&nonce, &proof[..32]])
++                                .expect("parent proof"),
++                        )
++                        .await
++                        .expect("authenticate parent");
++                    streams.push(stream);
++                }
++                assert!(
++                    received.try_recv().is_err(),
++                    "authentication bypassed remote stream credit"
++                );
++            })
++            .await
++            .expect("authenticated peers retained the unauthenticated handshake slots");
++        });
++    }
++
++    #[test]
++    fn dns_rejects_other_children_directions_and_replays() {
++        let auth = Arc::new(LocalAuth {
++            key: [1; 32],
++            generation: [2; 16],
++        });
++        let old = LocalAuth {
++            key: [1; 32],
++            generation: [3; 16],
++        };
++        let wrong = LocalAuth {
++            key: [4; 32],
++            generation: [2; 16],
++        };
++        let mut frame = auth.seal(1, b"DNS reply").expect("encode query");
++        assert!(auth.open(&frame).expect("check direction").is_none());
++        let end = frame.len() - 32;
++        let proof = auth.mac(REPLY, &[&frame[..end]]).expect("sign reply");
++        frame[end..].copy_from_slice(&proof);
++        assert_eq!(
++            auth.open(&frame).expect("decode reply"),
++            Some((&b"DNS reply"[..], 1))
++        );
++        assert!(old.open(&frame).expect("check generation").is_none());
++        assert!(wrong.open(&frame).expect("check key").is_none());
++        frame[32] ^= 1;
++        assert!(auth.open(&frame).expect("check payload").is_none());
++        let mut window = ReplayWindow::default();
++        assert!(window.accept(2));
++        assert!(window.accept(1));
++        assert!(!window.accept(2));
++        assert!(!window.accept(0));
++        assert!(window.accept(70));
++        assert!(!window.accept(1));
++    }
++}
+diff --git a/crates/slipstream-client/src/main.rs b/crates/slipstream-client/src/main.rs
+index fce871a..f45b2b7 100644
+--- a/crates/slipstream-client/src/main.rs
++++ b/crates/slipstream-client/src/main.rs
+@@ -1,5 +1,6 @@
+ mod dns;
+ mod error;
++mod local_io;
+ mod pacing;
+ mod pinning;
+ mod runtime;
+@@ -26,6 +27,9 @@ use runtime::run_client;
+     )
+ )]
+ struct Args {
++    /// POKROV private parent/child IPC; bootstrap is read from stdin.
++    #[arg(long = "pokrov-local-io")]
++    pokrov_local_io: bool,
+     #[arg(long = "tcp-listen-host", default_value = "::")]
+     tcp_listen_host: String,
+     #[arg(long = "tcp-listen-port", short = 'l', default_value_t = 5201)]
+@@ -184,12 +188,25 @@ fn main() {
+         debug_streams: args.debug_streams,
+     };
+ 
++    let local_auth = if args.pokrov_local_io {
++        if cert.is_none() {
++            exit_with_message("POKROV local I/O requires a pinned server certificate", 2);
++        }
++        Some(unwrap_or_exit(
++            local_io::LocalAuth::read_bootstrap(),
++            "Local I/O error",
++            2,
++        ))
++    } else {
++        None
++    };
++
+     let runtime = Builder::new_current_thread()
+         .enable_io()
+         .enable_time()
+         .build()
+         .expect("Failed to build Tokio runtime");
+-    match runtime.block_on(run_client(&config)) {
++    match runtime.block_on(run_client(&config, local_auth)) {
+         Ok(code) => std::process::exit(code),
+         Err(err) => exit_with_error("Client error", err, 1),
+     }
+diff --git a/crates/slipstream-client/src/runtime.rs b/crates/slipstream-client/src/runtime.rs
+index 4cf5f88..489ccf3 100644
+--- a/crates/slipstream-client/src/runtime.rs
++++ b/crates/slipstream-client/src/runtime.rs
+@@ -12,6 +12,7 @@ use crate::dns::{
+     sockaddr_storage_to_socket_addr, DnsResponseContext, PeerAddrMode,
+ };
+ use crate::error::ClientError;
++use crate::local_io::{DnsSocket, LocalAuth};
+ use crate::pacing::{cwnd_target_polls, inflight_packet_estimate};
+ use crate::pinning::configure_pinned_certificate;
+ use crate::streams::{
+@@ -61,10 +62,27 @@ fn drain_disconnected_commands(command_rx: &mut mpsc::UnboundedReceiver<Command>
+     dropped
+ }
+ 
+-pub async fn run_client(config: &ClientConfig<'_>) -> Result<i32, ClientError> {
++pub async fn run_client(
++    config: &ClientConfig<'_>,
++    local_auth: Option<Arc<LocalAuth>>,
++) -> Result<i32, ClientError> {
+     let domain_len = config.domain.len();
+     let mtu = compute_mtu(domain_len)?;
+-    let udp = bind_udp_socket().await?;
++    let udp = if let Some(auth) = &local_auth {
++        if config.resolvers.len() != 1 || config.resolvers[0].resolver.host != "127.0.0.1" {
++            return Err(ClientError::new(
++                "POKROV local I/O requires one loopback relay",
++            ));
++        }
++        let relay = std::net::SocketAddr::from(([127, 0, 0, 1], config.resolvers[0].resolver.port));
++        let socket = tokio::net::UdpSocket::bind("127.0.0.1:0")
++            .await
++            .map_err(map_io)?;
++        socket.connect(relay).await.map_err(map_io)?;
++        DnsSocket::new(socket, Some((Arc::clone(auth), relay)))
++    } else {
++        DnsSocket::new(bind_udp_socket().await?, None)
++    };
+     let udp_local_addr = udp.local_addr().map_err(map_io)?;
+     let peer_addr_mode = PeerAddrMode::from_local_addr(udp_local_addr);
+ 
+@@ -72,12 +90,29 @@ pub async fn run_client(config: &ClientConfig<'_>) -> Result<i32, ClientError> {
+     let data_notify = Arc::new(Notify::new());
+     let acceptor = ClientAcceptor::new();
+     let debug_streams = config.debug_streams;
+-    let tcp_host = config.tcp_listen_host;
+-    let tcp_port = config.tcp_listen_port;
++    let tcp_host = if local_auth.is_some() {
++        "127.0.0.1"
++    } else {
++        config.tcp_listen_host
++    };
++    let tcp_port = if local_auth.is_some() {
++        0
++    } else {
++        config.tcp_listen_port
++    };
+     let (listener, bound_host) = bind_tcp_listener(tcp_host, tcp_port)
+         .await
+         .map_err(map_io)?;
+-    acceptor.spawn(listener, command_tx.clone());
++    if let Some(auth) = local_auth {
++        auth.report_ready(
++            listener.local_addr().map_err(map_io)?.port(),
++            udp_local_addr.port(),
++        )
++        .map_err(map_io)?;
++        acceptor.spawn_authenticated(listener, command_tx.clone(), auth);
++    } else {
++        acceptor.spawn(listener, command_tx.clone());
++    }
+     info!("Listening on TCP port {} (host {})", tcp_port, bound_host);
+ 
+     let alpn = CString::new(SLIPSTREAM_ALPN)
+diff --git a/crates/slipstream-client/src/streams/acceptor.rs b/crates/slipstream-client/src/streams/acceptor.rs
+index aae560c..6dac19b 100644
+--- a/crates/slipstream-client/src/streams/acceptor.rs
++++ b/crates/slipstream-client/src/streams/acceptor.rs
+@@ -1,4 +1,5 @@
+ use super::Command;
++use crate::local_io::LocalAuth;
+ use slipstream_ffi::picoquic::{picoquic_cnx_t, slipstream_get_max_streams_bidir_remote};
+ use std::sync::atomic::{AtomicUsize, Ordering};
+ use std::sync::Arc;
+@@ -33,6 +34,55 @@ impl ClientAcceptor {
+         TcpAcceptor::new(listener, command_tx, Arc::clone(&self.limiter)).spawn();
+     }
+ 
++    pub(crate) fn spawn_authenticated(
++        &self,
++        listener: TokioTcpListener,
++        command_tx: mpsc::UnboundedSender<Command>,
++        auth: Arc<LocalAuth>,
++    ) {
++        let limiter = Arc::clone(&self.limiter);
++        tokio::spawn(async move {
++            // Unauthenticated peers cannot consume remote QUIC stream credit.
++            // Bound both idle handshakes and their number on the shared loopback.
++            let pending = Arc::new(tokio::sync::Semaphore::new(32));
++            loop {
++                let Ok(permit) = Arc::clone(&pending).acquire_owned().await else {
++                    break;
++                };
++                let (mut stream, _) = match listener.accept().await {
++                    Ok(accepted) => accepted,
++                    Err(_) => {
++                        sleep(Duration::from_millis(50)).await;
++                        continue;
++                    }
++                };
++                let auth = Arc::clone(&auth);
++                let limiter = Arc::clone(&limiter);
++                let command_tx = command_tx.clone();
++                tokio::spawn(async move {
++                    if !matches!(
++                        tokio::time::timeout(
++                            Duration::from_secs(5),
++                            auth.authenticate(&mut stream)
++                        )
++                        .await,
++                        Ok(Ok(()))
++                    ) {
++                        return;
++                    }
++                    drop(permit);
++                    let reservation = limiter.reserve().await;
++                    if reservation.is_fresh() {
++                        let _ = command_tx.send(Command::NewStream {
++                            stream,
++                            reservation,
++                        });
++                    }
++                });
++            }
++        });
++    }
++
+     pub(crate) fn update_limit(&self, cnx: *mut picoquic_cnx_t) -> usize {
+         let max_streams = unsafe { slipstream_get_max_streams_bidir_remote(cnx) };
+         let max_streams = usize::try_from(max_streams).unwrap_or(usize::MAX);
+diff --git a/crates/slipstream-core/src/cli.rs b/crates/slipstream-core/src/cli.rs
+index bfebfee..3b602d3 100644
+--- a/crates/slipstream-core/src/cli.rs
++++ b/crates/slipstream-core/src/cli.rs
+@@ -1,28 +1,29 @@
+-use std::fmt::Display;
+-use tracing_subscriber::EnvFilter;
+-
+-pub fn init_logging() {
+-    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+-    let _ = tracing_subscriber::fmt()
+-        .with_env_filter(filter)
+-        .with_target(false)
+-        .without_time()
+-        .try_init();
+-}
+-
+-pub fn unwrap_or_exit<T, E>(result: Result<T, E>, context: &str, code: i32) -> T
+-where
+-    E: Display,
+-{
+-    result.unwrap_or_else(|err| exit_with_error(context, err, code))
+-}
+-
+-pub fn exit_with_error(context: &str, err: impl Display, code: i32) -> ! {
+-    tracing::error!("{}: {}", context, err);
+-    std::process::exit(code);
+-}
+-
+-pub fn exit_with_message(message: &str, code: i32) -> ! {
+-    tracing::error!("{}", message);
+-    std::process::exit(code);
+-}
++use std::fmt::Display;
++use tracing_subscriber::EnvFilter;
++
++pub fn init_logging() {
++    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
++    let _ = tracing_subscriber::fmt()
++        .with_writer(std::io::stderr)
++        .with_env_filter(filter)
++        .with_target(false)
++        .without_time()
++        .try_init();
++}
++
++pub fn unwrap_or_exit<T, E>(result: Result<T, E>, context: &str, code: i32) -> T
++where
++    E: Display,
++{
++    result.unwrap_or_else(|err| exit_with_error(context, err, code))
++}
++
++pub fn exit_with_error(context: &str, err: impl Display, code: i32) -> ! {
++    tracing::error!("{}: {}", context, err);
++    std::process::exit(code);
++}
++
++pub fn exit_with_message(message: &str, code: i32) -> ! {
++    tracing::error!("{}", message);
++    std::process::exit(code);
++}

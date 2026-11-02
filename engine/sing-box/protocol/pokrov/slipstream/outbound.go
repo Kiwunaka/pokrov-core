@@ -3,10 +3,11 @@ package slipstream
 import (
 	"context"
 	"errors"
+	"io"
 	"net"
+	"net/netip"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"sync"
 	"time"
 
@@ -138,6 +139,7 @@ type tunnelSession struct {
 	command *exec.Cmd
 	relay   *dnsRelay
 	address string
+	auth    localAuth
 	done    chan struct{}
 	once    sync.Once
 }
@@ -159,32 +161,30 @@ func (s *tunnelSession) Close() {
 }
 
 func (s *tunnelSession) dial(ctx context.Context) (net.Conn, error) {
-	timer := time.NewTicker(25 * time.Millisecond)
-	defer timer.Stop()
-	for {
-		if s.closed() {
-			return nil, errors.New("slipstream native client stopped")
-		}
-		conn, err := (&net.Dialer{}).DialContext(ctx, N.NetworkTCP, s.address)
-		if err == nil {
-			return conn, nil
-		}
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-s.done:
-			return nil, errors.New("slipstream native client stopped")
-		case <-timer.C:
-		}
+	if s.closed() {
+		return nil, errors.New("slipstream native client stopped")
 	}
+	conn, err := (&net.Dialer{}).DialContext(ctx, N.NetworkTCP, s.address)
+	if err != nil {
+		return nil, err
+	}
+	if err = s.auth.authenticate(ctx, conn); err != nil {
+		conn.Close()
+		return nil, errors.New("slipstream local authentication failed")
+	}
+	return conn, nil
 }
 
 func (h *Outbound) start(ctx context.Context) (*tunnelSession, error) {
+	auth, err := newLocalAuth()
+	if err != nil {
+		return nil, errors.New("could not initialize slipstream local authentication")
+	}
 	remote, err := h.dialer.DialContext(ctx, N.NetworkUDP, M.SocksaddrFromNetIP(h.resolver))
 	if err != nil {
 		return nil, err
 	}
-	relay, err := newDNSRelay(remote)
+	relay, err := newDNSRelay(remote, auth)
 	if err != nil {
 		return nil, err
 	}
@@ -209,22 +209,26 @@ func (h *Outbound) start(ctx context.Context) (*tunnelSession, error) {
 	if writeErr != nil || closeErr != nil {
 		return nil, errors.New("could not write slipstream certificate file")
 	}
-	listener, err := net.Listen("tcp4", "127.0.0.1:0")
-	if err != nil {
-		return nil, err
-	}
-	address := listener.Addr().(*net.TCPAddr)
-	listener.Close() // The upstream CLI cannot inherit a listener descriptor.
 	command := exec.CommandContext(h.ctx, h.executable,
-		"--tcp-listen-host", "127.0.0.1", "--tcp-listen-port", strconv.Itoa(address.Port),
+		"--pokrov-local-io",
 		"--resolver", relay.local.LocalAddr().String(), "--domain", h.domain, "--cert", certPath)
 	hideWindow(command)
+	input, err := command.StdinPipe()
+	if err != nil {
+		return nil, errors.New("could not create slipstream bootstrap pipe")
+	}
+	defer input.Close()
+	output, err := command.StdoutPipe()
+	if err != nil {
+		return nil, errors.New("could not create slipstream readiness pipe")
+	}
+	defer output.Close()
 	// Native output contains endpoint/configuration details. Do not forward it to
 	// application logs; callers receive bounded lifecycle errors instead.
 	if command.Start() != nil {
 		return nil, errors.New("could not start slipstream native client")
 	}
-	s := &tunnelSession{command: command, relay: relay, address: address.String(), done: make(chan struct{})}
+	s := &tunnelSession{command: command, relay: relay, auth: auth, done: make(chan struct{})}
 	started = true
 	go func() {
 		command.Wait()
@@ -239,5 +243,34 @@ func (h *Outbound) start(ctx context.Context) (*tunnelSession, error) {
 		case <-s.done:
 		}
 	}()
-	return s, nil
+	bootstrap := auth.bootstrap()
+	if n, err := input.Write(bootstrap); err != nil || n != len(bootstrap) {
+		s.Close()
+		return nil, errors.New("could not initialize slipstream native client")
+	}
+	input.Close()
+	var ready [28]byte
+	read := make(chan error, 1)
+	go func() {
+		_, err := io.ReadFull(output, ready[:])
+		read <- err
+	}()
+	select {
+	case err := <-read:
+		if err == nil {
+			var peer netip.AddrPort
+			s.address, peer, err = auth.parseReady(ready[:])
+			if err == nil {
+				relay.setPeer(peer)
+				return s, nil
+			}
+		}
+		s.Close()
+		return nil, errors.New("slipstream native client did not establish authenticated local I/O")
+	case <-ctx.Done():
+		s.Close()
+		return nil, ctx.Err()
+	case <-s.done:
+		return nil, errors.New("slipstream native client stopped before local I/O was ready")
+	}
 }

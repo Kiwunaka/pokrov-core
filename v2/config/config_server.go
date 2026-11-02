@@ -2,14 +2,12 @@ package config
 
 import (
 	context "context"
+	"errors"
 	"fmt"
-	"log"
-	"net"
 	"os"
 
 	"github.com/Kiwunaka/POKROV-core/v2/hutils"
 	"github.com/sagernet/sing-box/experimental/libbox"
-	"google.golang.org/grpc"
 )
 
 type server struct {
@@ -60,20 +58,5 @@ func (s *server) GenerateFullConfig(ctx context.Context, in *GenerateConfigReque
 }
 
 func StartGRPCServer(port uint16) error {
-	lis, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
-	if err != nil {
-		log.Fatalf("Failed to listen: %v", err)
-	}
-
-	s := grpc.NewServer()
-	RegisterCoreServiceServer(s, &server{})
-
-	log.Println("Server started on :", port)
-	go func() {
-		if err := s.Serve(lis); err != nil {
-			log.Fatalf("Failed to serve: %v", err)
-		}
-	}()
-
-	return nil
+	return errors.New("unauthenticated configuration gRPC listener is disabled")
 }

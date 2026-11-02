@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.15 — local source
+
+Source/build version only; no new tag or public artifact is implied. Runtime
+capabilities and artifact selection are described in [release](docs/release.md)
+and the app's cutover readiness.
+
 ## 1.2.13 — unreleased
 
 - Report a closed HTTP 64 KiB failure detail for request writing, response headers,

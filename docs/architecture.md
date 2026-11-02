@@ -19,7 +19,8 @@ POKROV Core is one client runtime with three layers:
 The optional `with_slipstream` build registers a separate `slipstream` TCP
 carrier and reports `slipstream_vless_v1` on Windows, Android and Linux. It uses
 the pinned Apache-2.0 [Slipstream Rust v0.1.1](https://github.com/Mygod/slipstream-rust/releases/tag/v0.1.1)
-client; that upstream is archived. The trusted host supplies its installed
+client with `third_party/slipstream/pokrov-local-io.patch`; that upstream is archived.
+The trusted host supplies its installed
 client path through `libbox.SetupOptions.SlipstreamClientPath` or, after setup
 and before start, `pokrovCoreSetSlipstreamClientPath`. The profile supplies one
 numeric UDP resolver, `domain`, one PEM `certificate` for exact server leaf
@@ -27,7 +28,16 @@ pinning, and `network: "tcp"`; it cannot select an executable. Core owns one
 lazy native process and a loopback DNS relay whose outer socket uses the normal
 protected/bound dialer. Close and interface reset kill and wait for that process,
 close streams and sockets, and remove the temporary public certificate. Native
-output is discarded. A personal flowless VLESS leaf detours through this carrier
+stderr is discarded. Core sends a fresh 256-bit key and process generation through
+the child's private stdin pipe. The child binds its own `127.0.0.1:0` TCP/UDP
+sockets and returns their actual ports through private stdout, without releasing
+either socket. Each TCP connection proves both peers using fresh nonces and
+direction-separated HMAC-SHA256 before the child opens a QUIC stream or Core
+returns a connection to VLESS. DNS on the local hop has separate authenticated
+query/reply framing, a generation and replay window; the relay accepts only the
+child UDP port reported through stdout. An unpatched CLI fails closed. Remote
+QUIC TLS, the exact leaf certificate pin and personal VLESS authorization remain
+required. A personal flowless VLESS leaf detours through this carrier
 to the existing fixed Premium backend `127.0.0.1:12543`; Slipstream itself supplies
 neither destination framing nor account authorization. Content DNS must use TCP
 through that VLESS leaf. Android requires an executable native CLI packaged as
@@ -1232,11 +1242,21 @@ are omitted. Each probe has its own deadline and interruption callback.
 When a selected-app profile routes ordinary traffic directly, the probe uses
 the protected outbound of its process rule, or its first selector if that rule
 is absent. The app's direct final route is not used as proof of the VPN path.
-Cancellation closes the instance and waits
-for the request and observer to return before releasing the caller-owned callback.
+The HTTP verdict and its duration are frozen before instance shutdown. Late
+shutdown deadlines do not replace a completed success or a certificate/response
+failure. TLS uses the isolated instance's certificate pool and clock, including
+Android platform roots. `CancelCandidateProbe` only signals cancellation and
+returns promptly; `ProbeCandidate` closes the instance and joins the request and
+observer before returning and releasing the caller-owned callback.
 The existing active runtime and its TUN remain untouched by probes. The optional
 desktop ABI 2 exports return a fixed failure kind and duration, with strings
 released by `freeString`; profiles and transport errors never enter the result.
+
+ABI 2 retains the legacy server symbols for existing hosts. Standalone
+unauthenticated Core/config gRPC listeners and SDK pprof startup return an error;
+debug setup does not start a profiling listener. Reading the server public key
+before authenticated gRPC setup returns empty. No symbol removal is required to
+disable these unused entry points.
 
 Startup proof for an ordinary selected outbound now uses the same strict HTTP
 exchange: owned GET 204 and marker, then GET 200 with a full uncompressed 64 KiB

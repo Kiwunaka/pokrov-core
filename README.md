@@ -52,7 +52,7 @@ change the public release targets above.
 
 ## Requirements
 
-- Go `1.26.8`
+- Go `1.26.10`
 - Git
 - Android SDK, NDK `29.0.14206865`, JDK, and pinned `gomobile v0.1.12` for Android
 - MinGW-w64 for the Windows DLL
@@ -79,7 +79,7 @@ Android:
 
 The script verifies cached gomobile and gobind module/toolchain identities with
 `go version -m` and installs the pinned versions when they differ. Default output
-contains all four Android ABIs; `-Arm64Only` is for explicit private candidates.
+contains three Android ABIs (armeabi-v7a, arm64-v8a and x86_64); `-Arm64Only` is for explicit private candidates.
 Use `-OutputDirectory` to keep a private AAR outside the checkout. On macOS,
 `bash scripts/build-apple.sh` builds the XCFramework with the pinned tools;
 this command is not exercised by Linux CI.

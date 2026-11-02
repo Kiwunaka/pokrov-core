@@ -54,6 +54,11 @@ if ($SlipstreamClient) {
   if (-not (Test-Path -LiteralPath $SlipstreamClient -PathType Leaf)) {
     throw 'Pass the pinned upstream slipstream-client.exe.'
   }
+  $slipstreamPin = $release.engine.slipstream.windows_amd64
+  if ((Get-Item -LiteralPath $SlipstreamClient).Length -ne $slipstreamPin.size -or
+      (Get-FileHash -Algorithm SHA256 -LiteralPath $SlipstreamClient).Hash -ne $slipstreamPin.sha256) {
+    throw 'Slipstream native client does not match config/release.json.'
+  }
 }
 $tags = @(
   "pokrov_client",
@@ -176,6 +181,9 @@ if ($SlipstreamClient) {
   $slipstreamOutput = Join-Path $OutputDirectory 'slipstream-client.exe'
   if ($SlipstreamClient -ne $slipstreamOutput) {
     Copy-Item -Force -LiteralPath $SlipstreamClient -Destination $slipstreamOutput
+  }
+  if ((Get-FileHash -Algorithm SHA256 -LiteralPath $slipstreamOutput).Hash -ne $slipstreamPin.sha256) {
+    throw 'Copied Slipstream native client does not match config/release.json.'
   }
   Copy-Item -Force -LiteralPath (Join-Path $root 'third_party/slipstream/LICENSE') `
     -Destination (Join-Path $OutputDirectory 'slipstream-LICENSE.txt')

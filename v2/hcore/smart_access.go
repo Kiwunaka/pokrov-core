@@ -18,9 +18,7 @@ func ProbeSelectedOutbound(tag string) (bool, error) {
 	}
 	emit := operationalEventEmitter.CaptureContext()
 	healthy, err := started.ProbeSelectedOutboundResult(tag)
-	if !static.lock.TryLock() {
-		return false, errors.New("selected route probe unavailable")
-	}
+	static.lock.Lock()
 	current := static.StartedService == started
 	static.lock.Unlock()
 	if !current {
@@ -47,9 +45,7 @@ func ProbeRuntimeEgress(tag string, timeout time.Duration, interrupted func() bo
 	}
 	emit := operationalEventEmitter.CaptureContext()
 	healthy, err := started.ProbeRuntimeEgressResult(tag, timeout, interrupted)
-	if !static.lock.TryLock() {
-		return false, errors.New("runtime egress probe unavailable")
-	}
+	static.lock.Lock()
 	current := static.StartedService == started
 	static.lock.Unlock()
 	if !current {

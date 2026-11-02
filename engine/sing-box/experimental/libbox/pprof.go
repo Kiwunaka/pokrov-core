@@ -1,33 +1,17 @@
 package libbox
 
-import (
-	"net"
-	"net/http"
-	_ "net/http/pprof"
-	"strconv"
-)
+import "errors"
 
-type PProfServer struct {
-	server *http.Server
-}
+type PProfServer struct{}
 
 func NewPProfServer(port int) *PProfServer {
-	return &PProfServer{
-		&http.Server{
-			Addr: ":" + strconv.Itoa(port),
-		},
-	}
+	return &PProfServer{}
 }
 
 func (s *PProfServer) Start() error {
-	ln, err := net.Listen("tcp", s.server.Addr)
-	if err != nil {
-		return err
-	}
-	go s.server.Serve(ln)
-	return nil
+	return errors.New("pprof listener is disabled in the client SDK")
 }
 
 func (s *PProfServer) Close() error {
-	return s.server.Close()
+	return nil
 }

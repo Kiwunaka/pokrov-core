@@ -20,6 +20,7 @@ import (
 	"github.com/sagernet/sing-box/option"
 	SJSON "github.com/sagernet/sing/common/json"
 	M "github.com/sagernet/sing/common/metadata"
+	"github.com/sagernet/sing/common/ntp"
 	"github.com/sagernet/sing/service"
 )
 
@@ -61,7 +62,6 @@ func (r CandidateProbeResult) JSON() string {
 
 type candidateProbeCall struct {
 	cancel context.CancelFunc
-	done   chan struct{}
 }
 
 var candidateProbes = struct {
@@ -70,15 +70,15 @@ var candidateProbes = struct {
 }{calls: make(map[string]*candidateProbeCall)}
 var candidateProbeID = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
 
-// CancelCandidateProbe waits for the registered call's sockets and instance.
-// The host's interruption callback covers cancellation before registration.
+// CancelCandidateProbe signals cancellation without waiting for transport Close.
+// ProbeCandidate still joins its sockets and instance before returning. The host's
+// interruption callback covers cancellation before registration.
 func CancelCandidateProbe(id string) {
 	candidateProbes.Lock()
 	call := candidateProbes.calls[id]
 	candidateProbes.Unlock()
 	if call != nil {
 		call.cancel()
-		<-call.done
 	}
 }
 
@@ -87,12 +87,17 @@ func CancelCandidateProbe(id string) {
 // stage, when supplied, receives only fixed phase names and runs synchronously.
 func ProbeCandidate(config, id string, timeout time.Duration, bindInterface string,
 	platform libbox.PlatformInterface, interrupted func() bool, stage ...func(string)) (result CandidateProbeResult) {
+	return probeCandidate(libbox.BaseContext(platform), config, id, timeout, bindInterface, platform, interrupted, stage...)
+}
+
+func probeCandidate(baseContext context.Context, config, id string, timeout time.Duration, bindInterface string,
+	platform libbox.PlatformInterface, interrupted func() bool, stage ...func(string)) (result CandidateProbeResult) {
 	started := time.Now()
+	finished := false
+	var operationError error
 	defer func() {
-		result.DurationMS = time.Since(started).Milliseconds()
-		if result.ProbeError != nil {
-			result.ProbeError.StageStartedMS = result.StageStartedMS
-			result.ProbeError.DurationMS = result.DurationMS
+		if !finished {
+			result.finish(nil, started, operationError)
 		}
 	}()
 	reportStage := func(name string) {
@@ -106,12 +111,18 @@ func ProbeCandidate(config, id string, timeout time.Duration, bindInterface stri
 	if !candidateProbeID.MatchString(id) || timeout <= 0 || timeout > 30*time.Second {
 		return
 	}
-	ctx, cancel := context.WithTimeout(libbox.BaseContext(platform), timeout)
+	ctx, cancel := context.WithTimeout(baseContext, timeout)
 	defer cancel()
+	finish := func() {
+		if !finished {
+			finished = true
+			result.finish(ctx, started, operationError)
+		}
+	}
 	if platform != nil {
 		ctx = service.ContextWith[adapter.PlatformInterface](ctx, libbox.WrapPlatformInterface(platform))
 	}
-	call := &candidateProbeCall{cancel: cancel, done: make(chan struct{})}
+	call := &candidateProbeCall{cancel: cancel}
 	candidateProbes.Lock()
 	if candidateProbes.calls[id] != nil {
 		candidateProbes.Unlock()
@@ -123,7 +134,6 @@ func ProbeCandidate(config, id string, timeout time.Duration, bindInterface stri
 	defer func() {
 		candidateProbes.Lock()
 		delete(candidateProbes.calls, id)
-		close(call.done)
 		candidateProbes.Unlock()
 	}()
 	watchDone := make(chan struct{})
@@ -150,21 +160,9 @@ func ProbeCandidate(config, id string, timeout time.Duration, bindInterface stri
 		}
 	}()
 	defer func() {
+		finish()
 		close(watchStop)
 		<-watchDone
-		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			if result.FailureKind != "data_stalled" {
-				result.Success = false
-				result.FailureKind = "timeout"
-			}
-		} else if ctx.Err() != nil {
-			result.Success = false
-			result.FailureKind = "cancelled"
-		}
-		if result.FailureKind != "probe_failed" || result.Stage != "http_64k" {
-			result.HTTP64KFailure = ""
-			result.HTTP64KObservation = nil
-		}
 	}()
 	if ctx.Err() != nil {
 		return
@@ -174,6 +172,7 @@ func ProbeCandidate(config, id string, timeout time.Duration, bindInterface stri
 	options, target, err := candidateOptions(ctx, config, bindInterface)
 	result.ParseDurationMS = time.Since(parseStarted).Milliseconds()
 	if err != nil {
+		operationError = err
 		result.FailureKind = "invalid_profile"
 		return
 	}
@@ -185,20 +184,36 @@ func ProbeCandidate(config, id string, timeout time.Duration, bindInterface stri
 	result.CreateDurationMS = time.Since(createStarted).Milliseconds()
 	result.CertificateDurationMS = certificateDuration.Milliseconds()
 	if err != nil {
+		operationError = err
 		result.FailureKind = "invalid_profile"
 		return
 	}
 	var closeOnce sync.Once
 	closeInstance := func() { closeOnce.Do(func() { _ = instance.Close() }) }
-	defer closeInstance()
+	var closeDone, closeStop chan struct{}
+	var awg interface{ AWGProbeSnapshot() map[string]any }
+	defer func() {
+		// Freeze the HTTP/setup verdict before any component shutdown consumes the
+		// remaining request budget. Close may take longer than that budget.
+		finish()
+		if closeStop != nil {
+			close(closeStop)
+			<-closeDone
+		}
+		closeInstance()
+		if awg != nil && result.ProbeError != nil {
+			result.ProbeError.AWG = awg.AWGProbeSnapshot()
+		}
+	}()
 	reportStage("start_instance")
 	if err = instance.Start(); err != nil {
+		operationError = err
 		result.FailureKind = "start_failed"
 		return
 	}
 	// Close the isolated transport on cancellation, then join the request below.
-	closeDone := make(chan struct{})
-	closeStop := make(chan struct{})
+	closeDone = make(chan struct{})
+	closeStop = make(chan struct{})
 	go func() {
 		defer close(closeDone)
 		select {
@@ -207,22 +222,13 @@ func ProbeCandidate(config, id string, timeout time.Duration, bindInterface stri
 		case <-closeStop:
 		}
 	}()
-	defer func() { close(closeStop); <-closeDone }()
 	reportStage("select_outbound")
 	selected := candidateProtectedLeaf(target, instance.Outbound().Outbound)
 	if selected == nil {
 		result.FailureKind = "invalid_profile"
 		return
 	}
-	if awg, ok := selected.(interface{ AWGProbeSnapshot() map[string]any }); ok {
-		defer func() {
-			// Join the device before freezing counts, including cancellation.
-			closeInstance()
-			if result.ProbeError != nil {
-				result.ProbeError.AWG = awg.AWGProbeSnapshot()
-			}
-		}()
-	}
+	awg, _ = selected.(interface{ AWGProbeSnapshot() map[string]any })
 	probeDial := func(ctx context.Context, network string, destination M.Socksaddr) (net.Conn, error) {
 		reportStage("proxy_dial")
 		conn, err := selected.DialContext(ctx, network, destination)
@@ -241,6 +247,30 @@ func ProbeCandidate(config, id string, timeout time.Duration, bindInterface stri
 	result.HTTP64KObservation = http64kDiagnostic.Observation
 	result.Success = result.FailureKind == ""
 	return
+}
+
+func (r *CandidateProbeResult) finish(ctx context.Context, started time.Time, operationError error) {
+	// A real TLS/HTTP failure remains useful even when cancellation races it.
+	// Only cancellation-shaped IO and unfinished setup inherit the caller state.
+	if ctx != nil && !r.Success && r.FailureKind != "data_stalled" &&
+		(r.FailureKind == "invalid_request" || operationError != nil && errors.Is(operationError, ctx.Err()) ||
+			r.ProbeError != nil && (r.ProbeError.Cause == "timeout" ||
+				r.ProbeError.Cause == "cancelled" || r.ProbeError.Cause == "closed")) {
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			r.FailureKind = "timeout"
+		} else if ctx.Err() != nil {
+			r.FailureKind = "cancelled"
+		}
+	}
+	if r.FailureKind != "probe_failed" || r.Stage != "http_64k" {
+		r.HTTP64KFailure = ""
+		r.HTTP64KObservation = nil
+	}
+	r.DurationMS = time.Since(started).Milliseconds()
+	if r.ProbeError != nil {
+		r.ProbeError.StageStartedMS = r.StageStartedMS
+		r.ProbeError.DurationMS = r.DurationMS
+	}
 }
 
 // Remove host-owned state, while retaining the exact transport and DNS material.
@@ -420,6 +450,8 @@ func candidateProbeAt(ctx context.Context, dial func(context.Context, string, M.
 	return candidateHTTPSProbe(ctx, dial, target, &tls.Config{
 		ServerName: target.host,
 		MinVersion: tls.VersionTLS12,
+		RootCAs:    adapter.RootPoolFromContext(ctx),
+		Time:       ntp.TimeFuncFromContext(ctx),
 		// This callback runs after the default CA and hostname verification.
 		VerifyConnection: func(tls.ConnectionState) error {
 			reportStage("tls_certificate_verified")

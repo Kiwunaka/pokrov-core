@@ -15,10 +15,7 @@ $pin = $release.engine.slipstream
 $SourceDirectory = [IO.Path]::GetFullPath($SourceDirectory)
 $OutputDirectory = [IO.Path]::GetFullPath($OutputDirectory)
 $AndroidNdk = [IO.Path]::GetFullPath($AndroidNdk)
-$revision = (& git -C $SourceDirectory rev-parse HEAD).Trim()
-if ($LASTEXITCODE -ne 0 -or $revision -ne $pin.revision) {
-  throw 'Slipstream source must match config/release.json; initialize its pinned submodules first.'
-}
+& (Join-Path $PSScriptRoot 'prepare-slipstream-source.ps1') -SourceDirectory $SourceDirectory
 $ndkProperties = [IO.File]::ReadAllText((Join-Path $AndroidNdk 'source.properties'))
 if ($ndkProperties -notmatch ('(?m)^Pkg\.Revision\s*=\s*' + [regex]::Escape($release.engine.android_ndk) + '\s*$')) {
   throw 'Android NDK must match config/release.json.'

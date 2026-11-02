@@ -11,5 +11,14 @@ POKROV Core includes and links third-party software.
   recorded in `config/awg2-capability.json`; the license is retained at
   `third_party/licenses/amneziawg-go-MIT.txt`.
 - Embedded WireGuard, Tailscale, Psiphon, and protocol modules retain their license files in their source directories.
+- Cronet is Chromium's network stack. Chromium uses a BSD-style license and
+  bundled components retain their respective licenses; see [Chromium LICENSE](https://github.com/chromium/chromium/blob/main/LICENSE).
+  The Go wrapper is [cronet-go, GPL-3.0-or-later](https://github.com/SagerNet/cronet-go/blob/c10c03c318db6d47bec8705c8290bad34bc32b64/LICENSE).
+- The optional [Slipstream Rust client](https://github.com/Mygod/slipstream-rust/tree/c7b265c11dd13d6dfd601bc81d54d61ee9bdde23)
+  is Apache-2.0; its license is retained at `third_party/slipstream/LICENSE` and
+  distributed with the native client. Its native TLS/QUIC components include
+  [OpenSSL, Apache-2.0](https://www.openssl.org/source/license.html),
+  [picoquic, MIT](https://github.com/Mygod/slipstream-picoquic/blob/d4a865c54929cfeb2a61902a0340b8758ad5492e/LICENSE),
+  and [picotls, MIT](https://github.com/h2o/picotls).
 
 POKROV-specific changes do not replace third-party copyright or license notices.

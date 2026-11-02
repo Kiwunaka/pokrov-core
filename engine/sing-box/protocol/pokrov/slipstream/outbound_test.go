@@ -24,6 +24,7 @@ import (
 
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/option"
+	"github.com/sagernet/sing-vmess/vless"
 	"github.com/sagernet/sing/common/control"
 	M "github.com/sagernet/sing/common/metadata"
 	"github.com/sagernet/sing/service"
@@ -96,12 +97,12 @@ func (n *protectedTestNetwork) ProtectFunc() control.Func {
 	}
 }
 
-// The test uses the unmodified upstream client and server, real loopback DNS,
+// The test uses the patched client and pinned upstream server, real loopback DNS,
 // QUIC and leaf pinning. It does not exercise a recursive resolver or TUN host.
 func TestSlipstreamProtectedWireEchoAndClose(t *testing.T) {
 	directory := os.Getenv("POKROV_SLIPSTREAM_TEST_DIRECTORY")
 	if directory == "" {
-		t.Skip("set POKROV_SLIPSTREAM_TEST_DIRECTORY to the upstream client/server directory")
+		t.Skip("set POKROV_SLIPSTREAM_TEST_DIRECTORY to the patched client/pinned server directory")
 	}
 	suffix := ""
 	if runtime.GOOS == "windows" {
@@ -118,14 +119,24 @@ func TestSlipstreamProtectedWireEchoAndClose(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { backend.Close() })
+	var backendStreams atomic.Int32
+	testUUID := [16]byte{0, 0, 0, 0, 0, 0, 0x40, 0, 0x80, 0, 0, 0, 0, 0, 0, 1}
 	go func() {
 		for {
 			conn, err := backend.Accept()
 			if err != nil {
 				return
 			}
+			backendStreams.Add(1)
 			go func() {
 				defer conn.Close()
+				request, err := vless.ReadRequest(conn)
+				if err != nil || request.UUID != testUUID || request.Command != 1 || request.Flow != "" {
+					return
+				}
+				if _, err := conn.Write([]byte{vless.Version, 0}); err != nil {
+					return
+				}
 				io.Copy(conn, conn)
 			}()
 		}
@@ -165,12 +176,32 @@ func TestSlipstreamProtectedWireEchoAndClose(t *testing.T) {
 	h := newTunnel(certificate)
 	dialCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	conn, err := h.DialContext(dialCtx, "tcp", M.Socksaddr{})
+	leaf, err := vless.NewClient("00000000-0000-4000-8000-000000000001", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dialVLESS := func(tunnel *Outbound) (net.Conn, error) {
+		stream, err := tunnel.DialContext(dialCtx, "tcp", M.Socksaddr{})
+		if err != nil {
+			return nil, err
+		}
+		conn, err := leaf.DialConn(stream, M.ParseSocksaddr("127.0.0.1:443"))
+		if err != nil {
+			stream.Close()
+		}
+		return conn, err
+	}
+	conn, err := dialVLESS(h)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer conn.Close()
 	conn.SetDeadline(time.Now().Add(15 * time.Second))
+	// A forged high sequence must not poison the native reply replay window.
+	forgedReply := h.session.auth.sealDNS(dnsReply, ^uint64(0)-1, []byte("forged DNS reply"))
+	forgedReply[len(forgedReply)-1] ^= 1
+	h.session.relay.local.WriteToUDPAddrPort(forgedReply, h.session.relay.peer)
+	h.session.relay.local.WriteToUDPAddrPort(h.session.auth.sealDNS(dnsQuery, ^uint64(0)-1, []byte("reflected query")), h.session.relay.peer)
 	payload := bytes.Repeat([]byte("slipstream-wire-echo"), 4096)
 	if _, err := conn.Write(payload); err != nil {
 		t.Fatal(err)
@@ -182,7 +213,46 @@ func TestSlipstreamProtectedWireEchoAndClose(t *testing.T) {
 	if network.protected.Load() != 1 {
 		t.Fatal("remote DNS socket did not use the protected dialer")
 	}
-	second, err := h.DialContext(dialCtx, "tcp", M.Socksaddr{})
+	before := backendStreams.Load()
+	unauthenticated, err := net.DialTimeout("tcp", h.session.address, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unauthenticated.SetDeadline(time.Now().Add(2 * time.Second))
+	unauthenticated.Write(bytes.Repeat([]byte{0xa5}, 64))
+	if _, err := unauthenticated.Read(reply[:1]); err == nil {
+		t.Fatal("unauthenticated local peer received application data")
+	}
+	unauthenticated.Close()
+	if backendStreams.Load() != before {
+		t.Fatal("unauthenticated local peer opened a remote QUIC stream")
+	}
+	reflected, err := net.DialTimeout("tcp", h.session.address, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reflected.SetDeadline(time.Now().Add(2 * time.Second))
+	hello := append([]byte(tcpMagic), h.session.auth.generation[:]...)
+	hello = append(hello, make([]byte, 32)...)
+	reflected.Write(hello)
+	var challenge [64]byte
+	if _, err := io.ReadFull(reflected, challenge[:]); err != nil {
+		t.Fatal("native client did not issue its local challenge:", err)
+	}
+	reflected.Write(append(challenge[32:], []byte("must-not-open-a-QUIC-stream")...))
+	if _, err := reflected.Read(reply[:1]); err == nil {
+		t.Fatal("reflected child proof authenticated a foreign parent")
+	}
+	reflected.Close()
+	if backendStreams.Load() != before {
+		t.Fatal("foreign parent opened a remote QUIC stream")
+	}
+	stalled, err := net.DialTimeout("tcp", h.session.address, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stalled.Close()
+	second, err := dialVLESS(h)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -197,7 +267,7 @@ func TestSlipstreamProtectedWireEchoAndClose(t *testing.T) {
 	if !oldSession.closed() {
 		t.Fatal("interface reset retained the old native client")
 	}
-	restarted, err := h.DialContext(dialCtx, "tcp", M.Socksaddr{})
+	restarted, err := dialVLESS(h)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,6 +277,14 @@ func TestSlipstreamProtectedWireEchoAndClose(t *testing.T) {
 	if _, err := io.ReadFull(restarted, reply[:32]); err != nil || !bytes.Equal(payload[:32], reply[:32]) || network.protected.Load() != 2 {
 		t.Fatal("interface reset did not create a fresh protected session:", err)
 	}
+	stale, err := net.DialTimeout("tcp", h.session.address, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := oldSession.auth.authenticate(dialCtx, stale); err == nil {
+		t.Fatal("new native generation admitted a previous process key")
+	}
+	stale.Close()
 	session := h.session
 	if err := h.Close(); err != nil || !session.closed() {
 		t.Fatal("Close left the native client alive")
@@ -224,7 +302,7 @@ func TestSlipstreamProtectedWireEchoAndClose(t *testing.T) {
 	}
 	wrongCertificate, _ := testCertificate(t)
 	wrong := newTunnel(wrongCertificate)
-	bad, err := wrong.DialContext(dialCtx, "tcp", M.Socksaddr{})
+	bad, err := dialVLESS(wrong)
 	if err != nil {
 		t.Fatal("wrong-pin client did not reach its local listener:", err)
 	}

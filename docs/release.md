@@ -3,6 +3,8 @@
 ## Current source and artifact ownership
 
 `VERSION` and `config/release.json` own the source/build version and tool pins.
+Current source is 1.2.15, `PRE_CANDIDATE_LOCAL`, with Go 1.26.10; the latest
+existing 1.2.x Git tag is v1.2.11. A source version does not create a release.
 The client-selected manifest (default seed or explicit build override) owns the
 exact consumed AAR/DLL and source revision. Current app integration, release
 queue and device acceptance are maintained in
@@ -13,7 +15,8 @@ may keep the existing Core version; it does not create a tag or public release.
 
 ## Runtime build contract
 
-The embedded fork targets stable sing-box `1.14.2` while retaining POKROV
+The embedded fork targets stable sing-box `v1.14.2`, upstream commit
+[`af6e64c3b69e6132ebaee0e1a3d24e93903f6709`](https://github.com/SagerNet/sing-box/commit/af6e64c3b69e6132ebaee0e1a3d24e93903f6709), while retaining POKROV
 XHTTP, Smart Access, WARP, AWG and opt-in Telegram WSS transports. Runtime client
 builds use `pokrov_client`: Psiphon, Tor, Mieru, SSH and remote server
 inbounds are omitted; TUN and authenticated local SOCKS/HTTP/mixed remain.
@@ -124,13 +127,22 @@ module tests and focused engine tests (AWG, REALITY/uTLS, XHTTP, Hysteria2
 reload, DNS, selector groups, daemon and libbox). CI runs the same script on Linux
 and builds no artifacts. During development, run the owning package test with
 the script's client tags; rerun accepted checks only after a relevant change or failure.
+Engine packages are selected by their module import paths from the root module,
+so they use the dependency versions and replacements shipped in the SDK.
+`-GovulncheckExecutable <path>` adds a local package-level vulnerability scan of
+that same graph. It reports imported vulnerable packages, not symbol reachability;
+it needs the Go vulnerability database and is not a paid or publication gate.
+For native loopback tests, set `POKROV_SLIPSTREAM_TEST_DIRECTORY` to the existing
+client/server directory and `POKROV_XRAY_TEST_DIRECTORY` to directories containing
+Xray `v26.6.27`, `v26.7.28`, and `v26.9.9`. These fixtures use loopback only.
 
 Use the commands in [README](../README.md#build). Android validates Go `1.26.10`,
 NDK `29.0.14206865`, and both gomobile/gobind `v0.1.12` identities. Existing cached
 tools are read with `go version -m`; a missing or mismatched command, module or
 Go compiler version triggers installation of the exact pin and revalidation.
 `-GomobileBinDirectory` selects the cache, and `-OutputDirectory` selects the AAR
-destination. The default target contains four ABIs; `-Arm64Only` is explicit
+destination. The current default target contains three ABIs (armeabi-v7a,
+arm64-v8a and x86_64); `-Arm64Only` is explicit
 private scope and cannot substitute for the universal artifact check.
 Apple installs the same pinned commands, invokes gomobile from that installation
 directory and puts gobind there first in PATH. This script selection and shell
@@ -169,12 +181,20 @@ before enabling the feature and adding those executables to the AAR. A JNI
 shared library is not a substitute. Native Android clients must be built with
 the configured NDK and 16 KiB ELF page alignment; the consuming app must extract
 native libraries for execution and supply the installed path through host setup.
-`config/release.json` pins the upstream client source; its `v0.1.1` Windows
-archive is available upstream, while Android CLI compilation and packaging are
-separate build inputs. These options do not select or publish new client artifacts.
+`config/release.json` pins the upstream client source. Native clients must also
+include `third_party/slipstream/pokrov-local-io.patch`, which provides the private
+bootstrap/readiness pipes, mutual local TCP authentication and authenticated DNS
+relay. The upstream `v0.1.1` Windows archive lacks this local protocol and cannot
+be used with this source. These options do not select or publish new client artifacts.
+The existing release config also pins the exact selected Windows executable and
+three Android native executables by size and SHA-256. Packaging checks the input
+and copied/archived output; a different native build needs an intentional pin
+update after native interop and rejection checks; source revision alone does not
+establish that a binary implements the patched protocol.
 
 `scripts/build-slipstream-android.ps1` builds the current `armeabi-v7a`,
-`arm64-v8a`, and `x86_64` native CLIs from the pinned initialized upstream checkout.
+`arm64-v8a`, and `x86_64` native CLIs from the pinned initialized upstream checkout,
+applying the maintained local I/O patch through `prepare-slipstream-source.ps1`.
 Pass `-SourceDirectory`, `-OutputDirectory`, the pinned `-AndroidNdk`, and
 `-ToolDirectories` containing Cargo, CMake/Ninja, and complete MSYS Unix
 Perl/make/pkgconf/cygpath tools. `-Abis` restricts a build to selected current
@@ -182,16 +202,32 @@ ABIs. The Windows-host helper obtains the locked OpenSSL source through Cargo
 metadata, builds static OpenSSL and picoquic with NDK, then builds the CLI without
 upstream's Unix-shell auto-build. It checks the ELF machine, PIE, 16 KiB alignment
 and system-only dynamic dependencies before copying `<ABI>/libslipstream.so`.
+`scripts/build-slipstream-windows.ps1` applies the same patch and builds the
+Windows executable, static OpenSSL and picoquic. Run it in a Visual Studio 2022
+x64 developer environment with `-SourceDirectory`, `-OutputDirectory` and
+`-ToolDirectories` for Cargo, CMake, full Windows Perl and pkgconf. Both helpers
+use the locked Cargo dependency sources and install no build tools. The wire test
+uses `POKROV_SLIPSTREAM_TEST_DIRECTORY` containing the patched client and pinned
+upstream server; it covers data transfer, wrong certificate rejection, protection,
+unauthenticated peers, interface reset and process/socket cleanup.
 
-Post-`1.0.3` working source requires Go `1.26.8` and the remediated dependency
+Post-`1.0.3` working source uses Go `1.26.10` and the remediated dependency
 floor recorded in both Go modules: gRPC `1.83.2`, CIRCL `1.6.3`,
-`golang.org/x/crypto` `0.56.0`, `x/net` `0.58.0`, and `x/text` `0.41.0`.
+`golang.org/x/crypto` `0.57.0`, `x/net` `0.60.0`, `x/text` `0.42.0`, and
+chi/v5 `5.3.0` (including their required Go x/* dependencies).
 Android source builds also pin NDK `29.0.14206865` in `config/release.json`.
 The build validates that exact `source.properties` revision and selects it
 through `ANDROID_NDK_HOME` before `gomobile` links the pinned Cronet archive.
 The floor was selected from reachable `govulncheck` findings; lowering any of
 these versions requires a new vulnerability review. It changes source/build
 inputs only and does not relabel the retained `1.0.3` artifacts.
+
+The November audit's host graph scan found the HTTP/2 package advisories fixed
+by `x/net 0.60.0` and RealIP advisories fixed by `chi/v5 5.3.0`. Both module
+graphs now use these fixes. A Go 1.26.10 source run of `govulncheck v1.7.0`
+reported zero vulnerable imported packages and zero reachable vulnerable symbols;
+three advisories remain only in required modules outside the scanned call graph.
+This is source verification for that host graph, not new Android/Windows artifacts.
 
 gRPC `1.83.2` closes the reachable findings
 [GO-2026-6443](https://pkg.go.dev/vuln/GO-2026-6443) and
