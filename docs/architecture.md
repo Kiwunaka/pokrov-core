@@ -190,9 +190,11 @@ Windows source has a separate `WindowsLocalDpiAdmissionVersion` and desktop
 `PrepareWindowsLocalDpiProfile` verifies Windows authority with the host's
 compiled pins and prepares matching nonshared Selective or Smart Safe domain
 rules, including the exact control host, with a physically bound TCP:443 local path
-and the original encrypted VPN fallback. It does not start winws, perform proof
-or admit a holder. Android retains its loopback SOCKS path. Setup failure uses
-one VPN dial; transmitted streams are never replayed. Windows service executor,
+and the original encrypted VPN fallback. Domains with the same match and name
+under multiple signed services keep their VPN rule in both modes, including when
+only one of the services is selected. The native Windows host starts winws,
+proves the path and admits the holder. Android uses its loopback SOCKS path.
+Setup failure uses one VPN dial before any application bytes. Windows service executor,
 assets, current profile/network proof and captured-holder lifetime ownership
 remain required, so this source capability does not enable the feature or
 change retained releases.

@@ -332,6 +332,7 @@ func TestWindowsSmartSafeServicesRequireSignedModeAndSameProtectedFallback(t *te
 	}
 	now := time.Now().UTC()
 	issued, expires := now.Add(-time.Minute).Format(time.RFC3339), now.Add(time.Minute).Format(time.RFC3339)
+	cdn := map[string]any{"name": "cdn.example", "match": "suffix", "shared": false, "role": "media", "source_ids": []string{"test"}}
 	signedService := func(id, host string) map[string]any {
 		return map[string]any{
 			"service_id": id, "enabled": true, "evidence_status": "verified", "platforms": []string{"windows"},
@@ -339,8 +340,11 @@ func TestWindowsSmartSafeServicesRequireSignedModeAndSameProtectedFallback(t *te
 			"source_ids": []string{"test"}, "evidence_ids": []string{"test"}, "android": []any{}, "windows": []any{},
 			"networks": []any{}, "provider_capability_refs": []any{}, "external_gateway_policy": "forbidden",
 			"access_states": []string{"paid_unlimited"},
-			"route_intents": []any{map[string]any{"mode": "smart_safe", "action": "vpn", "local_dpi_control_host": host}},
-			"domains":       []any{map[string]any{"name": host, "match": "exact", "shared": false, "role": "web", "source_ids": []string{"test"}}},
+			"route_intents": []any{
+				map[string]any{"mode": "smart_safe", "action": "vpn", "local_dpi_control_host": host},
+				map[string]any{"mode": "selective", "action": "vpn", "local_dpi_control_host": host},
+			},
+			"domains": []any{map[string]any{"name": host, "match": "exact", "shared": false, "role": "web", "source_ids": []string{"test"}}, cdn},
 		}
 	}
 	payload, _ := json.Marshal(map[string]any{
@@ -360,8 +364,12 @@ func TestWindowsSmartSafeServicesRequireSignedModeAndSameProtectedFallback(t *te
 		return map[string]any{"action": "route", "domain": []string{host}, "outbound": "vpn",
 			"pokrov_catalog_window": map[string]any{"service_id": id, "issued_at": issued, "expires_at": expires}}
 	}
-	route := map[string]any{"final": "vpn", "rules": []any{signedRule("youtube", "youtube.example"), signedRule("discord", "discord.example")}}
-	config := map[string]any{"_meta": map[string]any{"local_dpi": metadata},
+	discordRule := signedRule("discord", "discord.example")
+	cdnRule := signedRule("discord", "cdn.example")
+	cdnRule["domain_suffix"] = cdnRule["domain"]
+	delete(cdnRule, "domain")
+	route := map[string]any{"final": "vpn", "rules": []any{signedRule("youtube", "youtube.example"), discordRule, cdnRule}}
+	config := map[string]any{"_meta": map[string]any{"local_dpi": &metadata},
 		"outbounds": []any{map[string]any{"type": "direct", "tag": "direct"},
 			map[string]any{"type": "vless", "tag": "vpn", "tls": map[string]any{"enabled": true}},
 			map[string]any{"type": "vless", "tag": "other-vpn", "tls": map[string]any{"enabled": true}}},
@@ -369,6 +377,22 @@ func TestWindowsSmartSafeServicesRequireSignedModeAndSameProtectedFallback(t *te
 	prepare := func() (string, error) {
 		encoded, _ := json.Marshal(config)
 		return PrepareWindowsLocalDpiProfile(string(encoded), string(keys), "lab", "physical-fixture")
+	}
+	checkCDN := func(receipt windowsDpiPreparation) {
+		t.Helper()
+		for _, service := range receipt.Services {
+			if len(service.Domains) != 1 || service.Domains[0].Name != service.ControlHost {
+				t.Fatal("common CDN entered the local packet-filter scope")
+			}
+		}
+		var retained struct {
+			Route struct{ Rules []json.RawMessage }
+		}
+		original, _ := json.Marshal(cdnRule)
+		if json.Unmarshal(receipt.Profile, &retained) != nil || len(retained.Route.Rules) == 0 ||
+			string(retained.Route.Rules[len(retained.Route.Rules)-1]) != string(original) {
+			t.Fatal("common CDN lost its original VPN rule")
+		}
 	}
 	result, err := prepare()
 	var receipt windowsDpiPreparation
@@ -384,6 +408,7 @@ func TestWindowsSmartSafeServicesRequireSignedModeAndSameProtectedFallback(t *te
 		prepared.Route.Final != "vpn" || len(receipt.Services) != 2 || len(prepared.Outbounds) != 5 {
 		t.Fatal("signed Smart Safe services did not prepare separate holders")
 	}
+	checkCDN(receipt)
 	discord, youtube := prepared.Outbounds[3], prepared.Outbounds[4]
 	if discord.ServiceID != "discord" || discord.VPNOutbound != "vpn" || discord.PreferTCP ||
 		youtube.ServiceID != "youtube" || youtube.VPNOutbound != "vpn" || !youtube.PreferTCP {
@@ -402,4 +427,13 @@ func TestWindowsSmartSafeServicesRequireSignedModeAndSameProtectedFallback(t *te
 	if _, err := prepare(); err == nil {
 		t.Fatal("Smart Safe allowed an unsigned service")
 	}
+	metadata.Mode = "selective"
+	metadata.Services = map[string]string{"discord": "discord.example"}
+	route["final"] = "direct"
+	route["rules"] = []any{discordRule, cdnRule}
+	result, err = prepare()
+	if err != nil || json.Unmarshal([]byte(result), &receipt) != nil || len(receipt.Services) != 1 {
+		t.Fatal("Selective did not prepare the selected holder")
+	}
+	checkCDN(receipt)
 }

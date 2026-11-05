@@ -112,6 +112,19 @@ func PrepareWindowsLocalDpiProfile(configJSON, publicKeysJSON, audience, bindInt
 	} else if !windowsDpiProtectedVPN(byTag, finalTag, make(map[string]bool)) {
 		return "", errWindowsDpiScope
 	}
+	// Identical catalog VPN decisions share a materialized rule. Read owners
+	// from the full catalog so selecting one service still keeps the rule on VPN.
+	domainOwners := make(map[[2]string]string)
+	for _, signed := range envelope.Payload.Services {
+		for _, domain := range signed.Domains {
+			identity := [2]string{domain.Match, domain.Name}
+			if owner, seen := domainOwners[identity]; !seen {
+				domainOwners[identity] = signed.ServiceID
+			} else if owner != signed.ServiceID {
+				domainOwners[identity] = ""
+			}
+		}
+	}
 	serviceIDs := make([]string, 0, len(metadata.Services))
 	for serviceID := range metadata.Services {
 		serviceIDs = append(serviceIDs, serviceID)
@@ -171,13 +184,16 @@ func PrepareWindowsLocalDpiProfile(configJSON, publicKeysJSON, audience, bindInt
 				continue
 			}
 			for _, domain := range domains {
+				if domain.Shared || domainOwners[[2]string{domain.Match, domain.Name}] != serviceID {
+					continue
+				}
 				key := "domain"
 				other := "domain_suffix"
 				if domain.Match == "suffix" {
 					key, other = other, key
 				}
 				var names []string
-				if domain.Shared || rule[other] != nil || json.Unmarshal(rule[key], &names) != nil || len(names) != 1 || names[0] != domain.Name {
+				if rule[other] != nil || json.Unmarshal(rule[key], &names) != nil || len(names) != 1 || names[0] != domain.Name {
 					continue
 				}
 				vpn := windowsDpiString(rule["outbound"])
