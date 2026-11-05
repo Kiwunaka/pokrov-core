@@ -79,7 +79,7 @@ func PrepareWindowsRetry(holders []*Outbound, expectedIDs []string) ([]string, b
 		}
 		h.admissionID = newIDs[i]
 		h.admissionResolved = make(chan struct{})
-		h.admissionDeadline = time.Time{} // Retry never repeats the initial YouTube wait.
+		h.admissionDeadline = time.Time{} // Retry never repeats the initial proof wait.
 		h.withdrawCtx, h.withdrawCancel = context.WithCancel(h.runtimeCtx)
 		h.withdrawCompleted = false
 		h.failureReason = ""

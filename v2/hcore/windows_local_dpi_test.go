@@ -322,7 +322,7 @@ func TestWindowsLocalDpiPreparationRetainsVPNAndExactSignedScope(t *testing.T) {
 	}
 }
 
-func TestWindowsSmartSafeYouTubeRequiresSignedModeAndSameProtectedFallback(t *testing.T) {
+func TestWindowsSmartSafeServicesRequireSignedModeAndSameProtectedFallback(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		t.Skip("Windows admission unavailable")
 	}
@@ -332,18 +332,21 @@ func TestWindowsSmartSafeYouTubeRequiresSignedModeAndSameProtectedFallback(t *te
 	}
 	now := time.Now().UTC()
 	issued, expires := now.Add(-time.Minute).Format(time.RFC3339), now.Add(time.Minute).Format(time.RFC3339)
-	payload, _ := json.Marshal(map[string]any{
-		"schema_version": "pokrov-routing-catalog-v1", "audience": "lab", "revision": 7, "security_revision": 3,
-		"issued_at": issued, "expires_at": expires, "sources": []any{map[string]any{}}, "evidence": []any{},
-		"services": []any{map[string]any{
-			"service_id": "youtube", "enabled": true, "evidence_status": "verified", "platforms": []string{"windows"},
-			"display_name": "YouTube", "categories": []string{"media"}, "classification": "ordinary", "reason": "test",
+	signedService := func(id, host string) map[string]any {
+		return map[string]any{
+			"service_id": id, "enabled": true, "evidence_status": "verified", "platforms": []string{"windows"},
+			"display_name": id, "categories": []string{"media"}, "classification": "ordinary", "reason": "test",
 			"source_ids": []string{"test"}, "evidence_ids": []string{"test"}, "android": []any{}, "windows": []any{},
 			"networks": []any{}, "provider_capability_refs": []any{}, "external_gateway_policy": "forbidden",
 			"access_states": []string{"paid_unlimited"},
-			"route_intents": []any{map[string]any{"mode": "smart_safe", "action": "vpn", "local_dpi_control_host": "control.example"}},
-			"domains":       []any{map[string]any{"name": "control.example", "match": "exact", "shared": false, "role": "web", "source_ids": []string{"test"}}},
-		}},
+			"route_intents": []any{map[string]any{"mode": "smart_safe", "action": "vpn", "local_dpi_control_host": host}},
+			"domains":       []any{map[string]any{"name": host, "match": "exact", "shared": false, "role": "web", "source_ids": []string{"test"}}},
+		}
+	}
+	payload, _ := json.Marshal(map[string]any{
+		"schema_version": "pokrov-routing-catalog-v1", "audience": "lab", "revision": 7, "security_revision": 3,
+		"issued_at": issued, "expires_at": expires, "sources": []any{map[string]any{}}, "evidence": []any{},
+		"services": []any{signedService("youtube", "youtube.example"), signedService("discord", "discord.example")},
 	})
 	digest := sha256.Sum256(payload)
 	envelope, _ := json.Marshal(map[string]any{"algorithm": "Ed25519", "key_id": "test", "payload_sha256": hex.EncodeToString(digest[:]),
@@ -352,10 +355,12 @@ func TestWindowsSmartSafeYouTubeRequiresSignedModeAndSameProtectedFallback(t *te
 	keys, _ := json.Marshal(map[string]string{"test": base64.StdEncoding.EncodeToString(public)})
 	metadata := windowsDpiMetadata{Mode: "smart_safe", Platform: "windows", Envelope: string(envelope),
 		Digest: hex.EncodeToString(digest[:]), Revision: 7, SecurityRevision: 3, AccessState: "paid_unlimited",
-		Services: map[string]string{"youtube": "control.example"}}
-	rule := map[string]any{"action": "route", "domain": []string{"control.example"}, "outbound": "vpn",
-		"pokrov_catalog_window": map[string]any{"service_id": "youtube", "issued_at": issued, "expires_at": expires}}
-	route := map[string]any{"final": "vpn", "rules": []any{rule}}
+		Services: map[string]string{"youtube": "youtube.example", "discord": "discord.example"}}
+	signedRule := func(id, host string) map[string]any {
+		return map[string]any{"action": "route", "domain": []string{host}, "outbound": "vpn",
+			"pokrov_catalog_window": map[string]any{"service_id": id, "issued_at": issued, "expires_at": expires}}
+	}
+	route := map[string]any{"final": "vpn", "rules": []any{signedRule("youtube", "youtube.example"), signedRule("discord", "discord.example")}}
 	config := map[string]any{"_meta": map[string]any{"local_dpi": metadata},
 		"outbounds": []any{map[string]any{"type": "direct", "tag": "direct"},
 			map[string]any{"type": "vless", "tag": "vpn", "tls": map[string]any{"enabled": true}},
@@ -370,12 +375,19 @@ func TestWindowsSmartSafeYouTubeRequiresSignedModeAndSameProtectedFallback(t *te
 	var prepared struct {
 		Outbounds []struct {
 			VPNOutbound string `json:"vpn_outbound"`
+			ServiceID   string `json:"service_id"`
+			PreferTCP   bool   `json:"prefer_tcp"`
 		}
 		Route struct{ Final string }
 	}
 	if err != nil || json.Unmarshal([]byte(result), &receipt) != nil || json.Unmarshal(receipt.Profile, &prepared) != nil ||
-		prepared.Route.Final != "vpn" || len(prepared.Outbounds) != 4 || prepared.Outbounds[3].VPNOutbound != "vpn" {
-		t.Fatal("signed Smart Safe YouTube did not preserve its protected VPN")
+		prepared.Route.Final != "vpn" || len(receipt.Services) != 2 || len(prepared.Outbounds) != 5 {
+		t.Fatal("signed Smart Safe services did not prepare separate holders")
+	}
+	discord, youtube := prepared.Outbounds[3], prepared.Outbounds[4]
+	if discord.ServiceID != "discord" || discord.VPNOutbound != "vpn" || discord.PreferTCP ||
+		youtube.ServiceID != "youtube" || youtube.VPNOutbound != "vpn" || !youtube.PreferTCP {
+		t.Fatal("Smart Safe lost its service-scoped VPN or QUIC policy")
 	}
 	route["final"] = "direct"
 	if _, err := prepare(); err == nil {
@@ -386,8 +398,8 @@ func TestWindowsSmartSafeYouTubeRequiresSignedModeAndSameProtectedFallback(t *te
 		t.Fatal("Smart Safe allowed a different rule fallback")
 	}
 	route["final"] = "vpn"
-	metadata.Services["other"] = "control.example"
+	metadata.Services["other"] = "discord.example"
 	if _, err := prepare(); err == nil {
-		t.Fatal("Smart Safe allowed another service")
+		t.Fatal("Smart Safe allowed an unsigned service")
 	}
 }

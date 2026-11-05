@@ -49,8 +49,7 @@ func verifyLocalDpiCatalog(envelopeJSON, publicKeysJSON, audience, expectedPaylo
 
 func verifyLocalDpiCatalogPlatform(envelopeJSON, publicKeysJSON, audience, expectedPayloadSHA256 string,
 	expectedRevision, expectedSecurityRevision int64, serviceID, controlHost, accessState, platform, mode string, now time.Time) bool {
-	if (mode != "selective" && mode != "smart_safe") || (mode == "smart_safe" && serviceID != "youtube") ||
-		!localDpiCatalogHost(controlHost) {
+	if (mode != "selective" && mode != "smart_safe") || !localDpiCatalogHost(controlHost) {
 		return false
 	}
 	verified := verifiedRoutingCatalogService(envelopeJSON, publicKeysJSON, audience, expectedPayloadSHA256,
@@ -212,8 +211,18 @@ func localDpiCatalogService(service map[string]json.RawMessage, serviceID, host,
 		}
 		if rawHost, present := intent["local_dpi_control_host"]; present {
 			intentHost, _ := localDpiCatalogString(rawHost)
-			if (mode != "selective" && (mode != "smart_safe" || serviceID != "youtube")) ||
-				action != "vpn" || !localDpiCatalogHost(intentHost) {
+			switch mode {
+			case "selective":
+			case "smart_safe":
+				switch serviceID {
+				case "youtube", "discord", "instagram", "threads":
+				default:
+					return false
+				}
+			default:
+				return false
+			}
+			if action != "vpn" || !localDpiCatalogHost(intentHost) {
 				return false
 			}
 			if mode == requestedMode {
@@ -247,10 +256,7 @@ func localDpiCatalogService(service map[string]json.RawMessage, serviceID, host,
 			return false
 		}
 		seenDomains[identity] = true
-		if name == host {
-			if match != "exact" || shared != "false" {
-				return false
-			}
+		if name == host && match == "exact" && shared == "false" {
 			foundHost = true
 		}
 	}

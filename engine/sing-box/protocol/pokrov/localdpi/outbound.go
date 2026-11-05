@@ -306,16 +306,16 @@ func (h *Outbound) ListenPacket(ctx context.Context, destination M.Socksaddr) (n
 	return h.vpn.ListenPacket(ctx, destination)
 }
 
-// Wait only for the current YouTube holder, with one deadline shared by all
-// flows. Withdrawal resumes the protected VPN fallback; runtime cancellation
-// or closure must not start a fallback connection.
-func (h *Outbound) waitYouTubeAdmission(ctx context.Context) error {
+// Wait for the current holder, with one deadline shared by its flows.
+// Withdrawal resumes the protected VPN fallback; runtime cancellation or
+// closure must not start a fallback connection.
+func (h *Outbound) waitAdmission(ctx context.Context) error {
 	h.mu.Lock()
 	if h.closed {
 		h.mu.Unlock()
 		return errClosed
 	}
-	waiting := h.serviceID == "youtube" && h.preferTCP && h.admission.Load() == admissionUnpublished
+	waiting := h.admission.Load() == admissionUnpublished
 	deadline := h.admissionDeadline
 	id, resolved, withdraw := h.admissionID, h.admissionResolved, h.withdrawCtx
 	h.mu.Unlock()
@@ -345,7 +345,7 @@ func (h *Outbound) waitYouTubeAdmission(ctx context.Context) error {
 func (h *Outbound) NewPacketConnection(ctx context.Context, conn N.PacketConn, metadata adapter.InboundContext, onClose N.CloseHandlerFunc) {
 	preferTCP := h.preferTCP && h.serviceID == "youtube" && metadata.Destination.Port == 443
 	if preferTCP {
-		if err := h.waitYouTubeAdmission(ctx); err != nil {
+		if err := h.waitAdmission(ctx); err != nil {
 			N.CloseOnHandshakeFailure(conn, onClose, err)
 			return
 		}
@@ -398,8 +398,8 @@ func (h *Outbound) NewConnection(ctx context.Context, conn net.Conn, metadata ad
 		N.CloseOnHandshakeFailure(conn, finish, flowCtx.Err())
 		return
 	}
-	if eligible && h.preferTCP && h.serviceID == "youtube" {
-		if err := h.waitYouTubeAdmission(flowCtx); err != nil {
+	if eligible {
+		if err := h.waitAdmission(flowCtx); err != nil {
 			N.CloseOnHandshakeFailure(conn, finish, err)
 			return
 		}

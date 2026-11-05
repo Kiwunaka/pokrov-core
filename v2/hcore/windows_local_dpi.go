@@ -72,11 +72,6 @@ func PrepareWindowsLocalDpiProfile(configJSON, publicKeysJSON, audience, bindInt
 		(metadata.Mode != "selective" && metadata.Mode != "smart_safe") || metadata.Platform != "windows" || len(metadata.Services) == 0 || len(metadata.Services) > 256 {
 		return "", errWindowsDpiScope
 	}
-	if metadata.Mode == "smart_safe" {
-		if _, ok := metadata.Services["youtube"]; !ok || len(metadata.Services) != 1 {
-			return "", errWindowsDpiScope
-		}
-	}
 	var envelope struct {
 		Payload struct {
 			IssuedAt  string `json:"issued_at"`

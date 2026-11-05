@@ -141,7 +141,7 @@ func (v *admissionTestVPN) DialContext(ctx context.Context, network string, addr
 	return v.dialer.DialContext(ctx, network, address)
 }
 
-func TestYouTubeTCPTriesAdmittedLocalBeforeVPNAndSharesDeadline(t *testing.T) {
+func TestLocalDpiTCPTriesAdmittedLocalBeforeVPNAndSharesDeadline(t *testing.T) {
 	events := make(chan string, 4)
 	metadata := adapter.InboundContext{Network: N.NetworkTCP,
 		Destination: M.Socksaddr{Addr: netip.MustParseAddr("8.8.8.8"), Port: 443}}
@@ -154,6 +154,7 @@ func TestYouTubeTCPTriesAdmittedLocalBeforeVPNAndSharesDeadline(t *testing.T) {
 	}
 	setup := func(deadline time.Time) *Outbound {
 		h := newPendingTestOutbound(nil, deadline)
+		h.serviceID, h.preferTCP = "discord", false
 		h.proxy = &admissionTestDialer{name: "local", events: events}
 		h.vpn = &admissionTestVPN{dialer: &admissionTestDialer{name: "vpn", events: events}}
 		return h
@@ -221,14 +222,6 @@ func TestYouTubeTCPTriesAdmittedLocalBeforeVPNAndSharesDeadline(t *testing.T) {
 		t.Fatal("cancel started a local or VPN dial")
 	default:
 	}
-
-	other := setup(time.Now().Add(time.Second))
-	other.serviceID, other.preferTCP = "other", false
-	done = start(other, context.Background())
-	if got := readEvent(); got != "vpn" {
-		t.Fatalf("ordinary service used %s", got)
-	}
-	<-done
 }
 
 func (c *observedTestConn) Read(p []byte) (int, error) {
