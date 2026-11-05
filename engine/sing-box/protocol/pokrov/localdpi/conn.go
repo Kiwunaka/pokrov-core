@@ -6,7 +6,10 @@ import (
 	"net"
 	"sync"
 	"sync/atomic"
+	"time"
 )
+
+const firstResponseTimeout = 5 * time.Second
 
 // Embedding only net.Conn keeps buffer/syscall/unwrap fast paths behind these
 // Read and Write methods. Remote bytes are not a decrypted protocol proof.
@@ -23,8 +26,12 @@ type observedConn struct {
 
 func (c *observedConn) Read(p []byte) (int, error) {
 	n, err := c.Conn.Read(p)
-	if n > 0 {
-		c.responded.Store(true)
+	if n > 0 && !c.responded.Load() {
+		c.owner.mu.Lock()
+		if !c.responded.Swap(true) && c.wrote.Load() {
+			_ = c.Conn.SetReadDeadline(time.Time{})
+		}
+		c.owner.mu.Unlock()
 	}
 	// Browsers can open speculative TCP sockets without sending a request.
 	// A read failure before any client payload has not exercised the strategy.
@@ -37,15 +44,28 @@ func (c *observedConn) Read(p []byte) (int, error) {
 func (c *observedConn) Write(p []byte) (int, error) {
 	c.owner.mu.Lock()
 	available := c.owner.admissionID == c.admissionID && c.owner.admission.Load() != admissionWithdrawn
-	c.owner.mu.Unlock()
 	if !available || c.ctx.Err() != nil {
+		c.owner.mu.Unlock()
 		return 0, errUnavailable
 	}
-	if len(p) > 0 {
+	var deadlineErr error
+	if len(p) > 0 && !c.wrote.Load() {
+		// A reader may already be waiting. Arm the deadline only when the
+		// client uses this socket. The first response takes the same lock.
 		c.wrote.Store(true)
+		if !c.responded.Load() {
+			deadlineErr = c.Conn.SetReadDeadline(time.Now().Add(firstResponseTimeout))
+		}
+	}
+	c.owner.mu.Unlock()
+	if deadlineErr != nil {
+		c.observe(deadlineErr, failureEarlyWrite)
+		return 0, deadlineErr
 	}
 	n, err := c.Conn.Write(p)
-	c.observe(err, failureEarlyWrite)
+	if c.wrote.Load() {
+		c.observe(err, failureEarlyWrite)
+	}
 	return n, err
 }
 

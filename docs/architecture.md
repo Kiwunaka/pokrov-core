@@ -201,10 +201,12 @@ change retained releases.
 
 Windows local-DPI rules admit only IPv4, matching the native physical control
 proof. Each override precedes its unchanged signed VPN rule, so IPv6 retains
-the encrypted fallback instead of reaching final direct. A browser's unused
-speculative TCP socket read failure before any client write does not retire the
-service; a read failure after a write but before any response still fails the
-admission unless the flow is closed or cancelled.
+the encrypted fallback instead of reaching final direct. An unused speculative
+TCP socket can close without affecting admission. The first client payload write
+arms a five-second deadline for the first remote byte. That byte clears the
+deadline. A read failure or timeout while waiting closes the local flow and fails
+only its service admission. Subsequent connections use the protected VPN and
+bytes already sent stay with the original connection.
 
 Eligible TCP waits for unpublished proof until one shared five-second deadline
 per holder. Native compilers set `prefer_tcp` only on the signed YouTube holder,

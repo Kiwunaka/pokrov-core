@@ -12,15 +12,18 @@ import (
 	"time"
 
 	"github.com/sagernet/sing-box/adapter"
+	"github.com/sagernet/sing-box/log"
+	"github.com/sagernet/sing-box/route"
 	M "github.com/sagernet/sing/common/metadata"
 	N "github.com/sagernet/sing/common/network"
 )
 
 type observedTestConn struct {
 	net.Conn
-	readByte   bool
-	readError  error
-	writeError error
+	readByte     bool
+	readError    error
+	writeError   error
+	readDeadline time.Time
 }
 
 type packetTestConn struct {
@@ -122,10 +125,14 @@ func TestYouTubeQUICWaitsForProofAndRetainsVPNFallback(t *testing.T) {
 type admissionTestDialer struct {
 	name   string
 	events chan string
+	conn   net.Conn
 }
 
 func (d *admissionTestDialer) DialContext(context.Context, string, M.Socksaddr) (net.Conn, error) {
 	d.events <- d.name
+	if d.conn != nil {
+		return d.conn, nil
+	}
 	return nil, errors.New("synthetic dial failure")
 }
 func (d *admissionTestDialer) ListenPacket(context.Context, M.Socksaddr) (net.PacketConn, error) {
@@ -224,6 +231,56 @@ func TestLocalDpiTCPTriesAdmittedLocalBeforeVPNAndSharesDeadline(t *testing.T) {
 	}
 }
 
+func TestLocalDpiFirstResponseTimeoutUsesVPNOnNextConnection(t *testing.T) {
+	events := make(chan string, 2)
+	manager := route.NewConnectionManager(log.NewNOPFactory().Logger())
+	h := newPendingTestOutbound(manager, time.Time{})
+	defer h.Close()
+	h.serviceID, h.preferTCP = "threads", false
+	local, localPeer := net.Pipe()
+	defer localPeer.Close()
+	vpn, vpnPeer := net.Pipe()
+	defer vpnPeer.Close()
+	h.proxy = &admissionTestDialer{name: "local", events: events, conn: local}
+	h.vpn = &admissionTestVPN{dialer: &admissionTestDialer{name: "vpn", events: events, conn: vpn}}
+	if !h.AdmitAdmission("fixture") {
+		t.Fatal("admission failed")
+	}
+	metadata := adapter.InboundContext{Network: N.NetworkTCP,
+		Destination: M.Socksaddr{Addr: netip.MustParseAddr("8.8.8.8"), Port: 443}}
+	client, app := net.Pipe()
+	defer app.Close()
+	deadline := time.Now().Add(firstResponseTimeout + time.Second)
+	_ = app.SetDeadline(deadline)
+	_ = localPeer.SetDeadline(deadline)
+	h.NewConnection(context.Background(), client, metadata, nil)
+
+	payload := []byte("first client payload")
+	if _, err := app.Write(payload); err != nil {
+		t.Fatal(err)
+	}
+	received := make([]byte, len(payload))
+	if _, err := io.ReadFull(localPeer, received); err != nil || string(received) != string(payload) {
+		t.Fatal("local peer did not receive the first payload")
+	}
+	if _, err := app.Read(received); !errors.Is(err, io.EOF) {
+		t.Fatalf("Core did not close the silent stream: %v", err)
+	}
+	if observation := h.ReadObservation(); observation.State != "failed" || observation.FailureReason != "early_read" ||
+		observation.LocalHandoffs != 1 || observation.VPNHandoffs != 0 {
+		t.Fatalf("silent local path left the wrong admission state: %+v", observation)
+	}
+	if got := <-events; got != "local" || len(events) != 0 {
+		t.Fatal("first flow was replayed")
+	}
+	nextClient, nextApp := net.Pipe()
+	defer nextApp.Close()
+	h.NewConnection(context.Background(), nextClient, metadata, nil)
+	if observation := h.ReadObservation(); observation.LocalHandoffs != 1 || observation.VPNHandoffs != 1 {
+		t.Fatalf("next flow did not reach the VPN: %+v", observation)
+	}
+}
+
 func (c *observedTestConn) Read(p []byte) (int, error) {
 	if c.readError != nil {
 		return 0, c.readError
@@ -244,6 +301,11 @@ func (c *observedTestConn) Write(p []byte) (int, error) {
 }
 
 func (*observedTestConn) Close() error { return nil }
+
+func (c *observedTestConn) SetReadDeadline(deadline time.Time) error {
+	c.readDeadline = deadline
+	return nil
+}
 
 func TestIdleLocalDpiEOFKeepsAdmissionAndUsedFlowFailureIsRetained(t *testing.T) {
 	newConnection := func(remote *observedTestConn) (*Outbound, *observedConn) {
@@ -284,14 +346,23 @@ func TestIdleLocalDpiEOFKeepsAdmissionAndUsedFlowFailureIsRetained(t *testing.T)
 		t.Fatal("later failures or withdrawal overwrote the first reason")
 	}
 
-	writeFailed, writeConn := newConnection(&observedTestConn{writeError: errors.New("synthetic private transport detail")})
+	writeRemote := &observedTestConn{writeError: errors.New("synthetic private transport detail")}
+	writeFailed, writeConn := newConnection(writeRemote)
+	_, _ = writeConn.Write(nil)
+	if !writeFailed.IsReady() || !writeRemote.readDeadline.IsZero() {
+		t.Fatal("an empty write exercised the local strategy")
+	}
 	_, _ = writeConn.Write([]byte{1})
 	if observed := writeFailed.ReadObservation(); observed.State != "failed" || observed.FailureReason != "early_write" {
 		t.Fatal("write failure escaped the closed reason projection")
 	}
-	responded, respondedConn := newConnection(&observedTestConn{readByte: true})
+	respondedRemote := &observedTestConn{readByte: true}
+	responded, respondedConn := newConnection(respondedRemote)
 	_, _ = respondedConn.Write([]byte{1})
 	_, _ = respondedConn.Read(buffer)
+	if !respondedRemote.readDeadline.IsZero() {
+		t.Fatal("the first response left the local read deadline armed")
+	}
 	_, _ = respondedConn.Read(buffer)
 	if !responded.IsReady() || responded.ReadObservation().FailureReason != "none" {
 		t.Fatal("completed responding connection retired the service")
