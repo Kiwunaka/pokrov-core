@@ -21,10 +21,16 @@ import (
 const (
 	ProtectedProbeURL          = defaultURLTestLink
 	ProtectedPayloadURL        = "https://api.pokrov.space/api/public/egress-probe-64k"
-	ProtectedReserveProbeURL   = "https://pokrov.space/.well-known/pokrov/egress-probe"
-	ProtectedReservePayloadURL = "https://pokrov.space/.well-known/pokrov/egress-probe-64k.bin"
+	protectedReserveProbeHost  = "birch.portal-privacy.online"
+	ProtectedReserveProbeURL   = "https://" + protectedReserveProbeHost + "/.well-known/pokrov/egress-probe"
+	ProtectedReservePayloadURL = "https://" + protectedReserveProbeHost + "/.well-known/pokrov/egress-probe-64k.bin"
 	ProtectedProbeMarker       = "pokrov-authenticated-egress-v1"
 	ProtectedPayloadBytes      = 64 * 1024
+)
+
+var (
+	errOwnedProbeResponseInvalid = errors.New("authenticated egress response invalid")
+	errOwnedProbeUnavailable     = errors.New("runtime egress probe unavailable")
 )
 
 type OwnedProbeTarget struct{ Host, ProbeURL, PayloadURL string }
@@ -118,20 +124,26 @@ func ProbeOwnedTargets(ctx context.Context, probe func(context.Context, OwnedPro
 	if deadline, ok := ctx.Deadline(); ok {
 		primaryCtx, cancel = context.WithTimeout(ctx, time.Until(deadline)*3/4)
 	}
-	err := probe(primaryCtx, OwnedProbeTarget{"api.pokrov.space", ProtectedProbeURL, ProtectedPayloadURL})
+	primaryErr := probe(primaryCtx, OwnedProbeTarget{"api.pokrov.space", ProtectedProbeURL, ProtectedPayloadURL})
 	cancel()
 	if ctx.Err() != nil {
-		if err != nil {
-			return err
+		if primaryErr != nil {
+			return primaryErr
 		}
 		return ctx.Err()
 	}
-	if err == nil {
+	if primaryErr == nil {
 		return nil
 	}
-	err = probe(ctx, OwnedProbeTarget{"pokrov.space", ProtectedReserveProbeURL, ProtectedReservePayloadURL})
+	err := probe(ctx, OwnedProbeTarget{protectedReserveProbeHost, ProtectedReserveProbeURL, ProtectedReservePayloadURL})
 	if err == nil && ctx.Err() != nil {
 		return ctx.Err()
+	}
+	// A verified TLS reply can fail validation during a responder outage.
+	// Preserve the unavailable verdict when both attempts fail.
+	if ctx.Err() == nil && err != nil &&
+		(errors.Is(primaryErr, errOwnedProbeResponseInvalid) || errors.Is(err, errOwnedProbeResponseInvalid)) {
+		return errOwnedProbeUnavailable
 	}
 	return err
 }
@@ -220,7 +232,7 @@ func ProbeGET204(ctx context.Context, conn net.Conn, reader *bufio.Reader, endpo
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusNoContent || response.Header.Get("X-Pokrov-Egress-Probe") != ProtectedProbeMarker {
-		err = errors.New("authenticated egress response invalid")
+		err = errOwnedProbeResponseInvalid
 		diagnostic.Capture(ctx, "validate_response", endpoint, err, response.StatusCode, started)
 		// This session has failed. Closing the socket prevents Body.Close from
 		// draining an invalid response until the caller's entire budget expires.
@@ -269,7 +281,7 @@ func ProbeGET64K(ctx context.Context, conn net.Conn, reader *bufio.Reader, endpo
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK || response.Header.Get("X-Pokrov-Egress-Probe") != ProtectedProbeMarker ||
 		response.ContentLength != ProtectedPayloadBytes || response.Header.Get("Content-Encoding") != "" {
-		err = errors.New("authenticated egress response invalid")
+		err = errOwnedProbeResponseInvalid
 		probeError.Capture(ctx, "validate_response", endpoint, err, response.StatusCode, started)
 		_ = conn.Close()
 		return "unexpected_status", err

@@ -94,7 +94,8 @@ func isOwnedDNSProbeQuestion(message *mDNS.Msg) bool {
 	}
 	question := message.Question[0]
 	return question.Qclass == mDNS.ClassINET && question.Qtype == mDNS.TypeA &&
-		(strings.EqualFold(question.Name, "api.pokrov.space.") || strings.EqualFold(question.Name, "pokrov.space."))
+		(strings.EqualFold(question.Name, "api.pokrov.space.") || strings.EqualFold(question.Name, "pokrov.space.") ||
+			strings.EqualFold(question.Name, "birch.portal-privacy.online."))
 }
 
 func (r *Router) writeDNSPacketResponse(message *mDNS.Msg, response *mDNS.Msg, writer N.PacketWriter, destination M.Socksaddr) error {

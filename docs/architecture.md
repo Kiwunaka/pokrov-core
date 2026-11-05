@@ -1268,21 +1268,24 @@ exchange: owned GET 204 and marker, then GET 200 with a full uncompressed 64 KiB
 body and marker in one verified TLS session. It retains the 15-second deadline
 and captured instance/leaf checks. Periodic 3-second liveness, latency URL tests,
 Smart Access service readiness and endpoint initialization remain separate.
-The existing owned static responder is also used after startup: candidate,
-startup and light liveness/endpoint checks share the primary/reserve deadline
-split (three quarters for primary, then the original remaining deadline).
-Startup requires a complete 204/64 KiB session on either target; light checks
-still require only 204 and the owned marker. General URLTest/latency selection
-does not acquire this retry, and no target, allowance or deadline is added.
+Candidate, startup and light liveness/endpoint checks use the owned Birch
+responder on CH when the primary API probe fails. Both targets share the caller
+deadline (three quarters for primary, then the remaining time). Startup needs
+the full 204/64 KiB session. Light liveness needs 204 and the owned marker.
+A successful Birch check keeps the selected outbound. An HTTP reply that
+fails the probe contract leaves egress unconfirmed and reports the probe as
+unavailable if neither responder completes the check. General URLTest and
+latency selection keep their single-target policy.
 This Core outbound proof does not measure an OS-TUN browser transfer.
 
 The 64 KiB payload exchange classifies IO timeouts only from typed deadline or
 `net.Error.Timeout()` evidence through the error chain. Write/header timeouts
 return `timeout`; a body timeout after valid headers returns `data_stalled` even
 while the caller context is live. With a live caller, short EOF, reset and
-untyped IO failures remain `probe_failed`; invalid status, marker, length or
-encoding remains `unexpected_status`. Original IO causes and caller cancellation,
-deadline overrides, strict body size and primary/reserve budgets are retained.
+untyped IO failures remain `probe_failed`. The HTTP exchange reports
+`unexpected_status` for invalid status, marker, length or encoding. Original IO
+causes, caller cancellation, deadline overrides and the primary/reserve budgets
+are retained.
 GET 204 keeps its existing IO failure mapping.
 
 Candidate ACKs optionally carry `http_64k_failure` for generic GET 64 KiB IO

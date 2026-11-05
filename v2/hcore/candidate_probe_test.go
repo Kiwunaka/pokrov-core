@@ -56,7 +56,7 @@ func (p *candidateProbeTestOutbound) Close() error {
 
 // Use a real Box and certificate store from the shipped root module graph.
 // Only the outbound's wire destination and slow Close are local fixtures.
-func candidateProbeFixture(t *testing.T, closeOutbound func()) (context.Context, string) {
+func candidateProbeFixture(t *testing.T, closeOutbound func(), failHTTP bool) (context.Context, string) {
 	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -64,7 +64,7 @@ func candidateProbeFixture(t *testing.T, closeOutbound func()) (context.Context,
 	}
 	certificate := &x509.Certificate{SerialNumber: big.NewInt(1),
 		Subject:   pkix.Name{CommonName: "candidate probe fixture"},
-		DNSNames:  []string{"api.pokrov.space", "pokrov.space"},
+		DNSNames:  []string{"api.pokrov.space", "birch.portal-privacy.online"},
 		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour),
 		KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}
 	der, err := x509.CreateCertificate(rand.Reader, certificate, certificate, &key.PublicKey, key)
@@ -72,6 +72,10 @@ func candidateProbeFixture(t *testing.T, closeOutbound func()) (context.Context,
 		t.Fatal(err)
 	}
 	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if failHTTP {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
 		w.Header().Set("X-Pokrov-Egress-Probe", candidateProbeMarker)
 		if strings.Contains(r.URL.Path, "64k") {
 			w.Header().Set("Content-Length", fmt.Sprint(candidatePayloadBytes))
@@ -102,7 +106,7 @@ func candidateProbeFixture(t *testing.T, closeOutbound func()) (context.Context,
 
 func TestCandidateProbeFreezesHTTPVerdictBeforeClose(t *testing.T) {
 	closing, release := make(chan struct{}), make(chan struct{})
-	ctx, profile := candidateProbeFixture(t, func() { close(closing); <-release })
+	ctx, profile := candidateProbeFixture(t, func() { close(closing); <-release }, false)
 	result := make(chan CandidateProbeResult, 1)
 	started := time.Now()
 	go func() { result <- probeCandidate(ctx, profile, "slow-close", time.Second, "", nil, nil) }()
@@ -132,7 +136,7 @@ func TestCandidateProbeFreezesHTTPVerdictBeforeClose(t *testing.T) {
 
 func TestCandidateProbeKeepsCertificateFailureDuringClose(t *testing.T) {
 	closing, release := make(chan struct{}), make(chan struct{})
-	ctx, profile := candidateProbeFixture(t, func() { close(closing); <-release })
+	ctx, profile := candidateProbeFixture(t, func() { close(closing); <-release }, false)
 	var raw map[string]any
 	if err := json.Unmarshal([]byte(profile), &raw); err != nil {
 		t.Fatal(err)
@@ -154,6 +158,19 @@ func TestCandidateProbeKeepsCertificateFailureDuringClose(t *testing.T) {
 	got := <-result
 	if got.Success || got.FailureKind != "tls_failed" || got.ProbeError == nil || got.ProbeError.Cause != "tls_certificate" {
 		t.Fatalf("cancellation erased the certificate failure: %+v", got)
+	}
+}
+
+func TestCandidateProbeReportsResponderUnavailable(t *testing.T) {
+	ctx, profile := candidateProbeFixture(t, func() {}, true)
+	result := probeCandidate(ctx, profile, "http-unavailable", time.Second, "", nil, nil)
+	if result.Success || result.FailureKind != "unavailable" || result.ProbeError == nil {
+		t.Fatalf("unexpected verdict for HTTP responder failure: %+v", result)
+	}
+	reserve := result.ProbeError
+	if reserve.Target != "owned_reserve" || reserve.Status != http.StatusServiceUnavailable ||
+		reserve.PrimaryError == nil || reserve.PrimaryError.Status != http.StatusServiceUnavailable {
+		t.Fatal("the unavailable verdict lost the observed responder failures")
 	}
 }
 

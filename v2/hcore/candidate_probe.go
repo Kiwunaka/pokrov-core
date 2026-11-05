@@ -443,6 +443,9 @@ func candidateHTTPProbe(ctx context.Context, started time.Time, dial func(contex
 		*failure = CandidateProbeError{ProbeFailure: current, PrimaryError: primary}
 		return errors.New(kind)
 	})
+	if kind != "" && (failure.Cause == "invalid_response" || failure.PrimaryError != nil && failure.PrimaryError.Cause == "invalid_response") {
+		return "unavailable"
+	}
 	return kind
 }
 

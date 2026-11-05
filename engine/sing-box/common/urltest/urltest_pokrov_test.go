@@ -200,7 +200,7 @@ func TestProtectedStartupSessionReads64KAndRetainsResponseFailures(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	template := &x509.Certificate{SerialNumber: big.NewInt(1), DNSNames: []string{"api.pokrov.space", "pokrov.space"},
+	template := &x509.Certificate{SerialNumber: big.NewInt(1), DNSNames: []string{"api.pokrov.space", "birch.portal-privacy.online"},
 		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour),
 		KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}
 	der, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
@@ -225,8 +225,12 @@ func TestProtectedStartupSessionReads64KAndRetainsResponseFailures(t *testing.T)
 				if strings.HasPrefix(mode, "light") {
 					method = http.MethodHead
 				}
-				if r.Method != method || (r.Host != "api.pokrov.space" && r.Host != "pokrov.space") {
+				if r.Method != method || (r.Host != "api.pokrov.space" && r.Host != "birch.portal-privacy.online") {
 					t.Error("startup did not issue its owned GET")
+				}
+				if mode == "lightReserve" && r.Host == "api.pokrov.space" {
+					w.WriteHeader(http.StatusServiceUnavailable)
+					return
 				}
 				if mode != "lightReserveMissingMarker" {
 					w.Header().Set("X-Pokrov-Egress-Probe", ProtectedProbeMarker)
@@ -270,7 +274,11 @@ func TestProtectedStartupSessionReads64KAndRetainsResponseFailures(t *testing.T)
 			ctx, cancel := context.WithTimeout(ctx, timeout)
 			defer cancel()
 			dialer := ownedProbeDialer{dial: func(ctx context.Context, destination M.Socksaddr) (net.Conn, error) {
-				if (strings.HasPrefix(mode, "reserve") || strings.HasPrefix(mode, "light")) && destination.Fqdn == "api.pokrov.space" {
+				if (strings.HasPrefix(mode, "reserve") || mode == "lightReserveMissingMarker") && destination.Fqdn == "api.pokrov.space" {
+					if mode == "reserveFull" {
+						<-ctx.Done()
+						return nil, ctx.Err()
+					}
 					return nil, errors.New("primary unavailable")
 				}
 				conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", server.Listener.Addr().String())
@@ -335,7 +343,10 @@ func TestProtectedStartupSessionReads64KAndRetainsResponseFailures(t *testing.T)
 			if mode == "short16k" || mode == "stall16k" {
 				wantSessions, wantRequests = 2, 4
 			}
-			if strings.HasPrefix(mode, "light") {
+			switch mode {
+			case "lightReserve":
+				wantSessions, wantRequests = 2, 2
+			case "lightReserveMissingMarker":
 				wantRequests = 1
 			}
 			if sessions.Load() != wantSessions || requests.Load() != wantRequests {
@@ -347,6 +358,10 @@ func TestProtectedStartupSessionReads64KAndRetainsResponseFailures(t *testing.T)
 			if mode == "full" || mode == "reserveFull" || mode == "lightReserve" {
 				if err != nil || (mode != "lightReserve" && delay == 0) {
 					t.Fatalf("full proof failed: %v", err)
+				}
+			} else if mode == "lightReserveMissingMarker" {
+				if !errors.Is(err, errOwnedProbeUnavailable) || delay != 0 {
+					t.Fatalf("an invalid proof response did not report probe unavailability: %v", err)
 				}
 			} else {
 				var failure *ProbeError

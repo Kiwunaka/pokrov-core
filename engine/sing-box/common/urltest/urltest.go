@@ -321,8 +321,8 @@ func urlTest(ctx context.Context, link string, detour N.Dialer, stage *atomic.Ui
 func acceptURLTestResponse(response *http.Response, ownedEgressProbe bool) error {
 	defer response.Body.Close()
 	if ownedEgressProbe && (response.StatusCode != http.StatusNoContent ||
-		response.Header.Get("X-Pokrov-Egress-Probe") != "pokrov-authenticated-egress-v1") {
-		return errors.New("authenticated egress marker invalid")
+		response.Header.Get("X-Pokrov-Egress-Probe") != ProtectedProbeMarker) {
+		return errOwnedProbeResponseInvalid
 	}
 	return nil
 }
