@@ -15,21 +15,24 @@ const firstResponseTimeout = 5 * time.Second
 // Read and Write methods. Remote bytes are not a decrypted protocol proof.
 type observedConn struct {
 	net.Conn
-	ctx         context.Context
-	owner       *Outbound
-	admissionID string
-	wrote       atomic.Bool
-	responded   atomic.Bool
-	closed      atomic.Bool
-	once        sync.Once
+	ctx                   context.Context
+	owner                 *Outbound
+	admissionID           string
+	callerReadDeadline    time.Time // guarded by owner.mu
+	firstResponseDeadline time.Time // guarded by owner.mu
+	wrote                 atomic.Bool
+	responded             atomic.Bool
+	closed                atomic.Bool
+	once                  sync.Once
 }
 
 func (c *observedConn) Read(p []byte) (int, error) {
 	n, err := c.Conn.Read(p)
 	if n > 0 && !c.responded.Load() {
 		c.owner.mu.Lock()
-		if !c.responded.Swap(true) && c.wrote.Load() {
-			_ = c.Conn.SetReadDeadline(time.Time{})
+		if !c.responded.Swap(true) && !c.firstResponseDeadline.IsZero() {
+			c.firstResponseDeadline = time.Time{}
+			_ = c.Conn.SetReadDeadline(c.callerReadDeadline)
 		}
 		c.owner.mu.Unlock()
 	}
@@ -54,7 +57,8 @@ func (c *observedConn) Write(p []byte) (int, error) {
 		// client uses this socket. The first response takes the same lock.
 		c.wrote.Store(true)
 		if !c.responded.Load() {
-			deadlineErr = c.Conn.SetReadDeadline(time.Now().Add(firstResponseTimeout))
+			c.firstResponseDeadline = time.Now().Add(firstResponseTimeout)
+			deadlineErr = c.Conn.SetReadDeadline(c.effectiveReadDeadline(c.callerReadDeadline))
 		}
 	}
 	c.owner.mu.Unlock()
@@ -67,6 +71,36 @@ func (c *observedConn) Write(p []byte) (int, error) {
 		c.observe(err, failureEarlyWrite)
 	}
 	return n, err
+}
+
+func (c *observedConn) SetDeadline(deadline time.Time) error {
+	c.owner.mu.Lock()
+	defer c.owner.mu.Unlock()
+	if err := c.setCallerReadDeadline(deadline); err != nil {
+		return err
+	}
+	return c.Conn.SetWriteDeadline(deadline)
+}
+
+func (c *observedConn) SetReadDeadline(deadline time.Time) error {
+	c.owner.mu.Lock()
+	defer c.owner.mu.Unlock()
+	return c.setCallerReadDeadline(deadline)
+}
+
+func (c *observedConn) setCallerReadDeadline(deadline time.Time) error {
+	if err := c.Conn.SetReadDeadline(c.effectiveReadDeadline(deadline)); err != nil {
+		return err
+	}
+	c.callerReadDeadline = deadline
+	return nil
+}
+
+func (c *observedConn) effectiveReadDeadline(caller time.Time) time.Time {
+	if !c.firstResponseDeadline.IsZero() && (caller.IsZero() || c.firstResponseDeadline.Before(caller)) {
+		return c.firstResponseDeadline
+	}
+	return caller
 }
 
 func (c *observedConn) observe(err error, reason admissionFailure) {

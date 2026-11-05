@@ -20,10 +20,11 @@ import (
 
 type observedTestConn struct {
 	net.Conn
-	readByte     bool
-	readError    error
-	writeError   error
-	readDeadline time.Time
+	readByte      bool
+	readError     error
+	writeError    error
+	readDeadline  time.Time
+	writeDeadline time.Time
 }
 
 type packetTestConn struct {
@@ -307,6 +308,11 @@ func (c *observedTestConn) SetReadDeadline(deadline time.Time) error {
 	return nil
 }
 
+func (c *observedTestConn) SetWriteDeadline(deadline time.Time) error {
+	c.writeDeadline = deadline
+	return nil
+}
+
 func TestIdleLocalDpiEOFKeepsAdmissionAndUsedFlowFailureIsRetained(t *testing.T) {
 	newConnection := func(remote *observedTestConn) (*Outbound, *observedConn) {
 		withdraw, cancel := context.WithCancel(context.Background())
@@ -358,10 +364,25 @@ func TestIdleLocalDpiEOFKeepsAdmissionAndUsedFlowFailureIsRetained(t *testing.T)
 	}
 	respondedRemote := &observedTestConn{readByte: true}
 	responded, respondedConn := newConnection(respondedRemote)
+	earlier := time.Now().Add(time.Second)
+	if err := respondedConn.SetReadDeadline(earlier); err != nil {
+		t.Fatal(err)
+	}
 	_, _ = respondedConn.Write([]byte{1})
+	if !respondedRemote.readDeadline.Equal(earlier) {
+		t.Fatal("the first write extended the earlier caller deadline")
+	}
+	later := time.Now().Add(2 * firstResponseTimeout)
+	if err := respondedConn.SetDeadline(later); err != nil {
+		t.Fatal(err)
+	}
+	if !respondedRemote.readDeadline.After(earlier) || !respondedRemote.readDeadline.Before(later) ||
+		!respondedRemote.writeDeadline.Equal(later) {
+		t.Fatal("the caller did not retain its write deadline and the earlier internal read deadline")
+	}
 	_, _ = respondedConn.Read(buffer)
-	if !respondedRemote.readDeadline.IsZero() {
-		t.Fatal("the first response left the local read deadline armed")
+	if !respondedRemote.readDeadline.Equal(later) || !respondedRemote.writeDeadline.Equal(later) {
+		t.Fatal("the first response did not restore the caller deadline")
 	}
 	_, _ = respondedConn.Read(buffer)
 	if !responded.IsReady() || responded.ReadObservation().FailureReason != "none" {
