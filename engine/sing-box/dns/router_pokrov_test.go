@@ -180,9 +180,17 @@ func TestPokrovSmartDNSDomainWalkKeepsReadinessGuard(t *testing.T) {
 	}
 }
 
-func TestPokrovSmartDNSRefusalRetiresDNSAndTLSSelection(t *testing.T) {
-	for _, api := range []string{"exchange", "lookup"} {
-		t.Run(api, func(t *testing.T) {
+func TestPokrovSmartDNSFailureRetiresDNSAndTLSSelection(t *testing.T) {
+	for _, test := range []struct {
+		api   string
+		rcode int
+	}{
+		{"exchange", mDNS.RcodeRefused},
+		{"lookup", mDNS.RcodeRefused},
+		{"exchange", mDNS.RcodeServerFailure},
+		{"lookup", mDNS.RcodeServerFailure},
+	} {
+		t.Run(test.api+"/"+mDNS.RcodeToString[test.rcode], func(t *testing.T) {
 			factory, err := log.New(log.Options{Options: option.LogOptions{Disabled: true}})
 			if err != nil {
 				t.Fatal(err)
@@ -230,7 +238,7 @@ func TestPokrovSmartDNSRefusalRetiresDNSAndTLSSelection(t *testing.T) {
 			defer router.Close()
 			if err = router.Initialize([]option.DNSRule{
 				{Type: C.RuleTypeDefault, DefaultOptions: option.DefaultDNSRule{RawDefaultDNSRule: option.RawDefaultDNSRule{Domain: []string{"service.test"}, PokrovCatalogWindow: window},
-					DNSRuleAction: option.DNSRuleAction{Action: C.RuleActionTypeRoute, RouteOptions: option.DNSRouteActionOptions{Server: smart.Tag(), BypassIfFailed: true}}}},
+					DNSRuleAction: option.DNSRuleAction{Action: C.RuleActionTypeRoute, RouteOptions: option.DNSRouteActionOptions{Server: smart.Tag()}}}},
 				{Type: C.RuleTypeDefault, DefaultOptions: option.DefaultDNSRule{DNSRuleAction: option.DNSRuleAction{Action: C.RuleActionTypeRoute, RouteOptions: option.DNSRouteActionOptions{Server: vpn.Tag()}}}},
 			}); err != nil {
 				t.Fatal(err)
@@ -240,7 +248,7 @@ func TestPokrovSmartDNSRefusalRetiresDNSAndTLSSelection(t *testing.T) {
 			}
 			query := func() bool {
 				t.Helper()
-				if api == "lookup" {
+				if test.api == "lookup" {
 					addresses, err := router.Lookup(ctx, "service.test", adapter.DNSQueryOptions{Strategy: C.DomainStrategyIPv4Only})
 					return err == nil && len(addresses) == 1 && addresses[0].String() == "192.0.2.10"
 				}
@@ -257,16 +265,16 @@ func TestPokrovSmartDNSRefusalRetiresDNSAndTLSSelection(t *testing.T) {
 			if !matchesGateway() {
 				t.Fatal("NXDOMAIN retired the service provider")
 			}
-			smart.rcode = mDNS.RcodeRefused
+			smart.rcode = test.rcode
 			if !query() || matchesGateway() {
-				t.Fatal("REFUSED did not select VPN DNS and retire the matching TLS relay")
+				t.Fatal("DNS failure did not select VPN DNS and retire the matching TLS relay")
 			}
 			assertDNSFailure := func() {
 				t.Helper()
 				delay, probeErr := member.(*smartaccess.Outbound).ProbeServiceReadiness(ctx)
 				var failure *urltest.ProbeError
 				if delay != 0 || !errors.As(probeErr, &failure) || failure.Stage != urltest.ProbeStageDNS {
-					t.Fatal("actual DNS refusal became generic unavailable before host VPN recovery")
+					t.Fatal("actual DNS failure became generic unavailable before host VPN recovery")
 				}
 			}
 			assertDNSFailure()
@@ -277,7 +285,7 @@ func TestPokrovSmartDNSRefusalRetiresDNSAndTLSSelection(t *testing.T) {
 			assertDNSFailure()
 			smartCalls := smart.calls.Load()
 			if !query() || smart.calls.Load() != smartCalls {
-				t.Fatal("subsequent DNS retried the refused service provider")
+				t.Fatal("subsequent DNS retried the failed service provider")
 			}
 		})
 	}

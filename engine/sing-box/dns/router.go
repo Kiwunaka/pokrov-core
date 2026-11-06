@@ -1821,17 +1821,18 @@ func markSmartAccessDNSFailure(rule adapter.DNSRule) bool {
 }
 
 func smartAccessDNSFailed(response *mDNS.Msg, err error) bool {
-	if err == nil {
-		return response != nil && response.Rcode == mDNS.RcodeRefused
-	}
-	if errors.Is(err, ErrResponseRejected) {
-		return false
-	}
 	var rcode RcodeError
-	if errors.As(err, &rcode) {
-		return int(rcode) == mDNS.RcodeRefused
+	switch {
+	case errors.Is(err, ErrResponseRejected):
+		return false
+	case err != nil:
+		if !errors.As(err, &rcode) {
+			return true
+		}
+	case response != nil:
+		rcode = RcodeError(response.Rcode)
 	}
-	return true
+	return rcode == mDNS.RcodeRefused || rcode == mDNS.RcodeServerFailure
 }
 
 func pokrovDNSFallbackRules(rules []option.DNSRule) bool {

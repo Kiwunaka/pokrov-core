@@ -472,14 +472,14 @@ lease, withdrawn/expired catalog, retired resolver, cancellation or replaced DNS
 transport does not acquire this expiry outcome. Desktop and gomobile retain the
 same fixed message through the existing probe APIs; no ABI symbol changes.
 
-A provider DoH transport error or DNS REFUSED retires that selected member for the
-remaining profile lifetime, then reevaluates the domain from the first rule. Both
-DNS Exchange and Lookup handle REFUSED; subsequent DNS and TCP choose the same
-available standby or the scoped VPN/block fallback. Caller cancellation and valid
-negative DNS answers such as NXDOMAIN do not retire a member. In-flight
-queries and already established connections keep their original owner.
+A provider DoH transport error, DNS REFUSED or DNS SERVFAIL retires that member
+for the remaining profile lifetime. Both DNS Exchange and Lookup reevaluate the
+domain from the first rule, so subsequent DNS and TCP choose the same available
+standby or the scoped VPN/block fallback. Caller cancellation, response scope
+rejection and valid negative answers such as NXDOMAIN do not retire a member.
+In-flight queries and already established connections keep their original owner.
 
-Actual selected-service DNS refusal and native ClientHello ECH rejection retain
+Actual selected-service DNS failure and native ClientHello ECH rejection retain
 a fixed DNS/TLS probe failure on the current grant. Once no approved member is
 available, readiness reports that observed failure through the existing native
 probe mapping, so the host can apply its scoped VPN recovery. ECH outside the
