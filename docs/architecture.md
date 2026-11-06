@@ -1004,7 +1004,7 @@ including pooled connections. The transport remains reusable after this reset,
 as required by VLESS interface changes. REALITY-XHTTP profiles use an explicit
 `stream-one` mode, HTTP/2 ALPN and an empty VLESS flow.
 
-With `with_utls`, the REALITY client advertises version 26.3.27 and retains
+With `with_utls`, the REALITY client advertises version 26.6.27 and retains
 both the `X25519MLKEM768` and X25519 key shares supplied by the fingerprint.
 When `tls.record_fragment` is omitted, REALITY splits the ClientHello into TLS
 records to retain the hybrid Chrome workaround verified on the owned DE path.
