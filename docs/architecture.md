@@ -88,6 +88,9 @@ to 65535 wire bytes before decoding/caching, including unknown-length bodies.
 TCP/TLS single-use DNS exchanges and reuse probes belong to their transport's
 generation: Reset cancels the old generation, Close denies new queries, and a
 late dial cannot revive a cancelled query. The shared-pool protocol is unchanged.
+For profiles using DNS reverse mapping, a shorter reply for the same IP and
+domain preserves the earlier live mapping until its original expiry. Domain
+rules can still identify an IP-only connection during that window.
 The legacy Parse API writes credential-bearing profiles with owner-only
 permissions and reapplies the existing platform permission helper on overwrite;
 this is not an atomic-write or symlink policy change.

@@ -46,6 +46,7 @@ type Router struct {
 	rules                 []adapter.DNSRule
 	defaultDomainStrategy C.DomainStrategy
 	dnsReverseMapping     *freelru.Cache[netip.Addr, string]
+	reverseMappingAccess  sync.Mutex
 	platformInterface     adapter.PlatformInterface
 	legacyDNSMode         bool
 	rulesAccess           sync.RWMutex
@@ -1125,13 +1126,27 @@ func (r *Router) recordReverseMapping(message *mDNS.Msg, response *mDNS.Msg, tra
 			for _, answer := range response.Answer {
 				switch record := answer.(type) {
 				case *mDNS.A:
-					r.dnsReverseMapping.AddWithLifetime(M.AddrFromIP(record.A), FqdnToDomain(record.Hdr.Name), time.Duration(record.Hdr.Ttl)*time.Second)
+					r.addReverseMapping(M.AddrFromIP(record.A), FqdnToDomain(record.Hdr.Name), record.Hdr.Ttl)
 				case *mDNS.AAAA:
-					r.dnsReverseMapping.AddWithLifetime(M.AddrFromIP(record.AAAA), FqdnToDomain(record.Hdr.Name), time.Duration(record.Hdr.Ttl)*time.Second)
+					r.addReverseMapping(M.AddrFromIP(record.AAAA), FqdnToDomain(record.Hdr.Name), record.Hdr.Ttl)
 				}
 			}
 		}
 	}
+}
+
+func (r *Router) addReverseMapping(ip netip.Addr, domain string, ttl uint32) {
+	lifetime := time.Duration(ttl) * time.Second
+	r.reverseMappingAccess.Lock()
+	defer r.reverseMappingAccess.Unlock()
+	// A short reply for the same name cannot invalidate an earlier live answer.
+	if ttl > 0 {
+		previous, expiresAt, loaded := r.dnsReverseMapping.GetWithLifetime(ip)
+		if loaded && strings.EqualFold(previous, domain) && time.Until(expiresAt) > lifetime {
+			return
+		}
+	}
+	r.dnsReverseMapping.AddWithLifetime(ip, domain, lifetime)
 }
 
 func (r *Router) exchangeLegacy(ctx context.Context, exchangeCtx *dnsExchangeContext, message *mDNS.Msg, options adapter.DNSQueryOptions) (*mDNS.Msg, adapter.DNSTransport, error) {
@@ -1396,7 +1411,9 @@ func (r *Router) ClearCache() {
 		r.platformInterface.ClearDNSCache()
 	}
 	if r.dnsReverseMapping != nil {
+		r.reverseMappingAccess.Lock()
 		r.dnsReverseMapping.Purge()
+		r.reverseMappingAccess.Unlock()
 	}
 }
 

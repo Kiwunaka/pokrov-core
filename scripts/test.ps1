@@ -67,7 +67,7 @@ try {
   Push-Location $root
   try {
     $engine = "github.com/sagernet/sing-box"
-    & $goCommand.Source test -count=1 -ldflags=-checklinkname=0 -tags $clientTags $engine "$engine/protocol/awg" "$engine/common/tls" "$engine/common/urltest" "$engine/daemon" "$engine/experimental/libbox" "$engine/dns" "$engine/protocol/pokrov/dnstt" "$engine/protocol/pokrov/slipstream" "$engine/protocol/group" "$engine/transport/v2rayxhttp"
+    & $goCommand.Source test -count=1 -ldflags=-checklinkname=0 -tags $clientTags $engine "$engine/protocol/awg" "$engine/common/tls" "$engine/common/urltest" "$engine/daemon" "$engine/experimental/libbox" "$engine/dns" "$engine/route" "$engine/protocol/pokrov/dnstt" "$engine/protocol/pokrov/slipstream" "$engine/protocol/group" "$engine/transport/v2rayxhttp"
     if ($LASTEXITCODE -ne 0) {
       throw "Engine tests failed."
     }
