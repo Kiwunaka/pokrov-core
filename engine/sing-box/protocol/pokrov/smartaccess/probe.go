@@ -76,10 +76,12 @@ func (h *Outbound) ProbeServiceReadiness(ctx context.Context) (delayResult uint1
 		}
 		group.observeReadiness(probe, "resolver", observedAt, duration, err)
 	})
+	group.beginResolverLookup(probe)
 	addresses, err := resolver.Lookup(dnsContext, domain, adapter.DNSQueryOptions{
 		Transport: transport, Strategy: C.DomainStrategyIPv4Only,
 		DisableCache: true, DisableOptimisticCache: true,
 	})
+	group.finishResolverLookup(probe)
 	if !current(false) {
 		return 0, unavailable()
 	}

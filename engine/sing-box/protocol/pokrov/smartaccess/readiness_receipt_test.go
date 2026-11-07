@@ -3,11 +3,14 @@ package smartaccess
 import (
 	"context"
 	"errors"
+	"net/netip"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/option"
+	"github.com/sagernet/sing/service"
 )
 
 type readinessReceiptTransport struct{ adapter.DNSTransport }
@@ -16,11 +19,29 @@ func (*readinessReceiptTransport) Tag() string { return "readiness-doh" }
 
 type readinessReceiptManager struct {
 	adapter.DNSTransportManager
+	mu        sync.RWMutex
 	transport adapter.DNSTransport
 }
 
 func (m *readinessReceiptManager) Transport(tag string) (adapter.DNSTransport, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	return m.transport, tag == m.transport.Tag()
+}
+
+type readinessDeadlineResolver struct {
+	adapter.DNSRouter
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (r *readinessDeadlineResolver) Lookup(ctx context.Context, _ string, _ adapter.DNSQueryOptions) ([]netip.Addr, error) {
+	close(r.entered)
+	<-ctx.Done()
+	if r.release != nil {
+		<-r.release
+	}
+	return nil, ctx.Err()
 }
 
 // This checks receipt state transitions, without networking or fabricating a
@@ -129,5 +150,75 @@ func TestReadinessReceiptsResetAndFenceCurrentLease(t *testing.T) {
 	group.finishReadiness(first, nil)
 	if receipt = member.ReadServiceLeaseSelection().Readiness; receipt.Status != "failure" || len(receipt.Stages) != 2 || !receipt.FallbackGuardClosed {
 		t.Fatal("cancelled partial probe accepted a late TLS success")
+	}
+
+	for _, scenario := range []string{"before_lookup", "entered_lookup", "replaced_transport", "closed_window"} {
+		t.Run(scenario, func(t *testing.T) {
+			member, group, manager := newFixture()
+			resolver := &readinessDeadlineResolver{entered: make(chan struct{})}
+			var closeWindow func()
+			if scenario == "entered_lookup" || scenario == "closed_window" {
+				resolver.release = make(chan struct{})
+			}
+			if scenario == "closed_window" {
+				closeWindow = group.BindProbeWindow(member, false, nil, func() bool { return true }, func(string) bool { return true })
+			}
+			member.ctx = service.ContextWith[adapter.DNSRouter](context.Background(), resolver)
+			member.ctx = service.ContextWith[adapter.DNSTransportManager](member.ctx, manager)
+			timeout := 250 * time.Millisecond
+			if scenario == "before_lookup" {
+				timeout = -time.Second
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), timeout)
+			defer cancel()
+			done := make(chan struct{})
+			go func() { _, _ = member.ProbeServiceReadiness(ctx); close(done) }()
+			if scenario != "before_lookup" {
+				select {
+				case <-resolver.entered:
+				case <-ctx.Done():
+					t.Fatal("resolver was not entered before its deadline")
+				}
+				if scenario == "replaced_transport" {
+					// Replace only after the actual lookup has entered. The old
+					// authority cannot receive a terminal resolver failure.
+					manager.mu.Lock()
+					manager.transport = &readinessReceiptTransport{}
+					manager.mu.Unlock()
+				}
+				if scenario == "closed_window" {
+					<-ctx.Done()
+					closeWindow()
+					close(resolver.release)
+				} else if scenario == "entered_lookup" {
+					<-ctx.Done()
+					pending := member.ReadServiceLeaseSelection().Readiness
+					close(resolver.release)
+					if pending.Status != "failure" || len(pending.Stages) != 1 || pending.Stages[0].Result != "failure" {
+						t.Fatal("readback lost the entered deadline while lookup was still settling")
+					}
+				}
+			}
+			select {
+			case <-done:
+			case <-time.After(time.Second):
+				t.Fatal("deadline did not settle the probe")
+			}
+			receipt := member.ReadServiceLeaseSelection().Readiness
+			if receipt.Status != "failure" || receipt.CompletedAtMS == nil || !receipt.FallbackGuardClosed {
+				t.Fatal("deadline did not retain a closed failure receipt")
+			}
+			if scenario == "entered_lookup" {
+				if len(receipt.Stages) != 1 || receipt.Stages[0].Stage != "resolver" || receipt.Stages[0].Result != "failure" || receipt.Stages[0].Reason != "" {
+					t.Fatal("entered lookup deadline lost its resolver failure or invented a cause")
+				}
+				group.observeReadiness(group.readiness, "resolver", time.Now(), time.Millisecond, nil)
+				if late := member.ReadServiceLeaseSelection().Readiness; late.Status != "failure" || len(late.Stages) != 1 || late.Stages[0].Result != "failure" {
+					t.Fatal("deadline accepted a late resolver pass")
+				}
+			} else if len(receipt.Stages) != 0 {
+				t.Fatal("pre-entry timeout or invalidated authority acquired a resolver stage")
+			}
+		})
 	}
 }

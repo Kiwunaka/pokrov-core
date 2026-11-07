@@ -727,6 +727,16 @@ bypass closes the guard for the remaining compiled group lifetime. Completed
 probe timeout cleanup preserves observations, but only three current completed
 stage passes with an open guard can accompany the separate browser feature
 proof; Core does not prove a feature request or count fallback traffic.
+
+The probe records entry into `resolver.Lookup` independently of the later HTTP
+response observation. If its own deadline expires before that observation, an
+entered lookup retains one `resolver/failure` with no inferred reason, provided
+the same probe, owner, lease, transport and catalog bindings remain current.
+This records no pass and does not distinguish bootstrap DNS, TCP, TLS or headers.
+Pre-entry deadlines, cancellation and replaced authority leave unobserved stages
+absent; a late completion cannot restore pass. This source diagnostic has not
+been built or accepted on a device.
+
 The bypass observer uses each compiled window's own exact-domain/suffix matcher:
 walking past a sibling domain rule in the same lease does not close readiness,
 including during internal probe window checks. A mismatch of that window's own

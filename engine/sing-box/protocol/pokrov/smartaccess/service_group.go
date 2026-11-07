@@ -47,10 +47,11 @@ type ServiceReadiness struct {
 
 type serviceReadinessProbe struct {
 	ServiceReadiness
-	member            *Outbound
-	ctx, ownerContext context.Context
-	transport         adapter.DNSTransport
-	manager           adapter.DNSTransportManager
+	member                  *Outbound
+	ctx, ownerContext       context.Context
+	transport               adapter.DNSTransport
+	manager                 adapter.DNSTransportManager
+	resolverLookupStartedAt time.Time
 }
 
 // A new probe replaces every stage from the previous attempt. The closed guard
@@ -85,10 +86,30 @@ func (group *ServiceLeaseGroup) bindReadiness(probe *serviceReadinessProbe, memb
 	probe.member, probe.LeaseID, probe.transport, probe.manager = member, leaseID, transport, manager
 }
 
+func (group *ServiceLeaseGroup) beginResolverLookup(probe *serviceReadinessProbe) {
+	group.mu.Lock()
+	defer group.mu.Unlock()
+	if group.readiness == probe && probe.Status == "pending" && group.readinessCurrentLocked(probe) {
+		probe.resolverLookupStartedAt = time.Now()
+	}
+}
+
+func (group *ServiceLeaseGroup) finishResolverLookup(probe *serviceReadinessProbe) {
+	group.mu.Lock()
+	defer group.mu.Unlock()
+	if group.readiness == probe && probe.ctx.Err() == nil {
+		probe.resolverLookupStartedAt = time.Time{}
+	}
+}
+
 // Unlike probeScope, this only peeks. Reading receipts never selects a provider
 // or extends catalog/lease authority.
 func (group *ServiceLeaseGroup) readinessCurrentLocked(probe *serviceReadinessProbe) bool {
-	if (probe.Status == "pending" && probe.ctx.Err() != nil) || probe.ownerContext.Err() != nil ||
+	return !(probe.Status == "pending" && probe.ctx.Err() != nil) && group.readinessBindingCurrentLocked(probe)
+}
+
+func (group *ServiceLeaseGroup) readinessBindingCurrentLocked(probe *serviceReadinessProbe) bool {
+	if probe.ownerContext.Err() != nil ||
 		probe.member == nil || group.selected < 0 || group.members[group.selected] != probe.member ||
 		probe.manager == nil || probe.transport == nil {
 		return false
@@ -117,6 +138,19 @@ func (group *ServiceLeaseGroup) readinessCurrentLocked(probe *serviceReadinessPr
 	return dns && route
 }
 
+func (group *ServiceLeaseGroup) retainResolverDeadlineLocked(probe *serviceReadinessProbe) {
+	// The response observer runs only after HTTP headers. Retain an entered
+	// lookup's own deadline without guessing which resolver sub-operation stalled.
+	if !group.fallbackGuardClosed && probe.Status == "pending" && !probe.resolverLookupStartedAt.IsZero() && len(probe.Stages) == 0 &&
+		probe.ctx.Err() == context.DeadlineExceeded && group.readinessBindingCurrentLocked(probe) {
+		observedAt := time.Now()
+		probe.Stages = append(probe.Stages, ServiceReadinessStage{
+			Stage: "resolver", Result: "failure", ObservedAtMS: observedAt.UnixMilli(),
+			DurationMS: observedAt.Sub(probe.resolverLookupStartedAt).Milliseconds(),
+		})
+	}
+}
+
 func (group *ServiceLeaseGroup) closeReadinessLocked() {
 	if group.readiness == nil {
 		return
@@ -137,6 +171,7 @@ func (group *ServiceLeaseGroup) observeReadiness(probe *serviceReadinessProbe, s
 		return
 	}
 	if probe.ctx.Err() != nil || !group.readinessCurrentLocked(probe) {
+		group.retainResolverDeadlineLocked(probe)
 		group.closeReadinessLocked()
 		return
 	}
@@ -162,6 +197,7 @@ func (group *ServiceLeaseGroup) finishReadiness(probe *serviceReadinessProbe, er
 	if err != nil || probe.ctx.Err() != nil || group.fallbackGuardClosed || !group.readinessCurrentLocked(probe) || len(probe.Stages) != 3 ||
 		probe.Stages[0].Stage != "resolver" || probe.Stages[1].Stage != "dns" || probe.Stages[2].Stage != "tls" ||
 		probe.Stages[0].Result != "pass" || probe.Stages[1].Result != "pass" || probe.Stages[2].Result != "pass" {
+		group.retainResolverDeadlineLocked(probe)
 		group.closeReadinessLocked()
 		return
 	}
@@ -357,6 +393,7 @@ func (h *Outbound) ReadServiceLeaseSelection() *ServiceLeaseSelection {
 	result := &ServiceLeaseSelection{ServiceID: group.serviceID, SelectionIndex: group.selected, State: "pending"}
 	if probe := group.readiness; probe != nil {
 		if probe.member != nil && !group.readinessCurrentLocked(probe) {
+			group.retainResolverDeadlineLocked(probe)
 			group.closeReadinessLocked()
 		}
 		snapshot := probe.ServiceReadiness
