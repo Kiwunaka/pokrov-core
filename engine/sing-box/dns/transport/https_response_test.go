@@ -1,12 +1,26 @@
 package transport
 
 import (
+	"bufio"
 	"bytes"
+	"context"
 	"errors"
 	"io"
 	"math"
+	"net"
 	"net/http"
+	"net/url"
+	"os"
 	"testing"
+	"time"
+
+	"github.com/sagernet/sing-box/adapter"
+	"github.com/sagernet/sing-box/common/tls"
+	"github.com/sagernet/sing-box/dns"
+	M "github.com/sagernet/sing/common/metadata"
+	N "github.com/sagernet/sing/common/network"
+
+	mDNS "github.com/miekg/dns"
 )
 
 type countedDNSBody struct {
@@ -94,5 +108,170 @@ func TestReadDNSMessageBodyPreservesWireBytes(t *testing.T) {
 		if err != nil || !bytes.Equal(got, wire) {
 			t.Fatalf("wire payload changed: %v", err)
 		}
+	}
+}
+
+type httpsReadinessTestDialer struct {
+	N.Dialer
+	conn net.Conn
+	err  error
+	ctx  context.Context
+}
+
+func (d *httpsReadinessTestDialer) DialContext(ctx context.Context, _ string, _ M.Socksaddr) (net.Conn, error) {
+	d.ctx = ctx
+	return d.conn, d.err
+}
+
+type httpsReadinessTestTLSConfig struct {
+	tls.Config
+	err error
+}
+
+func (*httpsReadinessTestTLSConfig) HandshakeTimeout() time.Duration { return 0 }
+func (c *httpsReadinessTestTLSConfig) ClientHandshake(_ context.Context, conn net.Conn) (tls.Conn, error) {
+	if c.err != nil {
+		return nil, c.err
+	}
+	return &httpsReadinessTestTLSConn{conn}, nil
+}
+
+type httpsReadinessTestTLSConn struct{ net.Conn }
+
+func (c *httpsReadinessTestTLSConn) NetConn() net.Conn                    { return c.Conn }
+func (*httpsReadinessTestTLSConn) HandshakeContext(context.Context) error { return nil }
+func (*httpsReadinessTestTLSConn) ConnectionState() tls.ConnectionState {
+	return tls.ConnectionState{NegotiatedProtocol: "http/1.1"}
+}
+
+func TestHTTPSReadinessTransportFailures(t *testing.T) {
+	newTransport := func(raw N.Dialer, config tls.Config) *HTTPSTransport {
+		transport := NewHTTPSRaw(dns.NewTransportAdapter("https", "readiness", nil), nil, raw,
+			&url.URL{Scheme: "https", Host: "resolver.test", Path: "/dns-query"}, make(http.Header),
+			M.Socksaddr{Fqdn: "resolver.test", Port: 443}, config)
+		t.Cleanup(func() { _ = transport.Close() })
+		return transport
+	}
+	exchange := func(transport *HTTPSTransport) (string, error) {
+		var reason string
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		ctx = adapter.ContextWithDNSReadinessObserver(ctx, func(_ adapter.DNSTransport, _ time.Time, _ time.Duration, _ error, hint string) {
+			reason = hint
+		})
+		message := new(mDNS.Msg)
+		message.SetQuestion("service.test.", mDNS.TypeA)
+		_, err := transport.Exchange(ctx, message)
+		return reason, err
+	}
+	t.Run("dial", func(t *testing.T) {
+		failure := &net.OpError{Op: "dial", Net: "tcp", Err: os.ErrDeadlineExceeded}
+		transport := newTransport(&httpsReadinessTestDialer{err: failure}, &httpsReadinessTestTLSConfig{})
+		reason, err := exchange(transport)
+		var networkError net.Error
+		if err != failure || !errors.As(err, &networkError) || !networkError.Timeout() {
+			t.Fatal("readiness changed the original transport error or net.Error semantics")
+		}
+		if reason != "doh_dial" {
+			t.Fatal("endpoint dial failure lost its closed DoH reason")
+		}
+	})
+	t.Run("tls", func(t *testing.T) {
+		conn, peer := net.Pipe()
+		defer peer.Close()
+		failure := errors.New("synthetic handshake failure")
+		transport := newTransport(&httpsReadinessTestDialer{conn: conn}, &httpsReadinessTestTLSConfig{err: failure})
+		if reason, err := exchange(transport); reason != "doh_tls" || err != failure {
+			t.Fatal("TLS failure lost its phase or changed its original error")
+		}
+	})
+	checkHTTP := func(t *testing.T, response, want string) {
+		conn, peer := net.Pipe()
+		defer conn.Close()
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			defer peer.Close()
+			request, err := http.ReadRequest(bufio.NewReader(peer))
+			if err == nil {
+				_, _ = io.Copy(io.Discard, request.Body)
+				_ = request.Body.Close()
+				_, _ = io.WriteString(peer, response)
+			}
+		}()
+		transport := newTransport(&httpsReadinessTestDialer{conn: conn}, &httpsReadinessTestTLSConfig{})
+		transport.fallback.Store(true) // Exercise the existing HTTP/1 path with an in-memory connection.
+		reason, err := exchange(transport)
+		if err == nil || reason != want {
+			t.Fatal("HTTP failure lost its directly observed phase")
+		}
+		<-done
+	}
+	t.Run("http_exchange", func(t *testing.T) { checkHTTP(t, "", "doh_http_exchange") })
+	t.Run("http_status", func(t *testing.T) {
+		checkHTTP(t, "HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n", "doh_http_status")
+	})
+	t.Run("no_observer", func(t *testing.T) {
+		failure := errors.New("synthetic dial failure")
+		raw := &httpsReadinessTestDialer{err: failure}
+		transport := newTransport(raw, &httpsReadinessTestTLSConfig{})
+		if _, err := transport.Exchange(context.Background(), new(mDNS.Msg)); err != failure {
+			t.Fatal("ordinary exchange changed its error")
+		}
+		if raw.ctx.Value(httpsReadinessKey{}) != nil || raw.ctx.Value(httpsDialAttemptKey{}) != nil {
+			t.Fatal("ordinary exchange acquired readiness metadata")
+		}
+	})
+}
+
+func TestHTTPSReadinessRejectsAmbiguousOrLateEvidence(t *testing.T) {
+	failure := errors.New("synthetic dial failure")
+	attempt := &httpsDialAttempt{endpointCalls: 1, endpointError: failure}
+	var reused httpsReadiness
+	if reused.freeze(failure) != "" { // A pooled/shared dial belonged to another exchange.
+		t.Fatal("reused connection acquired another exchange's phase")
+	}
+	var multiple httpsReadiness
+	multiple.beginAttempt()
+	multiple.beginAttempt()
+	multiple.completeAttempt(attempt, failure, false)
+	if multiple.freeze(failure) != "" {
+		t.Fatal("multiple dials acquired a unique phase")
+	}
+	var repeatedEndpoint httpsReadiness
+	repeatedEndpoint.beginAttempt()
+	repeated := new(httpsDialAttempt)
+	dialCtx := context.WithValue(context.Background(), httpsDialAttemptKey{}, repeated)
+	observedDialer := &httpsReadinessDialer{&httpsReadinessTestDialer{err: failure}}
+	for range 2 { // The existing TLS dialer may redial once after ECH rejection.
+		if _, err := observedDialer.DialContext(dialCtx, "tcp", M.Socksaddr{}); err != failure {
+			t.Fatal("raw redial changed the original error")
+		}
+	}
+	repeatedEndpoint.completeAttempt(repeated, failure, false)
+	if repeatedEndpoint.freeze(failure) != "" {
+		t.Fatal("an internal TLS redial acquired a unique phase")
+	}
+	var mismatched httpsReadiness
+	mismatched.beginAttempt()
+	mismatched.completeAttempt(attempt, failure, false)
+	if mismatched.freeze(io.EOF) != "" {
+		t.Fatal("a different returned error acquired a dial phase")
+	}
+	var late httpsReadiness
+	late.beginAttempt()
+	if late.freeze(failure) != "" {
+		t.Fatal("pending dial acquired a terminal phase")
+	}
+	late.completeAttempt(attempt, failure, false)
+	if late.beginAttempt() || late.freeze(failure) != "" {
+		t.Fatal("late evidence changed a frozen exchange")
+	}
+	conn, peer := net.Pipe()
+	defer conn.Close()
+	defer peer.Close()
+	raw := &httpsReadinessTestDialer{conn: conn}
+	if got, err := (&httpsReadinessDialer{raw}).DialContext(context.Background(), "tcp", M.Socksaddr{}); got != conn || err != nil {
+		t.Fatal("endpoint observation changed the original connection")
 	}
 }

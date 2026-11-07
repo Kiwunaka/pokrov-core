@@ -57,7 +57,7 @@ type OwnedDNSProbeTrace func(context.Context, OwnedDNSProbeStage, error) bool
 
 // DNSReadinessObserver is attached only to an uncached service readiness
 // lookup. It observes the HTTPS response boundary without DNS payloads.
-type DNSReadinessObserver func(DNSTransport, time.Time, time.Duration, error)
+type DNSReadinessObserver func(DNSTransport, time.Time, time.Duration, error, string)
 
 type dnsReadinessObserverKey struct{}
 
@@ -65,9 +65,14 @@ func ContextWithDNSReadinessObserver(ctx context.Context, observer DNSReadinessO
 	return context.WithValue(ctx, dnsReadinessObserverKey{}, observer)
 }
 
-func ObserveDNSReadiness(ctx context.Context, transport DNSTransport, observedAt time.Time, duration time.Duration, err error) {
-	if observer, ok := ctx.Value(dnsReadinessObserverKey{}).(DNSReadinessObserver); ok {
-		observer(transport, observedAt, duration, err)
+func DNSReadinessObserverFromContext(ctx context.Context) DNSReadinessObserver {
+	observer, _ := ctx.Value(dnsReadinessObserverKey{}).(DNSReadinessObserver)
+	return observer
+}
+
+func ObserveDNSReadiness(ctx context.Context, transport DNSTransport, observedAt time.Time, duration time.Duration, err error, hint string) {
+	if observer := DNSReadinessObserverFromContext(ctx); observer != nil {
+		observer(transport, observedAt, duration, err, hint)
 	}
 }
 

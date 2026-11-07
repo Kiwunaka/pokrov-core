@@ -3,6 +3,7 @@ package smartaccess
 import (
 	"context"
 	"errors"
+	"net"
 	"net/netip"
 	"sync"
 	"testing"
@@ -69,7 +70,7 @@ func TestReadinessReceiptsResetAndFenceCurrentLease(t *testing.T) {
 		return probe
 	}
 	observe := func(group *ServiceLeaseGroup, probe *serviceReadinessProbe, stage string, err error) {
-		group.observeReadiness(probe, stage, time.Now(), time.Millisecond, err)
+		group.observeReadiness(probe, stage, time.Now(), time.Millisecond, err, "")
 	}
 	complete := func(group *ServiceLeaseGroup, probe *serviceReadinessProbe) {
 		observe(group, probe, "resolver", nil)
@@ -151,6 +152,21 @@ func TestReadinessReceiptsResetAndFenceCurrentLease(t *testing.T) {
 	if receipt = member.ReadServiceLeaseSelection().Readiness; receipt.Status != "failure" || len(receipt.Stages) != 2 || !receipt.FallbackGuardClosed {
 		t.Fatal("cancelled partial probe accepted a late TLS success")
 	}
+	for _, observation := range []struct {
+		err          error
+		hint, reason string
+	}{
+		{errors.New("synthetic status failure"), "doh_http_status", "doh_http_status"},
+		{&net.DNSError{Err: "synthetic lookup failure"}, "doh_dial", "dns_lookup"},
+		{errors.New("synthetic failure"), "unrecognized", ""},
+	} {
+		member, group, manager = newFixture()
+		probe := begin(group, member, manager, context.Background())
+		group.observeReadiness(probe, "resolver", time.Now(), time.Millisecond, observation.err, observation.hint)
+		if receipt := member.ReadServiceLeaseSelection().Readiness; receipt.Status != "failure" || receipt.Stages[0].Reason != observation.reason {
+			t.Fatal("resolver hint replaced typed evidence or escaped its closed allowlist")
+		}
+	}
 
 	for _, scenario := range []string{"before_lookup", "entered_lookup", "replaced_transport", "closed_window"} {
 		t.Run(scenario, func(t *testing.T) {
@@ -212,7 +228,7 @@ func TestReadinessReceiptsResetAndFenceCurrentLease(t *testing.T) {
 				if len(receipt.Stages) != 1 || receipt.Stages[0].Stage != "resolver" || receipt.Stages[0].Result != "failure" || receipt.Stages[0].Reason != "" {
 					t.Fatal("entered lookup deadline lost its resolver failure or invented a cause")
 				}
-				group.observeReadiness(group.readiness, "resolver", time.Now(), time.Millisecond, nil)
+				group.observeReadiness(group.readiness, "resolver", time.Now(), time.Millisecond, nil, "")
 				if late := member.ReadServiceLeaseSelection().Readiness; late.Status != "failure" || len(late.Stages) != 1 || late.Stages[0].Result != "failure" {
 					t.Fatal("deadline accepted a late resolver pass")
 				}

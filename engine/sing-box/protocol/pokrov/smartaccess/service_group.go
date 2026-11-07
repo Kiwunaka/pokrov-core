@@ -164,7 +164,7 @@ func (group *ServiceLeaseGroup) closeReadinessLocked() {
 	}
 }
 
-func (group *ServiceLeaseGroup) observeReadiness(probe *serviceReadinessProbe, stage string, observedAt time.Time, duration time.Duration, err error) {
+func (group *ServiceLeaseGroup) observeReadiness(probe *serviceReadinessProbe, stage string, observedAt time.Time, duration time.Duration, err error, hint string) {
 	group.mu.Lock()
 	defer group.mu.Unlock()
 	if group.readiness != probe {
@@ -179,9 +179,16 @@ func (group *ServiceLeaseGroup) observeReadiness(probe *serviceReadinessProbe, s
 	if err != nil {
 		result = "failure"
 	}
+	reason := urltest.ObservedFailure(err)
+	if reason == "" && err != nil {
+		switch hint {
+		case "doh_dial", "doh_tls", "doh_http_exchange", "doh_http_status":
+			reason = hint
+		}
+	}
 	probe.Stages = append(probe.Stages, ServiceReadinessStage{
 		Stage: stage, Result: result, ObservedAtMS: observedAt.UnixMilli(), DurationMS: duration.Milliseconds(),
-		Reason: urltest.ObservedFailure(err),
+		Reason: reason,
 	})
 	if err != nil {
 		group.closeReadinessLocked()

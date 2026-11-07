@@ -123,7 +123,7 @@ func NewHTTPSRaw(
 	tlsConfig tls.Config,
 ) *HTTPSTransport {
 	if tlsConfig != nil {
-		dialer = tls.NewDialer(dialer, tlsConfig)
+		dialer = tls.NewDialer(&httpsReadinessDialer{dialer}, tlsConfig)
 	}
 	fallback := new(atomic.Bool)
 	if destination.Scheme == "http" {
@@ -208,28 +208,37 @@ func (t *HTTPSTransport) exchange(ctx context.Context, message *mDNS.Msg) (*mDNS
 	request.Header = t.headers.Clone()
 	request.Header.Set("Content-Type", MimeType)
 	request.Header.Set("Accept", MimeType)
+	var observation *httpsReadiness
+	if t.destination.Scheme == "https" && adapter.DNSReadinessObserverFromContext(ctx) != nil {
+		observation = new(httpsReadiness)
+		request = request.WithContext(context.WithValue(ctx, httpsReadinessKey{}, observation))
+	}
 	t.transportAccess.Lock()
 	currentTransport := t.transport
 	t.transportAccess.Unlock()
 	resolverStarted := time.Now()
 	response, err := currentTransport.RoundTrip(request)
 	requestBuffer.Release()
-	observe := func(err error) {
+	var hint string
+	if observation != nil {
+		hint = observation.freeze(err)
+	}
+	observe := func(err error, hint string) {
 		if t.destination.Scheme == "https" {
-			adapter.ObserveDNSReadiness(ctx, t, time.Now(), time.Since(resolverStarted), err)
+			adapter.ObserveDNSReadiness(ctx, t, time.Now(), time.Since(resolverStarted), err, hint)
 		}
 	}
 	if err != nil {
-		observe(err)
+		observe(err, hint)
 		return nil, err
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
 		err = E.New("unexpected status: ", response.Status)
-		observe(err)
+		observe(err, "doh_http_status")
 		return nil, err
 	}
-	observe(nil)
+	observe(nil, "")
 	var responseMessage mDNS.Msg
 	rawMessage, err = readDNSMessageBody(response)
 	if err != nil {

@@ -70,11 +70,11 @@ func (h *Outbound) ProbeServiceReadiness(ctx context.Context) (delayResult uint1
 		return 0, unavailable()
 	}
 	started := time.Now()
-	dnsContext := adapter.ContextWithDNSReadinessObserver(ctx, func(observedTransport adapter.DNSTransport, observedAt time.Time, duration time.Duration, err error) {
+	dnsContext := adapter.ContextWithDNSReadinessObserver(ctx, func(observedTransport adapter.DNSTransport, observedAt time.Time, duration time.Duration, err error, hint string) {
 		if observedTransport != transport {
 			return
 		}
-		group.observeReadiness(probe, "resolver", observedAt, duration, err)
+		group.observeReadiness(probe, "resolver", observedAt, duration, err, hint)
 	})
 	group.beginResolverLookup(probe)
 	addresses, err := resolver.Lookup(dnsContext, domain, adapter.DNSQueryOptions{
@@ -87,7 +87,7 @@ func (h *Outbound) ProbeServiceReadiness(ctx context.Context) (delayResult uint1
 	}
 	if err != nil {
 		failure := &urltest.ProbeError{Stage: urltest.ProbeStageDNS, Err: err}
-		group.observeReadiness(probe, "dns", time.Now(), time.Since(started), failure)
+		group.observeReadiness(probe, "dns", time.Now(), time.Since(started), failure, "")
 		return 0, failure
 	}
 	if !current(true) {
@@ -95,7 +95,7 @@ func (h *Outbound) ProbeServiceReadiness(ctx context.Context) (delayResult uint1
 	}
 	if len(addresses) == 0 {
 		failure := &urltest.ProbeError{Stage: urltest.ProbeStageDNS, Err: errScope}
-		group.observeReadiness(probe, "dns", time.Now(), time.Since(started), failure)
+		group.observeReadiness(probe, "dns", time.Now(), time.Since(started), failure, "")
 		return 0, failure
 	}
 	for _, address := range addresses {
@@ -108,11 +108,11 @@ func (h *Outbound) ProbeServiceReadiness(ctx context.Context) (delayResult uint1
 		}
 		if !owned {
 			failure := &urltest.ProbeError{Stage: urltest.ProbeStageDNS, Err: errScope}
-			group.observeReadiness(probe, "dns", time.Now(), time.Since(started), failure)
+			group.observeReadiness(probe, "dns", time.Now(), time.Since(started), failure, "")
 			return 0, failure
 		}
 	}
-	group.observeReadiness(probe, "dns", time.Now(), time.Since(started), nil)
+	group.observeReadiness(probe, "dns", time.Now(), time.Since(started), nil, "")
 	client, incoming := net.Pipe()
 	stopClose := context.AfterFunc(ctx, func() { _ = client.Close(); _ = incoming.Close() })
 	done := make(chan error, 1)
@@ -142,11 +142,11 @@ func (h *Outbound) ProbeServiceReadiness(ctx context.Context) (delayResult uint1
 		return 0, unavailable()
 	}
 	if observation.connectError != nil {
-		group.observeReadiness(probe, "tls", tlsObservedAt, tlsDuration, &urltest.ProbeError{Stage: urltest.ProbeStageConnect, Err: observation.connectError})
+		group.observeReadiness(probe, "tls", tlsObservedAt, tlsDuration, &urltest.ProbeError{Stage: urltest.ProbeStageConnect, Err: observation.connectError}, "")
 		return 0, &urltest.ProbeError{Stage: urltest.ProbeStageConnect, Err: observation.connectError}
 	}
 	if err != nil {
-		group.observeReadiness(probe, "tls", tlsObservedAt, tlsDuration, &urltest.ProbeError{Stage: urltest.ProbeStageTLS, Err: err})
+		group.observeReadiness(probe, "tls", tlsObservedAt, tlsDuration, &urltest.ProbeError{Stage: urltest.ProbeStageTLS, Err: err}, "")
 		if !observation.connected {
 			if flowError != nil {
 				return 0, flowError
@@ -158,7 +158,7 @@ func (h *Outbound) ProbeServiceReadiness(ctx context.Context) (delayResult uint1
 	if !current(true) {
 		return 0, unavailable()
 	}
-	group.observeReadiness(probe, "tls", tlsObservedAt, tlsDuration, nil)
+	group.observeReadiness(probe, "tls", tlsObservedAt, tlsDuration, nil, "")
 	delay := time.Since(started).Milliseconds()
 	if delay < 1 {
 		delay = 1

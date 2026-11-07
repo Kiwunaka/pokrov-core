@@ -738,6 +738,16 @@ absent; a late completion cannot restore pass. Private Windows and Android
 artifacts from `9fa757f` passed the existing version/ABI and binding checks and
 are selected by App `2.0.0+4274`; device acceptance of this change remains pending.
 
+An HTTPS readiness lookup can add a closed failure reason: `doh_dial` includes
+endpoint bootstrap, `doh_tls` follows a successful endpoint dial,
+`doh_http_exchange` follows one owned connection handed to HTTP, and
+`doh_http_status` means a received non-200 response. Collection runs only for an
+existing readiness observer and freezes when RoundTrip returns. Reused/shared
+connections, redials, mismatched errors and late evidence retain no inferred
+substage; existing typed reasons take priority. Returned errors, retry/ALPN,
+deadlines, body handling and the resolver pass boundary are unchanged. The paired
+App parser must admit these reasons; this source change has no device acceptance.
+
 The bypass observer uses each compiled window's own exact-domain/suffix matcher:
 walking past a sibling domain rule in the same lease does not close readiness,
 including during internal probe window checks. A mismatch of that window's own
