@@ -734,8 +734,9 @@ entered lookup retains one `resolver/failure` with no inferred reason, provided
 the same probe, owner, lease, transport and catalog bindings remain current.
 This records no pass and does not distinguish bootstrap DNS, TCP, TLS or headers.
 Pre-entry deadlines, cancellation and replaced authority leave unobserved stages
-absent; a late completion cannot restore pass. This source diagnostic has not
-been built or accepted on a device.
+absent; a late completion cannot restore pass. Private Windows and Android
+artifacts from `9fa757f` passed the existing version/ABI and binding checks and
+are selected by App `2.0.0+4274`; device acceptance of this change remains pending.
 
 The bypass observer uses each compiled window's own exact-domain/suffix matcher:
 walking past a sibling domain rule in the same lease does not close readiness,
