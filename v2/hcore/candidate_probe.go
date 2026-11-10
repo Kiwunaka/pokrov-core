@@ -108,7 +108,7 @@ func probeCandidate(baseContext context.Context, config, id string, timeout time
 		}
 	}
 	result.FailureKind = "invalid_request"
-	if !candidateProbeID.MatchString(id) || timeout <= 0 || timeout > 30*time.Second {
+	if !candidateProbeID.MatchString(id) || timeout <= 0 || timeout > 60*time.Second {
 		return
 	}
 	ctx, cancel := context.WithTimeout(baseContext, timeout)

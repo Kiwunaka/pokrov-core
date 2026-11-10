@@ -104,6 +104,18 @@ func candidateProbeFixture(t *testing.T, closeOutbound func(), failHTTP bool) (c
 	return ctx, string(profile)
 }
 
+func TestCandidateProbeAllowsDNSBudget(t *testing.T) {
+	ctx, profile := candidateProbeFixture(t, func() {}, false)
+	result := probeCandidate(ctx, profile, "dns-budget", time.Minute, "", nil, nil)
+	if !result.Success || result.FailureKind != "" {
+		t.Fatalf("60-second candidate probe failed: %+v", result)
+	}
+	result = probeCandidate(ctx, profile, "dns-budget-over-limit", time.Minute+time.Millisecond, "", nil, nil)
+	if result.Success || result.FailureKind != "invalid_request" {
+		t.Fatalf("candidate probe exceeded the budget limit: %+v", result)
+	}
+}
+
 func TestCandidateProbeFreezesHTTPVerdictBeforeClose(t *testing.T) {
 	closing, release := make(chan struct{}), make(chan struct{})
 	ctx, profile := candidateProbeFixture(t, func() { close(closing); <-release }, false)
