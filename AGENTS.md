@@ -16,7 +16,7 @@ including explicit manifest overrides; a source capability alone is not binary r
 - Test only the changed behavior: focused package tests first, `scripts/test.ps1` before a release commit. Repeat a check only after a change or a failure.
 - Build only after code changes, and only the affected platform artifacts. Check the exported ABI when it changes.
 - Describe the current behavior and recurring procedures. Rewrite the owning paragraph when it changes. One fact has one home. Record what changed and when in the commit message.
-- Before adding a paragraph, ask if it will still be true and needed in a month. Split or cut a doc above 30 KB. Keep timestamps, candidate numbers and acceptance logs in Git history.
+- Before adding a paragraph, ask if it will still be true and needed in a month. A doc exceeding 30 KB does not by itself require cutting or splitting; change its structure only when needed for the current task. Keep timestamps, candidate numbers and acceptance logs in Git history.
 - Read production facts from production. Docs explain where and how to read them. The client manifest owns the consumed binary.
 - Do not read a large doc end to end. Search for the word you need and read the paragraph you find.
 
