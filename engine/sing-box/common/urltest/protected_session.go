@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -161,20 +162,27 @@ func OwnedURLTest(ctx context.Context, detour N.Dialer) (delay uint16, err error
 
 // ProtectedURLTest proves the startup route with two GETs in one verified TLS
 // session. The caller owns the deadline and the captured outbound identity.
-func ProtectedURLTest(ctx context.Context, detour N.Dialer) (uint16, error) {
+// A non-nil stage uses zero for no active phase and ProbeStage+1 otherwise.
+func ProtectedURLTest(ctx context.Context, detour N.Dialer, stage *atomic.Uint32) (uint16, error) {
 	var delay uint16
-	err := ProbeOwnedTargets(ctx, func(ctx context.Context, target OwnedProbeTarget) error {
+	err := ProbeOwnedTargets(ctx, func(attemptCtx context.Context, target OwnedProbeTarget) error {
 		var probeErr error
-		delay, probeErr = protectedURLTestAt(ctx, detour, target)
+		delay, probeErr = protectedURLTestAt(attemptCtx, detour, target, stage, ctx)
 		return probeErr
 	})
 	return delay, err
 }
 
-func protectedURLTestAt(ctx context.Context, detour N.Dialer, target OwnedProbeTarget) (uint16, error) {
+func protectedURLTestAt(ctx context.Context, detour N.Dialer, target OwnedProbeTarget, stage *atomic.Uint32, overall context.Context) (uint16, error) {
 	started := time.Now()
+	if stage != nil && overall.Err() == nil {
+		stage.Store(uint32(ProbeStageConnect) + 1)
+	}
 	conn, err := detour.DialContext(ctx, "tcp", M.ParseSocksaddr(target.Host+":443"))
 	if err != nil {
+		if stage != nil && overall.Err() == nil {
+			stage.Store(0)
+		}
 		return 0, &ProbeError{Stage: ProbeStageConnect, Err: err}
 	}
 	defer conn.Close()
@@ -188,6 +196,19 @@ func protectedURLTestAt(ctx context.Context, detour N.Dialer, target OwnedProbeT
 		}
 	}()
 	defer func() { close(closeStop); <-closeDone }()
+	if stage != nil {
+		// Clear before this function's deferred connection cleanup begins.
+		// Retain the last active stage after the overall deadline even if this
+		// worker observes cancellation before the caller reads the snapshot.
+		defer func() {
+			if overall.Err() == nil {
+				stage.Store(0)
+			}
+		}()
+		if overall.Err() == nil {
+			stage.Store(uint32(ProbeStageTLS) + 1)
+		}
+	}
 
 	secured := tls.Client(conn, &tls.Config{
 		ServerName: target.Host, MinVersion: tls.VersionTLS12,
@@ -195,6 +216,9 @@ func protectedURLTestAt(ctx context.Context, detour N.Dialer, target OwnedProbeT
 	})
 	if err := secured.HandshakeContext(ctx); err != nil {
 		return 0, &ProbeError{Stage: ProbeStageTLS, Err: err}
+	}
+	if stage != nil && overall.Err() == nil {
+		stage.Store(uint32(ProbeStageResponse) + 1)
 	}
 	reader := bufio.NewReader(secured)
 	if _, err := ProbeGET204(ctx, secured, reader, target.ProbeURL); err != nil {

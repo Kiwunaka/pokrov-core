@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"runtime"
+	"sync/atomic"
 	"time"
 
 	"github.com/sagernet/sing-box/adapter"
@@ -28,16 +29,32 @@ func (s *StartedService) ProbeSelectedOutboundResult(tag string) (bool, error) {
 	if !found || instance.ctx.Err() != nil {
 		return false, errors.New("selected route probe target unavailable")
 	}
-	ctx, cancel := context.WithTimeout(instance.ctx, selectedStartupProbeTimeout(runtime.GOOS, selected, lookup))
+	timeout := selectedStartupProbeTimeout(runtime.GOOS, selected, lookup)
+	ctx, cancel := context.WithTimeout(instance.ctx, timeout)
 	defer cancel()
+	var stage atomic.Uint32
+	var observedStage *atomic.Uint32
+	if runtime.GOOS == "android" && timeout == 60*time.Second {
+		observedStage = &stage
+	}
 	healthy, err := probeCapturedOutbound(ctx, tag, lookup, selected,
 		func(ctx context.Context, outbound adapter.Outbound) (uint16, error) {
-			return urltest.ProtectedURLTest(ctx, outbound)
+			return urltest.ProtectedURLTest(ctx, outbound, observedStage)
 		})
 	s.serviceAccess.RLock()
 	current := s.serviceStatus.Status == ServiceStatus_STARTED && s.instance == instance
 	s.serviceAccess.RUnlock()
+	if current && observedStage != nil && err == context.DeadlineExceeded && ctx.Err() == context.DeadlineExceeded {
+		err = selectedStartupDeadlineError(err, observedStage)
+	}
 	return healthy && current, err
+}
+
+func selectedStartupDeadlineError(err error, stage *atomic.Uint32) error {
+	if value := stage.Load(); value > 0 && value <= uint32(urltest.ProbeStageResponse)+1 {
+		return &urltest.ProbeError{Stage: urltest.ProbeStage(value - 1), Err: err}
+	}
+	return err
 }
 
 func selectedStartupProbeTimeout(platform string, selected adapter.Outbound, lookup func(string) (adapter.Outbound, bool)) time.Duration {

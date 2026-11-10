@@ -135,6 +135,114 @@ func (d localProbeDialer) DialContext(ctx context.Context, _ string, _ M.Socksad
 	return d.dial(ctx)
 }
 
+type delayedProbeCloseConn struct {
+	net.Conn
+	started, release chan struct{}
+	notified         atomic.Bool
+}
+
+func (c *delayedProbeCloseConn) Close() error {
+	if c.notified.CompareAndSwap(false, true) {
+		close(c.started)
+	}
+	<-c.release
+	return c.Conn.Close()
+}
+
+func TestProtectedStartupRetainsDeadlineStage(t *testing.T) {
+	target := OwnedProbeTarget{"example.com", "https://example.com/probe", "https://example.com/payload"}
+	t.Run("dial", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+		defer cancel()
+		var stage atomic.Uint32
+		dialer := localProbeDialer{dial: func(ctx context.Context) (net.Conn, error) {
+			<-ctx.Done()
+			return nil, ctx.Err()
+		}}
+		_, err := protectedURLTestAt(ctx, dialer, target, &stage, ctx)
+		if !errors.Is(err, context.DeadlineExceeded) || stage.Load() != uint32(ProbeStageConnect)+1 {
+			t.Fatalf("dial timeout lost its stage: stage=%d err=%v", stage.Load(), err)
+		}
+	})
+	t.Run("tls", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+		defer cancel()
+		var stage atomic.Uint32
+		dialer := localProbeDialer{dial: func(context.Context) (net.Conn, error) {
+			client, server := net.Pipe()
+			go func() { _, _ = io.Copy(io.Discard, server); _ = server.Close() }()
+			return client, nil
+		}}
+		_, err := protectedURLTestAt(ctx, dialer, target, &stage, ctx)
+		if !errors.Is(err, context.DeadlineExceeded) || stage.Load() != uint32(ProbeStageTLS)+1 {
+			t.Fatalf("TLS timeout lost its stage: stage=%d err=%v", stage.Load(), err)
+		}
+	})
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/hang" {
+			<-r.Context().Done()
+			return
+		}
+		w.Header().Set("X-Pokrov-Egress-Probe", ProtectedProbeMarker)
+		if r.URL.Path == "/probe" {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		w.Header().Set("Content-Length", "65536")
+		_, _ = io.WriteString(w, strings.Repeat("x", ProtectedPayloadBytes))
+	}))
+	defer server.Close()
+	roots := x509.NewCertPool()
+	roots.AddCert(server.Certificate())
+	base := service.ContextWith[adapter.CertificateStore](context.Background(), probeCertificateStore{roots: roots})
+	t.Run("response", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(base, 500*time.Millisecond)
+		defer cancel()
+		var stage atomic.Uint32
+		dialer := localProbeDialer{dial: func(ctx context.Context) (net.Conn, error) {
+			return (&net.Dialer{}).DialContext(ctx, "tcp", server.Listener.Addr().String())
+		}}
+		blocked := target
+		blocked.ProbeURL = "https://example.com/hang"
+		_, err := protectedURLTestAt(ctx, dialer, blocked, &stage, ctx)
+		if ctx.Err() != context.DeadlineExceeded || err == nil || stage.Load() != uint32(ProbeStageResponse)+1 {
+			t.Fatalf("HTTP timeout lost its stage: stage=%d err=%v", stage.Load(), err)
+		}
+	})
+	t.Run("cleanup", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(base, 500*time.Millisecond)
+		defer cancel()
+		var stage atomic.Uint32
+		started, release := make(chan struct{}), make(chan struct{})
+		dialer := localProbeDialer{dial: func(ctx context.Context) (net.Conn, error) {
+			conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", server.Listener.Addr().String())
+			if err != nil {
+				return nil, err
+			}
+			return &delayedProbeCloseConn{Conn: conn, started: started, release: release}, nil
+		}}
+		done := make(chan error, 1)
+		go func() { _, err := protectedURLTestAt(ctx, dialer, target, &stage, ctx); done <- err }()
+		select {
+		case <-started:
+		case <-ctx.Done():
+			close(release)
+			<-done
+			t.Fatal("verified response did not reach cleanup")
+		}
+		<-ctx.Done()
+		if got := stage.Load(); got != 0 {
+			close(release)
+			<-done
+			t.Fatalf("cleanup deadline retained an IO stage: %d", got)
+		}
+		close(release)
+		if err := <-done; err != nil {
+			t.Fatalf("verified response failed before cleanup: %v", err)
+		}
+	})
+}
+
 func TestResolveURLTestLinkUsesOwnedProbeByDefault(t *testing.T) {
 	const ownedProbe = "https://api.pokrov.space/api/public/authenticated-egress-probe"
 	if actual := resolveURLTestLink(""); actual != ownedProbe {
@@ -288,7 +396,9 @@ func TestProtectedStartupSessionReads64KAndRetainsResponseFailures(t *testing.T)
 				}
 				return conn, err
 			}}
-			probe := ProtectedURLTest
+			probe := func(ctx context.Context, detour N.Dialer) (uint16, error) {
+				return ProtectedURLTest(ctx, detour, nil)
+			}
 			if strings.HasPrefix(mode, "light") {
 				probe = OwnedURLTest
 			}

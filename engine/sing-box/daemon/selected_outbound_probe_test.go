@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/sagernet/sing-box/adapter"
+	"github.com/sagernet/sing-box/common/urltest"
 	C "github.com/sagernet/sing-box/constant"
 )
 
@@ -67,6 +68,30 @@ func TestAndroidDNSSelectedStartupBudget(t *testing.T) {
 	selected, found = selectedProbeLeaf("select", lookup)
 	if !found || selectedStartupProbeTimeout("android", selected, lookup) != C.TCPTimeout {
 		t.Fatal("ordinary Android startup budget changed")
+	}
+}
+
+func TestSelectedStartupDeadlineKeepsObservedStage(t *testing.T) {
+	for _, expected := range []struct {
+		stage urltest.ProbeStage
+		text  string
+	}{
+		{urltest.ProbeStageConnect, "URL probe connection failed"},
+		{urltest.ProbeStageTLS, "URL probe TLS negotiation failed"},
+		{urltest.ProbeStageResponse, "URL probe response failed"},
+	} {
+		var stage atomic.Uint32
+		stage.Store(uint32(expected.stage) + 1)
+		err := selectedStartupDeadlineError(context.DeadlineExceeded, &stage)
+		var detail *urltest.ProbeError
+		if !errors.Is(err, context.DeadlineExceeded) || !errors.As(err, &detail) ||
+			detail.Stage != expected.stage || err.Error() != expected.text {
+			t.Fatalf("deadline lost stage %d: %v", expected.stage, err)
+		}
+	}
+	var cleanup atomic.Uint32
+	if err := selectedStartupDeadlineError(context.DeadlineExceeded, &cleanup); err != context.DeadlineExceeded {
+		t.Fatalf("cleanup acquired a false IO stage: %v", err)
 	}
 }
 
