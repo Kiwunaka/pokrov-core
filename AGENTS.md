@@ -15,8 +15,9 @@ including explicit manifest overrides; a source capability alone is not binary r
 - Make the smallest maintainable change; prefer existing patterns. No speculative abstractions, dependencies, compatibility layers or future-proofing.
 - Test only the changed behavior: focused package tests first, `scripts/test.ps1` before a release commit. Repeat a check only after a change or a failure.
 - Build only after code changes, and only the affected platform artifacts. Check the exported ABI when it changes.
-- Docs describe how the runtime works now and how to build and release it. When behavior changes, rewrite the affected paragraph; do not append a new one. What was done and when goes in the commit message and nowhere else.
-- Keep out of every doc and the queue: timestamps, candidate build numbers, byte counts, lists of what was not done. A doc over 30 KB holds a chronicle or two topics: cut it. Do not create evidence folders, ledgers or decision diaries.
+- Describe the current behavior and recurring procedures. Rewrite the owning paragraph when it changes. One fact has one home. Record what changed and when in the commit message.
+- Before adding a paragraph, ask if it will still be true and needed in a month. Split or cut a doc above 30 KB. Keep timestamps, candidate numbers and acceptance logs in Git history.
+- Read production facts from production. Docs explain where and how to read them. The client manifest owns the consumed binary.
 - Do not read a large doc end to end. Search for the word you need and read the paragraph you find.
 
 ## Architecture Rules

@@ -66,8 +66,7 @@ the running child supplies its own inventory in the `prepared` reply instead.
 The inventory describes engine ingredients, not this adapter's profile allowlist:
 for example a compiled AWG ingredient does not remove the endpoint prohibition
 above. New Core and linuxd must ship together because retained daemon readers
-reject unknown child reply fields. No artifact/build/runtime evidence is added;
-metadata/child wire and timeout checks remain NOT_VERIFIED.
+reject unknown child reply fields.
 
 The private handshake also supports identity-bound start. `prepared` includes
 `identity_schema: 1`, `deadline_schema: 1` and `profile_sha256` over the untransformed bytes read from
@@ -79,9 +78,7 @@ existing daemon rollback path. Ordinary start never absorbs a bound request.
 The command also requires the original boot/start/end deadline. Core validates
 CLOCK_BOOTTIME before/after start, confirms the tuple and keeps a 100 ms clock
 watcher after responding. Expiry/clock loss closes the attempt; startup does not
-promote a lease. No wakeup or hard real-time shutdown is claimed. The command
-line limit is 512 bytes. Policy/lease/proof and selector executor integration
-remain open; this source has no new runtime evidence.
+promote a lease. The command line limit is 512 bytes.
 
 For a development build, use the root module's Go toolchain and existing tags:
 
@@ -92,12 +89,7 @@ CGO_ENABLED=0 go build -trimpath -buildvcs=false \
 go test ./v2/linuxruntime
 ```
 
-This source has bounded isolated-VM lifecycle evidence in the client repository,
-`docs/operations/evidence/2026-09-11-r12-l02-linux-runtime/`. It does not provide
-signed packaging or desktop-session acceptance. The daemon's durable recovery
-is a client L03 responsibility; exact host evidence remains separate from this
-adapter's build. Android/Windows artifact bindings and
-public release scope are unchanged by this private adapter.
+The client daemon owns durable network recovery. See the [host](../../../POKROV-app/apps/linux_shell/README.md) for that contract.
 
 ## Fixed candidate probe on Linux
 

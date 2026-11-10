@@ -3,13 +3,7 @@
 POKROV Core is the network runtime used by POKROV clients. Source/build version
 is defined by [VERSION](VERSION) and [config/release.json](config/release.json);
 the client selects binaries through its [default runtime manifest](../POKROV-app/config/runtime-artifacts.seed.json)
-or an explicit build override. A source fix does not
-update those binaries or publish a release. Current app readiness and accepted
-runtime versions are maintained in POKROV-app's [cutover readiness](../POKROV-app/docs/operations/cutover-readiness.md).
-Start with the [layout](#layout), [architecture](docs/architecture.md), and
-[release/build contract](docs/release.md). The owner's [current queue](C:/Users/kiwun/Downloads/POKROV_KNOWN_PROBLEMS_2026-10-13.md)
-and [execution plan, section 0](C:/Users/kiwun/Downloads/POKROV_EXECUTION_PLAN_2026-09-24.md)
-set the active work; dated receipts below are history.
+or an explicit build override. See [architecture](docs/architecture.md) for runtime behavior and [release](docs/release.md) for build and publishing steps.
 
 The repository contains:
 
@@ -46,9 +40,7 @@ and close after their last user. This does not change the bridge Xray pin.
 | iOS/macOS | `PokrovCore.xcframework` | local macOS build script; artifact and device acceptance remain separate |
 | Linux | none | private daemon/probe adapters; no public release artifact |
 
-The [private Linux daemon adapter](platform/linux/README.md) now provides the
-conditional beta's internal Core lifecycle. Its isolated-VM evidence does not
-change the public release targets above.
+See the [private Linux daemon adapter](platform/linux/README.md) for the engineering host.
 
 ## Requirements
 
@@ -117,7 +109,7 @@ libraries; release builds are made locally with the scripts above.
 - `third_party/warp-plus/` — pinned WARP helper.
 - `scripts/` — builds and tests.
 - `docs/architecture.md` — source contracts and focused subsystem references.
-- `docs/release.md` — build pins, artifact acceptance and historical receipts.
+- `docs/release.md` — build inputs, artifact checks and publication.
 - `docs/reference-review.md` — importing a focused upstream fix.
 
 ## Versioning
