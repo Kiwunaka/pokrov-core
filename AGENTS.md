@@ -1,13 +1,12 @@
 # POKROV Core Repository Contract
 
-This repository owns the POKROV client runtime core. It produces the Android, Windows and future Apple runtime libraries consumed by `POKROV-app`. Server-side behavior belongs to `C:/Users/kiwun/Documents/ai/POKROV-node`, not here. Current work follows the owner's execution plan `C:/Users/kiwun/Downloads/POKROV_EXECUTION_PLAN_2026-09-24.md`.
+This repository owns the POKROV client runtime core. It produces the Android, Windows and future Apple runtime libraries consumed by `POKROV-app`. Server-side behavior belongs to `C:/Users/kiwun/Documents/ai/POKROV-node`, not here.
+
+The current queue is `C:/Users/kiwun/Downloads/POKROV_RELEASE_2026-11.md`: at most 40 lines, open items only; a closed item is deleted, not described. `POKROV_KNOWN_PROBLEMS_2026-10-13.md` and the execution plan dated 2026-09-24 are archives: do not read or extend them.
 
 Use [README layout](README.md#layout) for code ownership, [architecture](docs/architecture.md)
 for runtime contracts, and [release](docs/release.md) for build pins and checks.
-The [current queue](C:/Users/kiwun/Downloads/POKROV_KNOWN_PROBLEMS_2026-10-13.md)
-and execution plan section 0 take precedence over historical receipts.
-Client-selected artifacts and runtime acceptance belong to
-[POKROV-app cutover readiness](../POKROV-app/docs/operations/cutover-readiness.md),
+Client-selected artifacts and runtime acceptance belong to the `POKROV-app` repository,
 including explicit manifest overrides; a source capability alone is not binary readiness.
 
 ## How To Work
@@ -16,7 +15,9 @@ including explicit manifest overrides; a source capability alone is not binary r
 - Make the smallest maintainable change; prefer existing patterns. No speculative abstractions, dependencies, compatibility layers or future-proofing.
 - Test only the changed behavior: focused package tests first, `scripts/test.ps1` before a release commit. Repeat a check only after a change or a failure.
 - Build only after code changes, and only the affected platform artifacts. Check the exported ABI when it changes.
-- Do not create evidence folders, ledgers or decision diaries.
+- Docs describe how the runtime works now and how to build and release it. When behavior changes, rewrite the affected paragraph; do not append a new one. What was done and when goes in the commit message and nowhere else.
+- Keep out of every doc and the queue: timestamps, candidate build numbers, byte counts, lists of what was not done. A doc over 30 KB holds a chronicle or two topics: cut it. Do not create evidence folders, ledgers or decision diaries.
+- Do not read a large doc end to end. Search for the word you need and read the paragraph you find.
 
 ## Architecture Rules
 
@@ -45,4 +46,4 @@ including explicit manifest overrides; a source capability alone is not binary r
 - Never print, commit or expose secrets, keys, tokens or raw connection material. Keep license notices.
 - Work only on POKROV-owned repos, servers and devices. Third-party systems are out of scope.
 - No destructive Git operations, deploys or release publication without explicit owner approval.
-- Never claim a check, build or release that did not happen. State plainly what was not checked.
+- Never claim a check, build or release that did not happen. State what was not checked once, in one line of the report; do not repeat such caveats in docs or the queue.
