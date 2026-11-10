@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"errors"
+	"runtime"
 	"time"
 
 	"github.com/sagernet/sing-box/adapter"
@@ -22,9 +23,14 @@ func (s *StartedService) ProbeSelectedOutboundResult(tag string) (bool, error) {
 	}
 	instance := s.instance
 	s.serviceAccess.RUnlock()
-	ctx, cancel := context.WithTimeout(instance.ctx, C.TCPTimeout)
+	lookup := instance.instance.Outbound().Outbound
+	selected, found := selectedProbeLeaf(tag, lookup)
+	if !found || instance.ctx.Err() != nil {
+		return false, errors.New("selected route probe target unavailable")
+	}
+	ctx, cancel := context.WithTimeout(instance.ctx, selectedStartupProbeTimeout(runtime.GOOS, selected, lookup))
 	defer cancel()
-	healthy, err := probeSelectedOutbound(ctx, tag, instance.instance.Outbound().Outbound,
+	healthy, err := probeCapturedOutbound(ctx, tag, lookup, selected,
 		func(ctx context.Context, outbound adapter.Outbound) (uint16, error) {
 			return urltest.ProtectedURLTest(ctx, outbound)
 		})
@@ -32,6 +38,19 @@ func (s *StartedService) ProbeSelectedOutboundResult(tag string) (bool, error) {
 	current := s.serviceStatus.Status == ServiceStatus_STARTED && s.instance == instance
 	s.serviceAccess.RUnlock()
 	return healthy && current, err
+}
+
+func selectedStartupProbeTimeout(platform string, selected adapter.Outbound, lookup func(string) (adapter.Outbound, bool)) time.Duration {
+	if platform == "android" && selected.Type() == C.TypeVLESS {
+		dependencies := selected.Dependencies()
+		if len(dependencies) == 1 {
+			carrier, found := lookup(dependencies[0])
+			if found && carrier != nil && (carrier.Type() == C.TypeDNSTT || carrier.Type() == C.TypeSlipstream) {
+				return 60 * time.Second
+			}
+		}
+	}
+	return C.TCPTimeout
 }
 
 // ProbeRuntimeEgressResult is the short periodic check of the active protected
@@ -139,6 +158,12 @@ func probeSelectedOutbound(ctx context.Context, tag string,
 	if !found || ctx.Err() != nil {
 		return false, errors.New("selected route probe target unavailable")
 	}
+	return probeCapturedOutbound(ctx, tag, lookup, selected, probe)
+}
+
+func probeCapturedOutbound(ctx context.Context, tag string, lookup func(string) (adapter.Outbound, bool),
+	selected adapter.Outbound, probe func(context.Context, adapter.Outbound) (uint16, error),
+) (bool, error) {
 	type result struct {
 		delay uint16
 		err   error

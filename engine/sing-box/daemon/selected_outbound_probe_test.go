@@ -13,11 +13,17 @@ import (
 
 type probeLeaf struct {
 	adapter.Outbound
-	tag, kind string
+	tag, kind, dependency string
 }
 
 func (p probeLeaf) Tag() string  { return p.tag }
 func (p probeLeaf) Type() string { return p.kind }
+func (p probeLeaf) Dependencies() []string {
+	if p.dependency == "" {
+		return nil
+	}
+	return []string{p.dependency}
+}
 
 type probeGroup struct {
 	adapter.OutboundGroup
@@ -26,6 +32,43 @@ type probeGroup struct {
 
 func (p *probeGroup) Type() string { return C.TypeSelector }
 func (p *probeGroup) Now() string  { return p.selected.Load().(string) }
+
+func TestAndroidDNSSelectedStartupBudget(t *testing.T) {
+	group := &probeGroup{}
+	group.selected.Store("proxy")
+	leaf := probeLeaf{tag: "proxy", kind: C.TypeVLESS, dependency: "carrier"}
+	carrier := probeLeaf{tag: "carrier", kind: C.TypeDNSTT}
+	lookup := func(tag string) (adapter.Outbound, bool) {
+		switch tag {
+		case "select":
+			return group, true
+		case "proxy":
+			return leaf, true
+		case "carrier":
+			return carrier, true
+		default:
+			return nil, false
+		}
+	}
+	selected, found := selectedProbeLeaf("select", lookup)
+	if !found {
+		t.Fatal("selected VLESS leaf was not found")
+	}
+	for _, kind := range []string{C.TypeDNSTT, C.TypeSlipstream} {
+		carrier.kind = kind
+		if selectedStartupProbeTimeout("android", selected, lookup) != 60*time.Second {
+			t.Fatalf("Android %s carrier did not get its startup budget", kind)
+		}
+	}
+	if selectedStartupProbeTimeout("windows", selected, lookup) != C.TCPTimeout {
+		t.Fatal("Windows startup budget changed")
+	}
+	leaf.dependency = ""
+	selected, found = selectedProbeLeaf("select", lookup)
+	if !found || selectedStartupProbeTimeout("android", selected, lookup) != C.TCPTimeout {
+		t.Fatal("ordinary Android startup budget changed")
+	}
+}
 
 func TestSelectedProbeCannotConfirmChangedRouteOrDirectLeaf(t *testing.T) {
 	group := &probeGroup{}
