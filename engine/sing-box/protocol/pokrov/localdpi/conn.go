@@ -3,9 +3,11 @@ package localdpi
 import (
 	"context"
 	"errors"
+	"io"
 	"net"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 )
 
@@ -106,7 +108,21 @@ func (c *observedConn) effectiveReadDeadline(caller time.Time) time.Time {
 func (c *observedConn) observe(err error, reason admissionFailure) {
 	if err != nil && !c.responded.Load() && !c.closed.Load() && c.ctx.Err() == nil &&
 		!errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
-		c.owner.failAdmission(c.admissionID, reason)
+		cause := ""
+		if reason == failureEarlyRead {
+			var netError net.Error
+			switch {
+			case errors.As(err, &netError) && netError.Timeout():
+				cause = "timeout"
+			case errors.Is(err, syscall.ECONNRESET):
+				cause = "reset"
+			case errors.Is(err, io.EOF), errors.Is(err, io.ErrUnexpectedEOF):
+				cause = "remote_closed"
+			default:
+				cause = "other"
+			}
+		}
+		c.owner.failAdmission(c.admissionID, reason, cause)
 	}
 }
 

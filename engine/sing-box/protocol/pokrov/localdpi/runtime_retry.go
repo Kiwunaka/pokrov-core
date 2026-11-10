@@ -83,6 +83,7 @@ func PrepareWindowsRetry(holders []*Outbound, expectedIDs []string) ([]string, b
 		h.withdrawCtx, h.withdrawCancel = context.WithCancel(h.runtimeCtx)
 		h.withdrawCompleted = false
 		h.failureReason = ""
+		h.earlyReadCause = ""
 		h.retryPrepared = true
 	}
 	unlock()

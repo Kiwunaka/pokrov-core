@@ -86,6 +86,7 @@ type Outbound struct {
 	vpnHandoffs       uint64
 	quicRejected      uint64
 	failureReason     admissionFailure // First ready-to-failed cause; guarded by mu.
+	earlyReadCause    string
 }
 
 type Observation struct {
@@ -95,6 +96,7 @@ type Observation struct {
 	VPNHandoffs       uint64 `json:"vpn_handoffs"`
 	QUICRejected      uint64 `json:"quic_rejected"`
 	FailureReason     string `json:"failure_reason"`
+	EarlyReadCause    string `json:"early_read_cause,omitempty"`
 }
 
 func NewOutbound(ctx context.Context, _ adapter.Router, _ log.ContextLogger, tag string,
@@ -166,14 +168,16 @@ func (h *Outbound) ReadObservation() Observation {
 	return Observation{
 		State: states[h.admission.Load()], WithdrawCompleted: h.withdrawCompleted,
 		LocalHandoffs: h.localHandoffs, VPNHandoffs: h.vpnHandoffs, QUICRejected: h.quicRejected, FailureReason: reason,
+		EarlyReadCause: h.earlyReadCause,
 	}
 }
 
-func (h *Outbound) failAdmission(expectedID string, reason admissionFailure) {
+func (h *Outbound) failAdmission(expectedID string, reason admissionFailure, cause string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if expectedID == h.admissionID && h.admission.CompareAndSwap(admissionReady, admissionFailed) {
 		h.failureReason = reason
+		h.earlyReadCause = cause
 	}
 }
 
@@ -450,7 +454,7 @@ func (h *Outbound) NewConnection(ctx context.Context, conn net.Conn, metadata ad
 				reason = failureConnectTimeoutIPv4
 			}
 		}
-		h.failAdmission(id, reason)
+		h.failAdmission(id, reason, "")
 		h.mu.Lock()
 		unavailable := h.admissionID != id || h.admission.Load() == admissionWithdrawn
 		h.mu.Unlock()

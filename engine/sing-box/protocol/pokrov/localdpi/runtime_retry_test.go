@@ -32,7 +32,7 @@ func TestWindowsRuntimeRetryReplacesBatchWithoutInterruptingVPN(t *testing.T) {
 	}
 	oldA, oldB := strings.Repeat("a", 32), strings.Repeat("b", 32)
 	a, b := makeHolder("a", oldA), makeHolder("b", oldB)
-	a.failAdmission(oldA, failureEarlyRead)
+	a.failAdmission(oldA, failureEarlyRead, "timeout")
 	local, localPeer := net.Pipe()
 	vpn, vpnPeer := net.Pipe()
 	t.Cleanup(func() { _ = localPeer.Close(); _ = vpnPeer.Close() })
@@ -51,6 +51,9 @@ func TestWindowsRuntimeRetryReplacesBatchWithoutInterruptingVPN(t *testing.T) {
 	ids, ok := PrepareWindowsRetry([]*Outbound{a, b}, []string{oldA, oldB})
 	if !ok || len(ids) != 2 || ids[0] == oldA || ids[1] == oldB || ids[0] == ids[1] || a.IsReady() || b.IsReady() {
 		t.Fatal("retry did not create two fresh unpublished holders")
+	}
+	if a.ReadObservation().EarlyReadCause != "" {
+		t.Fatal("retry retained the previous holder's early read cause")
 	}
 	if localCtx.Err() == nil || vpnCtx.Err() != nil {
 		t.Fatal("retry did not close only the local flow")
@@ -100,7 +103,7 @@ func TestWindowsRuntimeRetryReplacesBatchWithoutInterruptingVPN(t *testing.T) {
 	if !a.IsReady() || a.ReadObservation().FailureReason != "none" {
 		t.Fatal("old flow observer failed the new generation")
 	}
-	a.failAdmission(ids[0], failureEarlyRead)
+	a.failAdmission(ids[0], failureEarlyRead, "")
 	if _, ok := PrepareWindowsRetry([]*Outbound{a, b}, ids); ok {
 		t.Fatal("retry budget exceeded")
 	}

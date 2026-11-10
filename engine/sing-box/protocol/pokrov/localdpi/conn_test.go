@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"net/netip"
+	"os"
 	"sync/atomic"
 	"syscall"
 	"testing"
@@ -267,7 +268,7 @@ func TestLocalDpiFirstResponseTimeoutUsesVPNOnNextConnection(t *testing.T) {
 	if _, err := app.Read(received); !errors.Is(err, io.EOF) {
 		t.Fatalf("Core did not close the silent stream: %v", err)
 	}
-	if observation := h.ReadObservation(); observation.State != "failed" || observation.FailureReason != "early_read" ||
+	if observation := h.ReadObservation(); observation.State != "failed" || observation.FailureReason != "early_read" || observation.EarlyReadCause != "timeout" ||
 		observation.LocalHandoffs != 1 || observation.VPNHandoffs != 0 {
 		t.Fatalf("silent local path left the wrong admission state: %+v", observation)
 	}
@@ -343,13 +344,24 @@ func TestIdleLocalDpiEOFKeepsAdmissionAndUsedFlowFailureIsRetained(t *testing.T)
 	used, usedConn := newConnection(&observedTestConn{})
 	_, _ = usedConn.Write([]byte{1})
 	_, _ = usedConn.Read(buffer)
-	if used.IsReady() || used.ReadObservation().FailureReason != "early_read" {
+	if observed := used.ReadObservation(); used.IsReady() || observed.FailureReason != "early_read" || observed.EarlyReadCause != "remote_closed" {
 		t.Fatal("EOF after client payload lost its failed admission and closed reason")
 	}
-	used.failAdmission("fixture", failureConnectErrorIPv6)
+	used.failAdmission("fixture", failureConnectErrorIPv6, "")
 	used.WithdrawAdmission("fixture")
-	if observed := used.ReadObservation(); observed.State != "withdrawn" || observed.FailureReason != "early_read" {
+	if observed := used.ReadObservation(); observed.State != "withdrawn" || observed.FailureReason != "early_read" || observed.EarlyReadCause != "remote_closed" {
 		t.Fatal("later failures or withdrawal overwrote the first reason")
+	}
+	for _, sample := range []struct {
+		err   error
+		cause string
+	}{{syscall.ECONNRESET, "reset"}, {os.ErrDeadlineExceeded, "timeout"}, {errors.New("private transport detail"), "other"}} {
+		holder, conn := newConnection(&observedTestConn{readError: sample.err})
+		_, _ = conn.Write([]byte{1})
+		_, _ = conn.Read(buffer)
+		if observed := holder.ReadObservation(); observed.FailureReason != "early_read" || observed.EarlyReadCause != sample.cause {
+			t.Fatalf("early read classification: %+v", observed)
+		}
 	}
 
 	writeRemote := &observedTestConn{writeError: errors.New("synthetic private transport detail")}

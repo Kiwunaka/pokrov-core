@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"regexp"
+	"runtime"
 	"strings"
 
 	"github.com/sagernet/sing-box/protocol/pokrov/localdpi"
@@ -38,7 +39,11 @@ func (s *StartedService) ReadLocalDpiObservation(admissionID string) (string, er
 	}
 	for _, outbound := range s.instance.instance.Outbound().Outbounds() {
 		if local, ok := outbound.(*localdpi.Outbound); ok && local.AdmissionID() == admissionID {
-			encoded, err := json.Marshal(local.ReadObservation())
+			observation := local.ReadObservation()
+			if runtime.GOOS != "android" {
+				observation.EarlyReadCause = ""
+			}
+			encoded, err := json.Marshal(observation)
 			return string(encoded), err
 		}
 	}
