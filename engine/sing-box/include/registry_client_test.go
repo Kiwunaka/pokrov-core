@@ -16,12 +16,12 @@ func TestClientRegistryExcludesUnusedProtocolsAndServers(t *testing.T) {
 		}
 	}
 	inbounds := InboundRegistry()
-	for _, protocol := range []string{"direct", "shadowsocks", "vmess", "trojan", "naive", "shadowtls", "vless", "anytls", "mieru", "ssh", "hysteria", "hysteria2", "tuic"} {
+	for _, protocol := range []string{"shadowsocks", "vmess", "trojan", "naive", "shadowtls", "vless", "anytls", "mieru", "ssh", "hysteria", "hysteria2", "tuic"} {
 		if _, exists := inbounds.CreateOptions(protocol); exists {
 			t.Errorf("client registered server inbound %q", protocol)
 		}
 	}
-	for _, protocol := range []string{"tun", "socks", "http", "mixed"} {
+	for _, protocol := range []string{"tun", "direct", "socks", "http", "mixed"} {
 		if _, exists := inbounds.CreateOptions(protocol); !exists {
 			t.Errorf("client lost local inbound %q", protocol)
 		}
