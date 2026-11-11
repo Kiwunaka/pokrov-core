@@ -21,6 +21,7 @@ import (
 	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing/common/control"
 	M "github.com/sagernet/sing/common/metadata"
+	N "github.com/sagernet/sing/common/network"
 	"github.com/sagernet/sing/service"
 	kcp "github.com/xtaci/kcp-go/v5"
 	"github.com/xtaci/smux"
@@ -216,6 +217,95 @@ func TestDNSTTBlackholeCancellationAndClose(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("Close leaked setup")
+	}
+}
+
+type handoffCancelContext struct {
+	context.Context
+	cancel       context.CancelFunc
+	armed        atomic.Bool
+	closeStarted <-chan struct{}
+}
+
+func (c *handoffCancelContext) Err() error {
+	err := c.Context.Err()
+	if err == nil && c.armed.CompareAndSwap(true, false) {
+		// Cancel immediately after observing a live context, before the handoff.
+		c.cancel()
+		<-c.closeStarted
+	}
+	return err
+}
+
+type handoffDialer struct {
+	N.Dialer
+	ctx          *handoffCancelContext
+	closeStarted chan struct{}
+	allowClose   <-chan struct{}
+}
+
+func (d *handoffDialer) DialContext(ctx context.Context, network string, destination M.Socksaddr) (net.Conn, error) {
+	conn, err := d.Dialer.DialContext(ctx, network, destination)
+	if err != nil {
+		return nil, err
+	}
+	d.ctx.armed.Store(true)
+	return &handoffCloseConn{Conn: conn, closeStarted: d.closeStarted, allowClose: d.allowClose}, nil
+}
+
+type handoffCloseConn struct {
+	net.Conn
+	closeStarted chan struct{}
+	allowClose   <-chan struct{}
+	started      atomic.Bool
+}
+
+func (c *handoffCloseConn) Close() error {
+	if c.started.CompareAndSwap(false, true) {
+		close(c.closeStarted)
+	}
+	<-c.allowClose
+	return c.Conn.Close()
+}
+
+func TestDNSTTCancelAtSessionHandoffWaitsForClose(t *testing.T) {
+	resolver, publicKey := startDNSTTEcho(t)
+	h := newTestOutbound(t, resolver, publicKey, &protectedTestNetwork{})
+	parent, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	closeStarted := make(chan struct{})
+	allowClose := make(chan struct{})
+	ctx := &handoffCancelContext{Context: parent, cancel: cancel, closeStarted: closeStarted}
+	h.dialer = &handoffDialer{Dialer: h.dialer, ctx: ctx, closeStarted: closeStarted, allowClose: allowClose}
+	type result struct {
+		session *tunnelSession
+		err     error
+	}
+	finished := make(chan result, 1)
+	go func() { session, err := h.connect(ctx); finished <- result{session, err} }()
+	select {
+	case <-closeStarted:
+	case <-time.After(3 * time.Second):
+		close(allowClose)
+		t.Fatal("handoff cancellation did not close the transport")
+	}
+	select {
+	case got := <-finished:
+		close(allowClose)
+		if got.session != nil {
+			got.session.Close()
+		}
+		t.Fatal("session returned before cancellation callback finished")
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(allowClose)
+	select {
+	case got := <-finished:
+		if got.session != nil || !errors.Is(got.err, context.Canceled) {
+			t.Fatalf("cancelled handoff returned session=%v, error=%v", got.session != nil, got.err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("cancelled handoff did not finish after transport closed")
 	}
 }
 

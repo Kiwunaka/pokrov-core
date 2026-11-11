@@ -200,8 +200,12 @@ func (h *Outbound) connect(ctx context.Context) (*tunnelSession, error) {
 	session := &tunnelSession{packet: packet, kcp: conn}
 	// Closing the established path also interrupts a peer that never responds
 	// to the Noise handshake. Setup does not leave a background dial running.
-	stop := context.AfterFunc(ctx, func() { conn.Close(); packet.Close() })
-	defer stop()
+	closeDone := make(chan struct{})
+	stop := context.AfterFunc(ctx, func() {
+		defer close(closeDone)
+		conn.Close()
+		packet.Close()
+	})
 	session.noise, err = noise.NewClient(conn, h.key)
 	if err == nil {
 		config := smux.DefaultConfig()
@@ -212,6 +216,12 @@ func (h *Outbound) connect(ctx context.Context) (*tunnelSession, error) {
 	}
 	if err == nil {
 		err = ctx.Err()
+	}
+	if !stop() {
+		<-closeDone
+		if err == nil {
+			err = ctx.Err()
+		}
 	}
 	if err != nil {
 		session.Close()
