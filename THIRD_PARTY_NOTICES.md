@@ -10,6 +10,7 @@ POKROV Core includes and links third-party software.
 - AmneziaWG Go `v0.2.16`: MIT. Its exact module sum and bounded AWG2 usage are
   recorded in `config/awg2-capability.json`; the license is retained at
   `third_party/licenses/amneziawg-go-MIT.txt`.
+- OpenFlux MTS board carrier: GPL-3.0; its license is retained at `engine/sing-box/protocol/pokrov/mtscarrier/LICENSE`.
 - Embedded WireGuard, Tailscale, Psiphon, and protocol modules retain their license files in their source directories.
 - Cronet is Chromium's network stack. Chromium uses a BSD-style license and
   bundled components retain their respective licenses; see [Chromium LICENSE](https://github.com/chromium/chromium/blob/main/LICENSE).

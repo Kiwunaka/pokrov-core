@@ -66,6 +66,8 @@ require (
 	howett.net/plist v1.0.1
 )
 
+require github.com/gorilla/websocket v1.5.3 // indirect
+
 require (
 	github.com/AdguardTeam/golibs v0.32.7 // indirect
 	github.com/ameshkov/dnscrypt/v2 v2.4.0
@@ -174,7 +176,7 @@ require (
 	github.com/mroth/weightedrand v1.0.0 // indirect
 	github.com/pelletier/go-toml v1.9.5 // indirect
 	github.com/philhofer/fwd v1.2.0
-	github.com/pierrec/lz4/v4 v4.1.26 // indirect
+	github.com/pierrec/lz4/v4 v4.1.27 // indirect
 	github.com/pion/datachannel v1.5.5 // indirect
 	github.com/pion/dtls/v2 v2.2.7 // indirect
 	github.com/pion/dtls/v3 v3.1.5

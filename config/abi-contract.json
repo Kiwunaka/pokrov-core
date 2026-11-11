@@ -93,6 +93,11 @@
     "bounds": "Module at most 1 GiB, backing file at most 2 GiB, 128 KiB streaming hash buffer, maps read at most 16 MiB with 16 KiB line bound. Reject ambiguous ZIP entry, changed stat or changed mapping. No filesystem paths, addresses or errors leave the getter.",
     "scope": "Owned native observation, not remote attestation, profile admission or protection from a compromised host/Core. Optional additive Android binding; missing older AAR getter leaves ATS identity unavailable. No tunnel, network or entitlement mutation. Source NOT_VERIFIED."
   },
+  "api_loopback_proxy": {
+    "mobile_start_symbol": "mobile.StartApiLoopbackProxy",
+    "mobile_stop_symbol": "mobile.StopApiLoopbackProxy",
+    "scope": "Separate loopback HTTP CONNECT proxy for the fixed API upstream over MTS; caller closes it when no longer needed."
+  },
   "transport_capabilities": {
     "symbol": "pokrovCoreTransportCapabilities",
     "mobile_symbol": "libbox.TransportCapabilities",
@@ -101,6 +106,7 @@
     "arguments": "none; pure compiled-feature inventory, no runtime or network setup",
     "returns": "Caller-owned UTF-8 JSON, at most 4096 bytes, release desktop string with freeString. Closed shape: schema=1, features=sorted unique ASCII feature IDs. Absent symbol/null/invalid or unknown schema means unavailable, never inferred support. This optional additive export does not change desktop ABI 2 or the existing exact capability descriptor.",
     "features": {
+      "mts_vless_v1": "TCP-only fixed-upstream VLESS or API stream over MTS board, KCP, server-pinned Noise and smux.",
       "dnstt_vless_v1": "TCP-only VLESS detour over pinned Noise/KCP/smux DNS tunnel, one numeric UDP resolver and fixed server upstream. Compiled support only; host entitlement, owned delegated endpoint and server-side Premium authorization remain required.",
       "slipstream_vless_v1": "TCP-only VLESS detour over certificate-pinned Slipstream QUIC/DNS. Only with_slipstream on Windows/Android/Linux; requires a bundled native client supplied by the trusted host. Core owns process lifetime and the protected outer DNS socket. Compiled support does not establish endpoint, packaging, entitlement or TUN readiness.",
       "pokrov_ats_lease_v1": "Core outbound wrapper for a single VLESS ATS endpoint. New TCP/UDP flows stop within 10 minutes of issue; admitted flows close within one hour. The host must bind and revoke the exact running profile/lease.",

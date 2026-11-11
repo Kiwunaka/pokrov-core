@@ -82,6 +82,7 @@ require (
 	github.com/golang/snappy v0.0.1 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/google/nftables v0.2.1-0.20240414091927-5e242ec57806 // indirect
+	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/grafov/m3u8 v0.0.0-20171211212457-6ab8f28ed427 // indirect
 	github.com/hdevalence/ed25519consensus v0.2.0 // indirect
 	github.com/jmhodges/levigo v1.0.0 // indirect
@@ -212,7 +213,7 @@ require (
 	github.com/libdns/cloudflare v0.2.2 // indirect
 	github.com/libdns/libdns v1.1.1 // indirect
 	github.com/logrusorgru/aurora v2.0.3+incompatible // indirect
-	github.com/pierrec/lz4/v4 v4.1.26 // indirect
+	github.com/pierrec/lz4/v4 v4.1.27 // indirect
 	github.com/pires/go-proxyproto v0.9.2 // indirect
 	github.com/quic-go/qpack v0.6.0 // indirect
 	github.com/refraction-networking/utls v1.8.2 // indirect
