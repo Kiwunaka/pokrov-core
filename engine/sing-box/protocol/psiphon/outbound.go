@@ -21,6 +21,7 @@ import (
 	M "github.com/sagernet/sing/common/metadata"
 	N "github.com/sagernet/sing/common/network"
 	"github.com/sagernet/sing/service"
+	"github.com/sagernet/sing/service/filemanager"
 )
 
 const (
@@ -81,7 +82,7 @@ func NewOutbound(ctx context.Context, _ adapter.Router, logger log.ContextLogger
 	if timeout <= 0 {
 		timeout = defaultEstablishTunnelTimeout
 	}
-	config, err := buildConfig(options, timeout, tag)
+	config, err := buildConfig(ctx, options, timeout, tag)
 	if err != nil {
 		return nil, err
 	}
@@ -222,11 +223,12 @@ func instanceDirectory(tag string) string {
 	return string(name)
 }
 
-func buildConfig(options option.PsiphonOutboundOptions, timeout time.Duration, tag string) (*psiphon.Config, error) {
+func buildConfig(ctx context.Context, options option.PsiphonOutboundOptions, timeout time.Duration, tag string) (*psiphon.Config, error) {
 	dataDir := options.DataDirectory
 	if dataDir == "" {
 		dataDir = defaultDataDirectory
 	}
+	dataDir = filemanager.BasePath(ctx, dataDir)
 	allowDefaultDNS := true
 	if options.AllowDefaultDNSResolverWithBindToDevice != nil {
 		allowDefaultDNS = *options.AllowDefaultDNSResolverWithBindToDevice
