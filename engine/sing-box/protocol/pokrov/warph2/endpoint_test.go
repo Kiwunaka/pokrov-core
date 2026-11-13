@@ -9,15 +9,16 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
-	"github.com/sagernet/quic-go/quicvarint"
 	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/option"
+	wg "github.com/sagernet/sing-box/transport/wireguard"
 	M "github.com/sagernet/sing/common/metadata"
 )
 
@@ -31,6 +32,20 @@ func (localDialer) ListenPacket(context.Context, M.Socksaddr) (net.PacketConn, e
 }
 
 type packetReceiver chan []byte
+
+type packetSender struct {
+	wg.Device
+	packet []byte
+}
+
+func (p *packetSender) Read(packets [][]byte, sizes []int, _ int) (int, error) {
+	if p.packet == nil {
+		return 0, io.EOF
+	}
+	sizes[0] = copy(packets[0], p.packet)
+	p.packet = nil
+	return 1, nil
+}
 
 func (p packetReceiver) Write(packets [][]byte, _ int) (int, error) {
 	p <- append([]byte(nil), packets[0]...)
@@ -72,17 +87,19 @@ func TestHTTP2CapsuleTransferAndCancellation(t *testing.T) {
 		}
 		w.WriteHeader(200)
 		w.(http.Flusher).Flush()
-		buffer := make([]byte, 4096)
-		for {
-			n, err := r.Body.Read(buffer)
-			if n > 0 {
-				_, _ = w.Write(buffer[:n])
-				w.(http.Flusher).Flush()
-			}
-			if err != nil {
-				return
-			}
+		// DATAGRAM type, 21-byte payload, context zero, then the 20-byte IP packet.
+		frame := make([]byte, 23)
+		if _, err := io.ReadFull(r.Body, frame); err != nil {
+			t.Error(err)
+			return
 		}
+		if frame[0] != 0 || frame[1] != 21 || frame[2] != 0 || frame[3] != 0x45 {
+			t.Error("IP datagram omitted the RFC 9484 context identifier")
+			return
+		}
+		_, _ = w.Write(frame)
+		w.(http.Flusher).Flush()
+		_, _ = io.Copy(io.Discard, r.Body)
 	}))
 	server.EnableHTTP2 = true
 	server.TLS = &tls.Config{ClientAuth: tls.RequestClientCert}
@@ -97,17 +114,13 @@ func TestHTTP2CapsuleTransferAndCancellation(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer current.close()
+	e.current = current
 	packets := make(packetReceiver, 1)
 	done := make(chan error, 1)
 	go func() { done <- receivePackets(current.reader, packets) }()
 	packet := make([]byte, 20)
 	packet[0] = 0x45
-	frame := quicvarint.Append(nil, 0)
-	frame = quicvarint.Append(frame, uint64(len(packet)))
-	frame = append(frame, packet...)
-	if _, err = current.writer.Write(frame); err != nil {
-		t.Fatal(err)
-	}
+	go e.sendPackets(&packetSender{packet: packet})
 	select {
 	case received := <-packets:
 		if string(received) != string(packet) {

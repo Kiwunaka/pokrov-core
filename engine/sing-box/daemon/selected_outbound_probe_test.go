@@ -64,6 +64,14 @@ func TestAndroidCarrierSelectedStartupBudget(t *testing.T) {
 	if selectedStartupProbeTimeout("windows", selected, lookup) != C.TCPTimeout {
 		t.Fatal("Windows startup budget changed")
 	}
+	carrier.kind = C.TypePsiphon
+	if selectedStartupProbeTimeout("windows", selected, lookup) != 60*time.Second || selectedStartupProbeTimeout("android", selected, lookup) != 60*time.Second {
+		t.Fatal("Psiphon did not get its startup budget")
+	}
+	carrier.kind = C.TypeWARP
+	if selectedStartupProbeTimeout("windows", selected, lookup) != 30*time.Second || selectedStartupProbeTimeout("android", carrier, lookup) != 30*time.Second {
+		t.Fatal("WARP did not get its startup budget")
+	}
 	leaf.dependency = ""
 	selected, found = selectedProbeLeaf("select", lookup)
 	if !found || selectedStartupProbeTimeout("android", selected, lookup) != C.TCPTimeout {

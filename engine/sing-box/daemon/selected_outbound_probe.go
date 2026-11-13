@@ -58,12 +58,24 @@ func selectedStartupDeadlineError(err error, stage *atomic.Uint32) error {
 }
 
 func selectedStartupProbeTimeout(platform string, selected adapter.Outbound, lookup func(string) (adapter.Outbound, bool)) time.Duration {
-	if platform == "android" && selected.Type() == C.TypeVLESS {
+	if selected.Type() == C.TypeWARP {
+		return 30 * time.Second
+	}
+	if selected.Type() == C.TypeVLESS {
 		dependencies := selected.Dependencies()
 		if len(dependencies) == 1 {
 			carrier, found := lookup(dependencies[0])
-			if found && carrier != nil && (carrier.Type() == C.TypeDNSTT || carrier.Type() == C.TypeSlipstream || carrier.Type() == "vk") {
-				return 60 * time.Second
+			if found && carrier != nil {
+				switch carrier.Type() {
+				case C.TypePsiphon:
+					return 60 * time.Second
+				case C.TypeWARP:
+					return 30 * time.Second
+				case C.TypeDNSTT, C.TypeSlipstream, "vk":
+					if platform == "android" {
+						return 60 * time.Second
+					}
+				}
 			}
 		}
 	}
