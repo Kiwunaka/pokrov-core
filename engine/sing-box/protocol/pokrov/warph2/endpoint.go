@@ -76,7 +76,7 @@ func New(ctx context.Context, logger log.ContextLogger, tag string, options opti
 		return nil, errors.New("WARP MASQUE requires its own local device registration")
 	}
 	outerDialer, err := dialer.NewWithOptions(dialer.Options{Context: ctx, Options: options.DialerOptions,
-		RemoteIsDomain: true, ResolverOnDetour: true, DisableEmptyDirectCheck: true})
+		RemoteIsDomain: true})
 	if err != nil {
 		return nil, err
 	}
@@ -211,7 +211,7 @@ func (e *Endpoint) profile(ctx context.Context) (*C.WARPConfig, error) {
 	if e.options.Profile.Detour != "" {
 		var err error
 		registrationDialer, err = dialer.NewWithOptions(dialer.Options{Context: e.ctx,
-			Options: option.DialerOptions{Detour: e.options.Profile.Detour}, RemoteIsDomain: true, ResolverOnDetour: true, DisableEmptyDirectCheck: true})
+			Options: option.DialerOptions{Detour: e.options.Profile.Detour}, RemoteIsDomain: true})
 		if err != nil {
 			return nil, err
 		}
@@ -381,7 +381,7 @@ func receivePackets(stream io.Reader, device interface {
 		if err != nil {
 			return err
 		}
-		if size > 65536 {
+		if size > 65535 {
 			return errors.New("WARP MASQUE capsule is too large")
 		}
 		if kind != 0 {
@@ -390,19 +390,10 @@ func receivePackets(stream io.Reader, device interface {
 			}
 			continue
 		}
-		payload := make([]byte, int(size))
-		if _, err = io.ReadFull(reader, payload); err != nil {
+		packet := make([]byte, int(size))
+		if _, err = io.ReadFull(reader, packet); err != nil {
 			return err
 		}
-		datagram := bytes.NewReader(payload)
-		contextID, err := quicvarint.Read(datagram)
-		if err != nil {
-			return err
-		}
-		if contextID != 0 {
-			continue
-		}
-		packet := payload[len(payload)-datagram.Len():]
 		if len(packet) < 20 || (packet[0]>>4 != 4 && packet[0]>>4 != 6) || (packet[0]>>4 == 6 && len(packet) < 40) {
 			return errors.New("WARP MASQUE IP packet is invalid")
 		}
@@ -426,8 +417,7 @@ func (e *Endpoint) sendPackets(device wg.Device) {
 			continue
 		}
 		frame := quicvarint.Append(nil, 0)
-		frame = quicvarint.Append(frame, uint64(sizes[0]+1))
-		frame = quicvarint.Append(frame, 0) // RFC 9484: context zero carries an IP packet.
+		frame = quicvarint.Append(frame, uint64(sizes[0]))
 		frame = append(frame, packet[:sizes[0]]...)
 		current.writeMu.Lock()
 		_, err := current.writer.Write(frame)

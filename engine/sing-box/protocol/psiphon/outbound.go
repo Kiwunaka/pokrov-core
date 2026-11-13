@@ -68,11 +68,10 @@ func (o tunnelOwner) SignalTunnelFailure(*psiphon.Tunnel) {
 }
 
 func NewOutbound(ctx context.Context, _ adapter.Router, logger log.ContextLogger, tag string, options option.PsiphonOutboundOptions) (adapter.Outbound, error) {
-	// Psiphon's own connections (its server list, its servers) name domains: resolved here, or
-	// by the detour. With false they all failed with "domain not resolved".
+	// Resolve provider names on the physical dialer; a proxy detour resolves its own names.
 	outboundDialer, err := dialer.NewWithOptions(dialer.Options{
 		Context: ctx, Options: options.DialerOptions,
-		RemoteIsDomain: true, ResolverOnDetour: true, DisableEmptyDirectCheck: true,
+		RemoteIsDomain: true,
 	})
 	if err != nil {
 		return nil, err

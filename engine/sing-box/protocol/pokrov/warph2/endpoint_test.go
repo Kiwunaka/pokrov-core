@@ -87,14 +87,14 @@ func TestHTTP2CapsuleTransferAndCancellation(t *testing.T) {
 		}
 		w.WriteHeader(200)
 		w.(http.Flusher).Flush()
-		// DATAGRAM type, 21-byte payload, context zero, then the 20-byte IP packet.
-		frame := make([]byte, 23)
+		// Cloudflare's HTTP/2 dialect omits the context ID used by HTTP/3.
+		frame := make([]byte, 22)
 		if _, err := io.ReadFull(r.Body, frame); err != nil {
 			t.Error(err)
 			return
 		}
-		if frame[0] != 0 || frame[1] != 21 || frame[2] != 0 || frame[3] != 0x45 {
-			t.Error("IP datagram omitted the RFC 9484 context identifier")
+		if frame[0] != 0 || frame[1] != 20 || frame[2] != 0x45 {
+			t.Error("IP datagram did not use Cloudflare's HTTP/2 framing")
 			return
 		}
 		_, _ = w.Write(frame)
