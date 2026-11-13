@@ -31,6 +31,7 @@ import (
 	"github.com/sagernet/sing-box/protocol/pokrov/mts"
 	"github.com/sagernet/sing-box/protocol/pokrov/smartaccess"
 	"github.com/sagernet/sing-box/protocol/pokrov/telegramws"
+	"github.com/sagernet/sing-box/protocol/pokrov/vk"
 	"github.com/sagernet/sing-box/protocol/pokrov/xray"
 	"github.com/sagernet/sing-box/protocol/redirect"
 	"github.com/sagernet/sing-box/protocol/shadowsocks"
@@ -66,6 +67,7 @@ func OutboundRegistry() *outbound.Registry {
 	atslease.RegisterOutbound(registry)
 	dnstt.RegisterOutbound(registry)
 	mts.RegisterOutbound(registry)
+	vk.RegisterOutbound(registry)
 	registerSlipstreamOutbound(registry)
 	smartaccess.RegisterOutbound(registry)
 	telegramws.RegisterOutbound(registry)

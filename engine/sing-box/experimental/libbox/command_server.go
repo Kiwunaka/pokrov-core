@@ -14,6 +14,7 @@ import (
 	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/daemon"
 	"github.com/sagernet/sing-box/log"
+	"github.com/sagernet/sing-box/protocol/pokrov/vk"
 	"github.com/sagernet/sing/common"
 	E "github.com/sagernet/sing/common/exceptions"
 	"github.com/sagernet/sing/service"
@@ -33,6 +34,7 @@ type CommandServer struct {
 	listener          net.Listener
 	endPauseTimer     *time.Timer
 	operationalEvents *operationalEventEmitter
+	vkCaptcha         *vkCaptchaBroker
 }
 
 type CommandServerHandler interface {
@@ -55,7 +57,9 @@ func NewCommandServer(handler CommandServerHandler, platformInterface PlatformIn
 		platformInterface: platformInterface,
 		platformWrapper:   platformWrapper,
 		operationalEvents: newOperationalEventEmitter(),
+		vkCaptcha:         &vkCaptchaBroker{},
 	}
+	service.MustRegister[vk.CaptchaSolver](ctx, server.vkCaptcha)
 	platformWrapper.debugMessage = server.handler.WriteDebugMessage
 	server.StartedService = daemon.NewStartedService(daemon.ServiceOptions{
 		Context: ctx,

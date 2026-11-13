@@ -90,6 +90,11 @@ func ProbeCandidate(config, id string, timeout time.Duration, bindInterface stri
 	return probeCandidate(libbox.BaseContext(platform), config, id, timeout, bindInterface, platform, interrupted, stage...)
 }
 
+func ProbeCandidateWithVkCaptcha(config, id string, timeout time.Duration,
+	platform libbox.PlatformInterface, interrupted func() bool, session *libbox.VkCaptchaSession) CandidateProbeResult {
+	return probeCandidate(libbox.WithVkCaptcha(libbox.BaseContext(platform), session), config, id, timeout, "", platform, interrupted)
+}
+
 func probeCandidate(baseContext context.Context, config, id string, timeout time.Duration, bindInterface string,
 	platform libbox.PlatformInterface, interrupted func() bool, stage ...func(string)) (result CandidateProbeResult) {
 	started := time.Now()

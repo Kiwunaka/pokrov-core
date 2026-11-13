@@ -11,6 +11,7 @@ POKROV Core includes and links third-party software.
   recorded in `config/awg2-capability.json`; the license is retained at
   `third_party/licenses/amneziawg-go-MIT.txt`.
 - OpenFlux MTS board carrier: GPL-3.0; its license is retained at `engine/sing-box/protocol/pokrov/mtscarrier/LICENSE`.
+- VK TURN TCP carrier and authentication protocol: adapted from [vk-turn-proxy v1.8.3](https://github.com/cacggghp/vk-turn-proxy/tree/v1.8.3), GPL-3.0; its license is retained at `engine/sing-box/protocol/pokrov/vk/LICENSE`. The outer carrier requires inner VLESS REALITY or TLS authentication. Android runs VK's own verification page and returns its one-shot result in memory.
 - Embedded WireGuard, Tailscale, Psiphon, and protocol modules retain their license files in their source directories.
 - Cronet is Chromium's network stack. Chromium uses a BSD-style license and
   bundled components retain their respective licenses; see [Chromium LICENSE](https://github.com/chromium/chromium/blob/main/LICENSE).

@@ -33,6 +33,7 @@ import (
 	"github.com/sagernet/sing-box/protocol/pokrov/mts"
 	"github.com/sagernet/sing-box/protocol/pokrov/smartaccess"
 	"github.com/sagernet/sing-box/protocol/pokrov/telegramws"
+	"github.com/sagernet/sing-box/protocol/pokrov/vk"
 
 	"github.com/sagernet/sing-box/protocol/http"
 	"github.com/sagernet/sing-box/protocol/mieru"
@@ -120,6 +121,7 @@ func OutboundRegistry() *outbound.Registry {
 	xray.RegisterOutbound(registry)
 	dnstt.RegisterOutbound(registry)
 	mts.RegisterOutbound(registry)
+	vk.RegisterOutbound(registry)
 	registerSlipstreamOutbound(registry)
 	balancer.RegisterLoadBalance(registry)
 

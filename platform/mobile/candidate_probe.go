@@ -22,3 +22,13 @@ func ProbeCandidate(configJSON, probeID string, timeoutMs int32, platformInterfa
 func CancelCandidateProbe(probeID string) {
 	hcore.CancelCandidateProbe(probeID)
 }
+
+func ProbeCandidateWithVkCaptcha(configJSON, probeID string, timeoutMs int32,
+	platformInterface libbox.PlatformInterface, cancellation CandidateProbeCancellation,
+	session *libbox.VkCaptchaSession) string {
+	if platformInterface == nil || cancellation == nil || session == nil {
+		return (hcore.CandidateProbeResult{FailureKind: "invalid_request"}).JSON()
+	}
+	return hcore.ProbeCandidateWithVkCaptcha(configJSON, probeID, time.Duration(timeoutMs)*time.Millisecond,
+		platformInterface, cancellation.IsCancelled, session).JSON()
+}

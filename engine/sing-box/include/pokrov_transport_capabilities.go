@@ -2,6 +2,7 @@ package include
 
 import (
 	"encoding/json"
+	"runtime"
 	"sort"
 )
 
@@ -12,6 +13,9 @@ func TransportCapabilities() string {
 	features := []string{"dnstt_vless_v1", "mts_vless_v1", "pokrov_ats_lease_v1", "pokrov_telegram_ws_v1", "singbox_grpc_v1", "singbox_tls_v1", "singbox_vless_v1", "singbox_xhttp_v1"}
 	if pokrovTransportUTLS {
 		features = append(features, "singbox_utls_v1", "singbox_reality_v1")
+		if runtime.GOOS == "android" {
+			features = append(features, "vk_vless_v1")
+		}
 	}
 	if pokrovTransportQUIC {
 		features = append(features, "singbox_hysteria2_v1")
