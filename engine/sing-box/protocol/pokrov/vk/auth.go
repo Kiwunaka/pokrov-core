@@ -39,7 +39,17 @@ type authResponse struct {
 	} `json:"error"`
 }
 
+type turnCredentials struct {
+	username, password, address string
+	expiresAt                   time.Time
+}
+
 func (h *Outbound) credentials(ctx context.Context) (string, string, string, error) {
+	// Match the upstream ten-minute grant with its one-minute safety margin.
+	// The owning outbound gate serializes this cache and connection setup.
+	if c := h.credentialsCache; c != nil && time.Now().Before(c.expiresAt) {
+		return c.username, c.password, c.address, nil
+	}
 	jar, _ := cookiejar.New(nil)
 	transport := &http.Transport{DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
 		return h.dialer.DialContext(ctx, network, M.ParseSocksaddr(address))
@@ -149,6 +159,7 @@ func (h *Outbound) credentials(ctx context.Context) (string, string, string, err
 	if _, _, err := net.SplitHostPort(address); err != nil {
 		return "", "", "", errors.New("invalid VK TURN address")
 	}
+	h.credentialsCache = &turnCredentials{response.Turn.Username, response.Turn.Credential, address, time.Now().Add(9 * time.Minute)}
 	return response.Turn.Username, response.Turn.Credential, address, nil
 }
 

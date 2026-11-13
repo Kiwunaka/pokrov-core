@@ -10,6 +10,7 @@ import (
 
 	"github.com/pion/dtls/v3"
 	"github.com/pion/dtls/v3/pkg/crypto/selfsign"
+	"github.com/pion/stun/v3"
 	"github.com/pion/turn/v5"
 	M "github.com/sagernet/sing/common/metadata"
 	"github.com/xtaci/kcp-go/v5"
@@ -84,6 +85,10 @@ func (h *Outbound) connect(ctx context.Context) (_ *tunnelSession, err error) {
 	}
 	s.relay, err = s.turn.Allocate()
 	if err != nil {
+		var rejection *stun.TurnError
+		if errors.As(err, &rejection) && (int(rejection.ErrorCodeAttr.Code) == 401 || int(rejection.ErrorCodeAttr.Code) == 441) {
+			h.credentialsCache = nil
+		}
 		return nil, errors.New("VK TURN relay allocation failed")
 	}
 	certificate, err := selfsign.GenerateSelfSigned()

@@ -29,15 +29,16 @@ func RegisterOutbound(registry *outbound.Registry) {
 // must authenticate that server with the inner VLESS REALITY/TLS connection.
 type Outbound struct {
 	outbound.Adapter
-	ctx     context.Context
-	cancel  context.CancelFunc
-	dialer  N.Dialer
-	solver  CaptchaSolver
-	call    string
-	peer    *net.UDPAddr
-	timeout time.Duration
-	gate    chan struct{}
-	session *tunnelSession
+	ctx              context.Context
+	cancel           context.CancelFunc
+	dialer           N.Dialer
+	solver           CaptchaSolver
+	call             string
+	peer             *net.UDPAddr
+	timeout          time.Duration
+	gate             chan struct{}
+	session          *tunnelSession
+	credentialsCache *turnCredentials
 }
 
 var callPath = regexp.MustCompile(`^/call/join/([A-Za-z0-9_-]+)$`)
@@ -146,5 +147,6 @@ func (h *Outbound) Close() error {
 		h.session.Close()
 		h.session = nil
 	}
+	h.credentialsCache = nil
 	return nil
 }
