@@ -1,6 +1,6 @@
 {
   "name": "POKROV Core",
-  "version": "1.2.19",
+  "version": "1.2.20",
   "state": "PRE_CANDIDATE_LOCAL",
   "candidate_created": false,
   "go_toolchain": "go1.26.10",
