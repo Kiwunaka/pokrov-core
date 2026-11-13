@@ -38,6 +38,7 @@ type WireGuardPeer struct {
 }
 
 type WireGuardWARPEndpointOptions struct {
+	Mode                       string             `json:"mode,omitempty"`
 	System                     bool               `json:"system,omitempty"`
 	Name                       string             `json:"name,omitempty"`
 	ListenPort                 uint16             `json:"listen_port,omitempty"`

@@ -17,6 +17,7 @@ import (
 	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
+	"github.com/sagernet/sing-box/protocol/pokrov/warph2"
 	"github.com/sagernet/sing/common"
 	E "github.com/sagernet/sing/common/exceptions"
 	"github.com/sagernet/sing/common/json/badoption"
@@ -46,6 +47,12 @@ type WARPEndpoint struct {
 }
 
 func NewWARPEndpoint(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, options option.WireGuardWARPEndpointOptions) (adapter.Endpoint, error) {
+	if options.Mode == "masque_h2" {
+		return warph2.New(ctx, logger, tag, options)
+	}
+	if options.Mode != "" && options.Mode != "wireguard" {
+		return nil, E.New("unsupported WARP mode")
+	}
 	var dependencies []string
 	if options.Detour != "" {
 		dependencies = append(dependencies, options.Detour)

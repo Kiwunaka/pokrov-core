@@ -33,6 +33,7 @@ import (
 	"github.com/sagernet/sing-box/protocol/pokrov/telegramws"
 	"github.com/sagernet/sing-box/protocol/pokrov/vk"
 	"github.com/sagernet/sing-box/protocol/pokrov/xray"
+	"github.com/sagernet/sing-box/protocol/psiphon"
 	"github.com/sagernet/sing-box/protocol/redirect"
 	"github.com/sagernet/sing-box/protocol/shadowsocks"
 	"github.com/sagernet/sing-box/protocol/shadowtls"
@@ -87,6 +88,7 @@ func OutboundRegistry() *outbound.Registry {
 	anytls.RegisterOutbound(registry)
 	hinvalid.RegisterOutbound(registry)
 	xray.RegisterOutbound(registry)
+	psiphon.RegisterOutbound(registry)
 	balancer.RegisterLoadBalance(registry)
 	registerQUICOutbounds(registry)
 	registerWireGuardOutbound(registry)

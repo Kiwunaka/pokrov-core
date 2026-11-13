@@ -10,7 +10,7 @@ import (
 
 func TestClientRegistryExcludesUnusedProtocolsAndServers(t *testing.T) {
 	outbounds := OutboundRegistry()
-	for _, protocol := range []string{"psiphon", "tor", "mieru", "ssh"} {
+	for _, protocol := range []string{"tor", "mieru", "ssh"} {
 		if _, exists := outbounds.CreateOptions(protocol); exists {
 			t.Errorf("client registered unused outbound %q", protocol)
 		}
@@ -26,7 +26,7 @@ func TestClientRegistryExcludesUnusedProtocolsAndServers(t *testing.T) {
 			t.Errorf("client lost local inbound %q", protocol)
 		}
 	}
-	for _, protocol := range []string{"direct", "vless", "dnstt", "slipstream", "naive", "selector", "pokrov-telegram-ws", "pokrov-local-dpi"} {
+	for _, protocol := range []string{"direct", "vless", "dnstt", "slipstream", "naive", "psiphon", "selector", "pokrov-telegram-ws", "pokrov-local-dpi"} {
 		if _, exists := outbounds.CreateOptions(protocol); !exists {
 			t.Errorf("client lost outbound %q", protocol)
 		}
@@ -45,5 +45,8 @@ func TestClientRegistryExcludesUnusedProtocolsAndServers(t *testing.T) {
 	}
 	if slices.Contains(inventory.Features, "slipstream_vless_v1") != pokrovTransportSlipstream {
 		t.Fatal("Slipstream inventory does not match the compiled transport")
+	}
+	if !slices.Contains(inventory.Features, "pokrov_psiphon_tcp_v1") || slices.Contains(inventory.Features, "pokrov_warp_masque_h2_v1") != pokrovTransportWarpH2 {
+		t.Fatal("connection helper inventory does not match the compiled transports")
 	}
 }

@@ -2,6 +2,7 @@ package psiphon
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"path/filepath"
 	"sync"
@@ -11,6 +12,7 @@ import (
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/adapter/outbound"
 	"github.com/sagernet/sing-box/common/dialer"
+	"github.com/sagernet/sing-box/common/proxybridge"
 	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
@@ -46,11 +48,13 @@ type Outbound struct {
 	logger    logger.ContextLogger
 	dialer    N.Dialer
 
-	ctx context.Context
+	ctx    context.Context
+	cancel context.CancelFunc
 
 	mu          sync.RWMutex
 	reconnectCh chan struct{}
 	psiphon     *Psiphon
+	proxy       *proxybridge.Bridge
 }
 
 type tunnelOwner struct{ notify func() }
@@ -63,7 +67,12 @@ func (o tunnelOwner) SignalTunnelFailure(*psiphon.Tunnel) {
 }
 
 func NewOutbound(ctx context.Context, _ adapter.Router, logger log.ContextLogger, tag string, options option.PsiphonOutboundOptions) (adapter.Outbound, error) {
-	outboundDialer, err := dialer.New(ctx, options.DialerOptions, false)
+	// Psiphon's own connections (its server list, its servers) name domains: resolved here, or
+	// by the detour. With false they all failed with "domain not resolved".
+	outboundDialer, err := dialer.NewWithOptions(dialer.Options{
+		Context: ctx, Options: options.DialerOptions,
+		RemoteIsDomain: true, ResolverOnDetour: true, DisableEmptyDirectCheck: true,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -72,10 +81,14 @@ func NewOutbound(ctx context.Context, _ adapter.Router, logger log.ContextLogger
 	if timeout <= 0 {
 		timeout = defaultEstablishTunnelTimeout
 	}
-	config := buildConfig(options, timeout)
+	config, err := buildConfig(options, timeout, tag)
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithCancel(ctx)
 	psiphon, err := NewPsiphon(ctx, logger, config, tag)
 	if err != nil {
-
+		cancel()
 		return nil, err
 	}
 	outbound := &Outbound{
@@ -84,6 +97,7 @@ func NewOutbound(ctx context.Context, _ adapter.Router, logger log.ContextLogger
 		psiphon:     psiphon,
 		logger:      logger,
 		ctx:         ctx,
+		cancel:      cancel,
 		dnsRouter:   service.FromContext[adapter.DNSRouter](ctx),
 		reconnectCh: make(chan struct{}, 1),
 	}
@@ -95,7 +109,20 @@ func (h *Outbound) PreStart() error {
 	return h.psiphon.PreStart()
 }
 func (h *Outbound) Start() error {
-
+	// The Psiphon library opens its own connections. Without this bridge they ignored the
+	// outbound's dialer (its detour, e.g. the main proxy), and in VPN mode they went back into
+	// the tunnel. Same approach as the Tor outbound.
+	if h.psiphon.config.UpstreamProxyURL == "" {
+		proxy, err := proxybridge.New(h.ctx, h.logger, "psiphon", h.dialer)
+		if err != nil {
+			return err
+		}
+		if err = proxy.Start(); err != nil {
+			return err
+		}
+		h.proxy = proxy
+		h.psiphon.config.UpstreamProxyURL = fmt.Sprint("socks5://", proxy.Username(), ":", proxy.Password(), "@127.0.0.1:", proxy.Port())
+	}
 	go h.run()
 	return nil
 }
@@ -138,7 +165,7 @@ func (h *Outbound) DialContext(ctx context.Context, network string, destination 
 	// if err != nil {
 	// 	return nil, E.New(err, "failed to dial destination ", destination, " through outbound ", h.Tag())
 	// }
-	return h.psiphon.Dial(dst, nil)
+	return h.psiphon.Dial(ctx, dst, nil)
 
 	// dialConf := psiphon.DialConfig{
 	// 	// CustomDialer: *h.dialer,
@@ -171,13 +198,31 @@ func (h *Outbound) ListenPacket(ctx context.Context, destination M.Socksaddr) (n
 }
 
 func (h *Outbound) Close() error {
+	if h.cancel != nil {
+		h.cancel()
+	}
 
 	h.psiphon.Close()
-
+	if h.proxy != nil {
+		h.proxy.Close()
+	}
 	return nil
 }
 
-func buildConfig(options option.PsiphonOutboundOptions, timeout time.Duration) *psiphon.Config {
+func instanceDirectory(tag string) string {
+	name := []byte(tag)
+	for i, c := range name {
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-' || c == '_' || c == '.') {
+			name[i] = '_'
+		}
+	}
+	if len(name) == 0 || string(name) == "." || string(name) == ".." {
+		return "default"
+	}
+	return string(name)
+}
+
+func buildConfig(options option.PsiphonOutboundOptions, timeout time.Duration, tag string) (*psiphon.Config, error) {
 	dataDir := options.DataDirectory
 	if dataDir == "" {
 		dataDir = defaultDataDirectory
@@ -216,7 +261,7 @@ func buildConfig(options option.PsiphonOutboundOptions, timeout time.Duration) *
 	}
 	establishTimeoutSeconds := durationToSecondsPtr(timeout)
 	config := &psiphon.Config{
-		DataRootDirectory:                            dataDir,
+		DataRootDirectory:                            filepath.Join(dataDir, instanceDirectory(tag)),
 		EgressRegion:                                 options.EgressRegion,
 		PropagationChannelId:                         propagationChannelID,
 		RemoteServerListDownloadFilename:             remoteListFilename,
@@ -237,7 +282,7 @@ func buildConfig(options option.PsiphonOutboundOptions, timeout time.Duration) *
 	if options.UpstreamProxyURL != "" {
 		config.UpstreamProxyURL = options.UpstreamProxyURL
 	}
-	return config
+	return config, nil
 }
 
 func durationToSecondsPtr(duration time.Duration) *int {
@@ -248,42 +293,39 @@ func durationToSecondsPtr(duration time.Duration) *int {
 	return &seconds
 }
 
-func (h *Outbound) run() {
-	h.connectOnce()
-	// defer h.closeDataStore()
-	// for {
-	// 	if h.ctx.Err() != nil {
-	// 		return
-	// 	}
-	// 	if h.psiphon.IsConnected() {
-	// 		h.logger.Debug("psiphon tunnel is active")
-	// 		select {
-	// 		case <-h.ctx.Done():
-	// 			return
-	// 		case <-h.reconnectCh:
-	// 			h.resetTunnel()
-	// 		}
-	// 		continue
-	// 	}
-	// 	h.logger.Debug("psiphon tunnel is not active, trying to connect")
-	// 	if err := h.connectOnce(); err != nil {
-	// 		h.logger.Warn("psiphon connect failed: ", err)
-	// 		select {
-	// 		case <-h.ctx.Done():
-	// 			return
-	// 		case <-time.After(5 * time.Second):
-	// 		}
-	// 		continue
-	// 	}
-	// }
-}
+// The controller is started again after it stops (it gives up after the establish timeout, or
+// fails), with a backoff between these.
+const (
+	restartMin = 5 * time.Second
+	restartMax = 5 * time.Minute
+)
 
-func (p *Outbound) DisplayType() string {
-	str := "⚠️ Connecting..."
-	if p.psiphon.IsConnected() {
-		str = "✔️ Connected"
+// run keeps a controller running: it starts one, waits until it stops, and starts another. Before,
+// a controller that gave up left the outbound dead until the box restarted.
+func (h *Outbound) run() {
+	backoff := restartMin
+	for {
+		if h.ctx.Err() != nil {
+			return
+		}
+		err := h.connectOnce()
+		if err == nil {
+			backoff = restartMin // it connected: a later stop starts over quickly
+			h.psiphon.Wait()
+			err = E.New("the controller stopped")
+		}
+		h.psiphon.stop()
+		if h.ctx.Err() != nil {
+			return
+		}
+		h.logger.Warn("psiphon: ", err, ", starting again in ", backoff)
+		select {
+		case <-h.ctx.Done():
+			return
+		case <-time.After(backoff):
+		}
+		backoff = min(backoff*2, restartMax)
 	}
-	return C.ProxyDisplayName(p.Type()) + " " + str
 }
 
 func (h *Outbound) connectOnce() error {
@@ -315,11 +357,8 @@ func (h *Outbound) requestReconnect() {
 	default:
 	}
 }
-func (h *Outbound) IsReady() bool {
-	return h.psiphon.IsConnected()
-}
 
-func (h *Outbound) InterfaceUpdated(_ context.Context) {
+func (h *Outbound) InterfaceUpdated(ctx context.Context) {
 	h.logger.Info("Network Changed... Restarting Psiphon Tunnel")
-	h.psiphon.controller.NetworkChanged()
+	h.psiphon.NetworkChanged()
 }

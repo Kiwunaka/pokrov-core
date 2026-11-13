@@ -25,3 +25,5 @@ func registerWireGuardEndpoint(registry *endpoint.Registry) {
 		return nil, E.New(`WireGuard is not included in this build, rebuild with -tags with_wireguard`)
 	})
 }
+
+const pokrovTransportWarpH2 = false
