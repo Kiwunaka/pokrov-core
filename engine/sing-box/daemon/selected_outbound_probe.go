@@ -62,7 +62,7 @@ func selectedStartupProbeTimeout(platform string, selected adapter.Outbound, loo
 		dependencies := selected.Dependencies()
 		if len(dependencies) == 1 {
 			carrier, found := lookup(dependencies[0])
-			if found && carrier != nil && (carrier.Type() == C.TypeDNSTT || carrier.Type() == C.TypeSlipstream) {
+			if found && carrier != nil && (carrier.Type() == C.TypeDNSTT || carrier.Type() == C.TypeSlipstream || carrier.Type() == "vk") {
 				return 60 * time.Second
 			}
 		}

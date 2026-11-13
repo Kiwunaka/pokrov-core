@@ -34,7 +34,7 @@ type probeGroup struct {
 func (p *probeGroup) Type() string { return C.TypeSelector }
 func (p *probeGroup) Now() string  { return p.selected.Load().(string) }
 
-func TestAndroidDNSSelectedStartupBudget(t *testing.T) {
+func TestAndroidCarrierSelectedStartupBudget(t *testing.T) {
 	group := &probeGroup{}
 	group.selected.Store("proxy")
 	leaf := probeLeaf{tag: "proxy", kind: C.TypeVLESS, dependency: "carrier"}
@@ -55,7 +55,7 @@ func TestAndroidDNSSelectedStartupBudget(t *testing.T) {
 	if !found {
 		t.Fatal("selected VLESS leaf was not found")
 	}
-	for _, kind := range []string{C.TypeDNSTT, C.TypeSlipstream} {
+	for _, kind := range []string{C.TypeDNSTT, C.TypeSlipstream, "vk"} {
 		carrier.kind = kind
 		if selectedStartupProbeTimeout("android", selected, lookup) != 60*time.Second {
 			t.Fatalf("Android %s carrier did not get its startup budget", kind)
