@@ -71,7 +71,7 @@ func NewOutbound(ctx context.Context, _ adapter.Router, logger log.ContextLogger
 	// Resolve provider names on the physical dialer; a proxy detour resolves its own names.
 	outboundDialer, err := dialer.NewWithOptions(dialer.Options{
 		Context: ctx, Options: options.DialerOptions,
-		RemoteIsDomain: true,
+		RemoteIsDomain: true, ProtectPlatformSocket: true,
 	})
 	if err != nil {
 		return nil, err
