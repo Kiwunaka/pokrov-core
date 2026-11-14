@@ -1,7 +1,7 @@
 diff --git a/crates/slipstream-client/src/runtime.rs b/crates/slipstream-client/src/runtime.rs
 --- a/crates/slipstream-client/src/runtime.rs
 +++ b/crates/slipstream-client/src/runtime.rs
-@@ -318,7 +318,26 @@ pub async fn run_client(config: &ClientConfig<'_>) -> Result<i32, ClientError> {
+@@ -318,5 +318,24 @@ pub async fn run_client(config: &ClientConfig<'_>) -> Result<i32, ClientError> {
                          }
                      }
                  }
@@ -27,5 +27,3 @@ diff --git a/crates/slipstream-client/src/runtime.rs b/crates/slipstream-client/
 +                    }
 +                }
              }
- 
-             drain_commands(cnx, state_ptr, &mut command_rx);
