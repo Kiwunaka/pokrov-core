@@ -1,0 +1,246 @@
+diff --git a/crates/slipstream-client/src/local_io.rs b/crates/slipstream-client/src/local_io.rs
+index 6dcd4a8..d525547 100644
+--- a/crates/slipstream-client/src/local_io.rs
++++ b/crates/slipstream-client/src/local_io.rs
+@@ -24,6 +24,7 @@ fn auth_error() -> io::Error {
+ pub(crate) struct LocalAuth {
+     key: [u8; 32],
+     generation: [u8; 16],
++    pub(crate) relay_port: u16,
+ }
+ 
+ impl LocalAuth {
+@@ -31,22 +32,26 @@ impl LocalAuth {
+         // Bound a malformed launch even if stdin never supplies a bootstrap.
+         let (tx, rx) = mpsc::sync_channel(1);
+         std::thread::spawn(move || {
+-            let mut message = [0u8; 56];
++            let mut message = [0u8; 58];
+             let result = io::stdin().read_exact(&mut message).map(|_| message);
+             let _ = tx.send(result);
+         });
+         let message = rx
+             .recv_timeout(Duration::from_secs(5))
+             .map_err(|_| auth_error())??;
+-        if &message[..8] != b"PKRVIPC1" {
++        if &message[..8] != b"PKRVIPC2" {
+             return Err(auth_error());
+         }
+         let mut auth = Self {
+             key: [0; 32],
+             generation: [0; 16],
++            relay_port: u16::from_be_bytes([message[56], message[57]]),
+         };
++        if auth.relay_port == 0 {
++            return Err(auth_error());
++        }
+         auth.key.copy_from_slice(&message[8..40]);
+-        auth.generation.copy_from_slice(&message[40..]);
++        auth.generation.copy_from_slice(&message[40..56]);
+         Ok(Arc::new(auth))
+     }
+ 
+@@ -62,7 +67,7 @@ impl LocalAuth {
+     }
+ 
+     pub(crate) fn report_ready(&self, tcp_port: u16, udp_port: u16) -> io::Result<()> {
+-        let mut message = Vec::from(&b"PKRVRDY1"[..]);
++        let mut message = Vec::from(&b"PKRVRDY2"[..]);
+         message.extend_from_slice(&self.generation);
+         message.extend_from_slice(&tcp_port.to_be_bytes());
+         message.extend_from_slice(&udp_port.to_be_bytes());
+@@ -93,7 +98,7 @@ impl LocalAuth {
+ 
+     fn seal(&self, sequence: u64, payload: &[u8]) -> io::Result<Vec<u8>> {
+         let mut frame = Vec::with_capacity(payload.len() + FRAME_SIZE);
+-        frame.extend_from_slice(b"PKRVDNS1");
++        frame.extend_from_slice(b"PKRVDNS2");
+         frame.extend_from_slice(&self.generation);
+         frame.extend_from_slice(&sequence.to_be_bytes());
+         frame.extend_from_slice(payload);
+@@ -103,7 +108,7 @@ impl LocalAuth {
+ 
+     fn open<'a>(&self, frame: &'a [u8]) -> io::Result<Option<(&'a [u8], u64)>> {
+         if frame.len() <= FRAME_SIZE
+-            || &frame[..8] != b"PKRVDNS1"
++            || &frame[..8] != b"PKRVDNS2"
+             || frame[8..24] != self.generation
+         {
+             return Ok(None);
+@@ -151,15 +156,21 @@ impl ReplayWindow {
+ pub(crate) struct DnsSocket {
+     socket: UdpSocket,
+     auth: Option<(Arc<LocalAuth>, SocketAddr)>,
++    targets: Vec<SocketAddr>,
+     sequence: AtomicU64,
+     received: Mutex<ReplayWindow>,
+ }
+ 
+ impl DnsSocket {
+-    pub(crate) fn new(socket: UdpSocket, auth: Option<(Arc<LocalAuth>, SocketAddr)>) -> Self {
++    pub(crate) fn new(
++        socket: UdpSocket,
++        auth: Option<(Arc<LocalAuth>, SocketAddr)>,
++        targets: Vec<SocketAddr>,
++    ) -> Self {
+         Self {
+             socket,
+             auth,
++            targets,
+             sequence: AtomicU64::new(0),
+             received: Mutex::new(ReplayWindow::default()),
+         }
+@@ -171,9 +182,11 @@ impl DnsSocket {
+ 
+     pub(crate) async fn send_to(&self, payload: &[u8], peer: SocketAddr) -> io::Result<usize> {
+         if let Some((auth, expected)) = &self.auth {
+-            if peer != *expected {
+-                return Err(auth_error());
+-            }
++            let index = self
++                .targets
++                .iter()
++                .position(|target| *target == peer)
++                .ok_or_else(auth_error)?;
+             let sequence = self
+                 .sequence
+                 .fetch_add(1, Ordering::Relaxed)
+@@ -181,8 +194,11 @@ impl DnsSocket {
+             if sequence == 0 {
+                 return Err(auth_error());
+             }
++            let mut routed = Vec::with_capacity(payload.len() + 1);
++            routed.push(index as u8);
++            routed.extend_from_slice(payload);
+             self.socket
+-                .send_to(&auth.seal(sequence, payload)?, peer)
++                .send_to(&auth.seal(sequence, &routed)?, *expected)
+                 .await?;
+             Ok(payload.len())
+         } else {
+@@ -195,7 +211,7 @@ impl DnsSocket {
+         frame: &[u8],
+         peer: SocketAddr,
+         output: &mut [u8],
+-    ) -> io::Result<Option<usize>> {
++    ) -> io::Result<Option<(usize, SocketAddr)>> {
+         let Some((auth, expected)) = &self.auth else {
+             return Err(auth_error());
+         };
+@@ -205,6 +221,12 @@ impl DnsSocket {
+         let Some((payload, sequence)) = auth.open(frame)? else {
+             return Ok(None);
+         };
++        let Some((&index, payload)) = payload.split_first() else {
++            return Ok(None);
++        };
++        let Some(target) = self.targets.get(index as usize) else {
++            return Ok(None);
++        };
+         if !self
+             .received
+             .lock()
+@@ -214,18 +236,18 @@ impl DnsSocket {
+             return Ok(None);
+         }
+         output[..payload.len()].copy_from_slice(payload);
+-        Ok(Some(payload.len()))
++        Ok(Some((payload.len(), *target)))
+     }
+ 
+     pub(crate) async fn recv_from(&self, output: &mut [u8]) -> io::Result<(usize, SocketAddr)> {
+         if self.auth.is_none() {
+             return self.socket.recv_from(output).await;
+         }
+-        let mut frame = vec![0u8; output.len() + FRAME_SIZE];
++        let mut frame = vec![0u8; output.len() + FRAME_SIZE + 1];
+         loop {
+             let (size, peer) = self.socket.recv_from(&mut frame).await?;
+-            if let Some(size) = self.decode(&frame[..size], peer, output)? {
+-                return Ok((size, peer));
++            if let Some(result) = self.decode(&frame[..size], peer, output)? {
++                return Ok(result);
+             }
+             tokio::task::yield_now().await;
+         }
+@@ -235,11 +257,11 @@ impl DnsSocket {
+         if self.auth.is_none() {
+             return self.socket.try_recv_from(output);
+         }
+-        let mut frame = vec![0u8; output.len() + FRAME_SIZE];
++        let mut frame = vec![0u8; output.len() + FRAME_SIZE + 1];
+         for _ in 0..64 {
+             let (size, peer) = self.socket.try_recv_from(&mut frame)?;
+-            if let Some(size) = self.decode(&frame[..size], peer, output)? {
+-                return Ok((size, peer));
++            if let Some(result) = self.decode(&frame[..size], peer, output)? {
++                return Ok(result);
+             }
+         }
+         Err(io::ErrorKind::WouldBlock.into())
+@@ -261,6 +283,7 @@ mod tests {
+             let auth = Arc::new(LocalAuth {
+                 key: [1; 32],
+                 generation: [2; 16],
++                relay_port: 1,
+             });
+             let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+                 .await
+@@ -315,14 +338,17 @@ mod tests {
+         let auth = Arc::new(LocalAuth {
+             key: [1; 32],
+             generation: [2; 16],
++            relay_port: 1,
+         });
+         let old = LocalAuth {
+             key: [1; 32],
+             generation: [3; 16],
++            relay_port: 1,
+         };
+         let wrong = LocalAuth {
+             key: [4; 32],
+             generation: [2; 16],
++            relay_port: 1,
+         };
+         let mut frame = auth.seal(1, b"DNS reply").expect("encode query");
+         assert!(auth.open(&frame).expect("check direction").is_none());
+diff --git a/crates/slipstream-client/src/runtime.rs b/crates/slipstream-client/src/runtime.rs
+index cb93a4b..fe7d08d 100644
+--- a/crates/slipstream-client/src/runtime.rs
++++ b/crates/slipstream-client/src/runtime.rs
+@@ -69,19 +69,30 @@ pub async fn run_client(
+     let domain_len = config.domain.len();
+     let mtu = compute_mtu(domain_len)?;
+     let udp = if let Some(auth) = &local_auth {
+-        if config.resolvers.len() != 1 || config.resolvers[0].resolver.host != "127.0.0.1" {
++        if config.resolvers.is_empty()
++            || config.resolvers.len() > 4
++            || config
++                .resolvers
++                .iter()
++                .any(|resolver| resolver.resolver.host != "127.0.0.1")
++        {
+             return Err(ClientError::new(
+-                "POKROV local I/O requires one loopback relay",
++                "POKROV local I/O requires one to four local paths",
+             ));
+         }
+-        let relay = std::net::SocketAddr::from(([127, 0, 0, 1], config.resolvers[0].resolver.port));
++        let relay = std::net::SocketAddr::from(([127, 0, 0, 1], auth.relay_port));
++        let targets = config
++            .resolvers
++            .iter()
++            .map(|resolver| std::net::SocketAddr::from(([127, 0, 0, 1], resolver.resolver.port)))
++            .collect();
+         let socket = tokio::net::UdpSocket::bind("127.0.0.1:0")
+             .await
+             .map_err(map_io)?;
+         socket.connect(relay).await.map_err(map_io)?;
+-        DnsSocket::new(socket, Some((Arc::clone(auth), relay)))
++        DnsSocket::new(socket, Some((Arc::clone(auth), relay)), targets)
+     } else {
+-        DnsSocket::new(bind_udp_socket().await?, None)
++        DnsSocket::new(bind_udp_socket().await?, None, Vec::new())
+     };
+     let udp_local_addr = udp.local_addr().map_err(map_io)?;
+     let peer_addr_mode = PeerAddrMode::from_local_addr(udp_local_addr);

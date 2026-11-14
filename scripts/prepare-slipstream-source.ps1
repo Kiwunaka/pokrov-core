@@ -9,7 +9,12 @@ $revision = (& git -C $SourceDirectory rev-parse HEAD).Trim()
 if ($LASTEXITCODE -ne 0 -or $revision -ne $release.engine.slipstream.revision) {
   throw 'Slipstream source must match config/release.json; initialize its pinned submodules first.'
 }
-foreach ($name in @('pokrov-local-io.patch', 'pokrov-active-poll.patch')) {
+$patches = @('pokrov-local-io.patch', 'pokrov-active-poll.patch', 'pokrov-multipath.patch')
+# The final patch changes the file introduced by the first patch.
+$lastPatch = Join-Path $root "third_party/slipstream/$($patches[-1])"
+& git -C $SourceDirectory apply --reverse --check $lastPatch *> $null
+if ($LASTEXITCODE -eq 0) { return }
+foreach ($name in $patches) {
   $patch = Join-Path $root "third_party/slipstream/$name"
   & git -C $SourceDirectory apply --reverse --check $patch *> $null
   if ($LASTEXITCODE -eq 0) { continue }

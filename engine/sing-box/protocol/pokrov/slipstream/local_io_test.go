@@ -112,7 +112,7 @@ func TestDNSRelayRejectsFirstSenderForgeryReplayAndOldGeneration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	relay, err := newDNSRelay(remote, auth)
+	relay, err := newDNSRelay([]net.Conn{remote}, auth)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,7 +129,7 @@ func TestDNSRelayRejectsFirstSenderForgeryReplayAndOldGeneration(t *testing.T) {
 	defer attacker.Close()
 	address := relay.local.LocalAddr().(*net.UDPAddr)
 	query := []byte("DNS query from the child")
-	frame := auth.sealDNS(dnsQuery, 1, query)
+	frame := auth.sealDNS(dnsQuery, 1, append([]byte{0}, query...))
 	attacker.WriteToUDP([]byte("first unauthenticated sender"), address)
 	attacker.WriteToUDP(frame, address)
 	relay.setPeer(legitimate.LocalAddr().(*net.UDPAddr).AddrPort())
@@ -144,7 +144,7 @@ func TestDNSRelayRejectsFirstSenderForgeryReplayAndOldGeneration(t *testing.T) {
 	legitimate.SetReadDeadline(time.Now().Add(2 * time.Second))
 	n, _, err = legitimate.ReadFromUDP(buffer)
 	payload, sequence, valid := auth.openDNS(dnsReply, buffer[:n])
-	if err != nil || !valid || sequence != 1 || string(payload) != "DNS reply" {
+	if err != nil || !valid || sequence != 1 || len(payload) == 0 || payload[0] != 0 || string(payload[1:]) != "DNS reply" {
 		t.Fatal("reply was not authenticated to the child:", err)
 	}
 	legitimate.WriteToUDP(frame, address)                            // Replay.
@@ -155,8 +155,9 @@ func TestDNSRelayRejectsFirstSenderForgeryReplayAndOldGeneration(t *testing.T) {
 	wrong := auth
 	wrong.key[0] ^= 1
 	legitimate.WriteToUDP(wrong.sealDNS(dnsQuery, 2, query), address)
-	attacker.WriteToUDP(auth.sealDNS(dnsQuery, 2, query), address) // Even a captured frame cannot repin the port.
-	legitimate.WriteToUDP(auth.sealDNS(dnsQuery, 2, []byte("next DNS query")), address)
+	attacker.WriteToUDP(auth.sealDNS(dnsQuery, 2, query), address)                         // Even a captured frame cannot repin the port.
+	legitimate.WriteToUDP(auth.sealDNS(dnsQuery, 2, append([]byte{1}, query...)), address) // Unknown path cannot consume replay credit.
+	legitimate.WriteToUDP(auth.sealDNS(dnsQuery, 2, append([]byte{0}, []byte("next DNS query")...)), address)
 	n, _, err = server.ReadFromUDP(buffer)
 	if err != nil || string(buffer[:n]) != "next DNS query" {
 		t.Fatal("forged, replayed or old-generation DNS crossed the relay:", err)

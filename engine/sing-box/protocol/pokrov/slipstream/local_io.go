@@ -15,10 +15,10 @@ import (
 )
 
 const (
-	bootstrapMagic = "PKRVIPC1"
-	readyMagic     = "PKRVRDY1"
+	bootstrapMagic = "PKRVIPC2"
+	readyMagic     = "PKRVRDY2"
 	tcpMagic       = "PKRVTCP1"
-	dnsMagic       = "PKRVDNS1"
+	dnsMagic       = "PKRVDNS2"
 	dnsFrameSize   = 8 + 16 + 8 + sha256.Size
 	childProof     = "pokrov/slipstream/local/v1/tcp/child\x00"
 	parentProof    = "pokrov/slipstream/local/v1/tcp/parent\x00"
@@ -42,9 +42,10 @@ func newLocalAuth() (localAuth, error) {
 	return auth, err
 }
 
-func (a *localAuth) bootstrap() []byte {
+func (a *localAuth) bootstrap(relayPort uint16) []byte {
 	message := append([]byte(bootstrapMagic), a.key[:]...)
-	return append(message, a.generation[:]...)
+	message = append(message, a.generation[:]...)
+	return binary.BigEndian.AppendUint16(message, relayPort)
 }
 
 func (a *localAuth) mac(domain string, parts ...[]byte) []byte {

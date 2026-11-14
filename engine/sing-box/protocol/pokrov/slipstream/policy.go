@@ -13,17 +13,28 @@ import (
 
 type tunnelConfig struct {
 	domain      string
-	resolver    netip.AddrPort
+	resolvers   []netip.AddrPort
 	certificate []byte
 }
 
+const maxResolvers = 4
+
 func parseOptions(options option.SlipstreamOptions) (*tunnelConfig, error) {
-	if len(options.Resolvers) != 1 || options.Detour != "" {
-		return nil, errors.New("slipstream requires one UDP resolver without a detour")
+	if len(options.Resolvers) == 0 || len(options.Resolvers) > maxResolvers || options.Detour != "" {
+		return nil, errors.New("slipstream requires one to four UDP resolvers without a detour")
 	}
-	resolver, err := netip.ParseAddrPort(options.Resolvers[0])
-	if err != nil || resolver.Port() == 0 || resolver.Addr().IsUnspecified() || resolver.Addr().IsMulticast() {
-		return nil, errors.New("slipstream requires a numeric UDP resolver address and port")
+	resolvers := make([]netip.AddrPort, 0, len(options.Resolvers))
+	for _, raw := range options.Resolvers {
+		resolver, err := netip.ParseAddrPort(raw)
+		if err != nil || resolver.Port() == 0 || resolver.Addr().IsUnspecified() || resolver.Addr().IsMulticast() {
+			return nil, errors.New("slipstream requires numeric UDP resolver addresses and ports")
+		}
+		for _, previous := range resolvers {
+			if resolver == previous {
+				return nil, errors.New("slipstream resolver addresses must be distinct")
+			}
+		}
+		resolvers = append(resolvers, resolver)
 	}
 	for _, network := range options.Network.Build() {
 		if network != N.NetworkTCP && options.Network != "" {
@@ -51,7 +62,7 @@ func parseOptions(options option.SlipstreamOptions) (*tunnelConfig, error) {
 	if _, err := x509.ParseCertificate(block.Bytes); err != nil {
 		return nil, errors.New("invalid slipstream server certificate")
 	}
-	return &tunnelConfig{domain, resolver, pem.EncodeToMemory(block)}, nil
+	return &tunnelConfig{domain, resolvers, pem.EncodeToMemory(block)}, nil
 }
 
 // ProtectedVLESSDetour recognizes the personal TCP-only backend carried by a

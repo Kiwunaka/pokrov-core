@@ -8,6 +8,7 @@ import (
 	"net/netip"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"time"
 
@@ -180,11 +181,11 @@ func (h *Outbound) start(ctx context.Context) (*tunnelSession, error) {
 	if err != nil {
 		return nil, errors.New("could not initialize slipstream local authentication")
 	}
-	remote, err := h.dialer.DialContext(ctx, N.NetworkUDP, M.SocksaddrFromNetIP(h.resolver))
+	remotes, err := h.openResolvers(ctx)
 	if err != nil {
 		return nil, err
 	}
-	relay, err := newDNSRelay(remote, auth)
+	relay, err := newDNSRelay(remotes, auth)
 	if err != nil {
 		return nil, err
 	}
@@ -209,9 +210,11 @@ func (h *Outbound) start(ctx context.Context) (*tunnelSession, error) {
 	if writeErr != nil || closeErr != nil {
 		return nil, errors.New("could not write slipstream certificate file")
 	}
-	command := exec.CommandContext(h.ctx, h.executable,
-		"--pokrov-local-io",
-		"--resolver", relay.local.LocalAddr().String(), "--domain", h.domain, "--cert", certPath)
+	arguments := []string{"--pokrov-local-io", "--domain", h.domain, "--cert", certPath}
+	for index := range remotes {
+		arguments = append(arguments, "--resolver", net.JoinHostPort("127.0.0.1", strconv.Itoa(index+1)))
+	}
+	command := exec.CommandContext(h.ctx, h.executable, arguments...)
 	hideWindow(command)
 	input, err := command.StdinPipe()
 	if err != nil {
@@ -243,7 +246,7 @@ func (h *Outbound) start(ctx context.Context) (*tunnelSession, error) {
 		case <-s.done:
 		}
 	}()
-	bootstrap := auth.bootstrap()
+	bootstrap := auth.bootstrap(uint16(relay.local.LocalAddr().(*net.UDPAddr).Port))
 	if n, err := input.Write(bootstrap); err != nil || n != len(bootstrap) {
 		s.Close()
 		return nil, errors.New("could not initialize slipstream native client")
