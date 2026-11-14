@@ -262,7 +262,9 @@ func buildConfig(ctx context.Context, options option.PsiphonOutboundOptions, tim
 	}
 	establishTimeoutSeconds := durationToSecondsPtr(timeout)
 	config := &psiphon.Config{
-		// Direct server addresses can be blocked even while HTTPS fronting works.
+		// Tactics override LimitTunnelProtocols, including cached tactics. Keep
+		// the HTTPS carrier selected when direct server addresses are blocked.
+		DisableTactics:                               true,
 		LimitTunnelProtocols:                         []string{"FRONTED-MEEK-OSSH"},
 		DataRootDirectory:                            filepath.Join(dataDir, instanceDirectory(tag)),
 		EgressRegion:                                 options.EgressRegion,

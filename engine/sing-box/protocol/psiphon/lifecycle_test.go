@@ -74,6 +74,9 @@ func TestNetworkChangeBeforeControllerStartAndClose(t *testing.T) {
 	if config.DataRootDirectory != filepath.Join(root, "psiphon", instanceDirectory("reserve")) {
 		t.Fatal("relative data directory escaped the runtime directory")
 	}
+	if !config.DisableTactics || len(config.LimitTunnelProtocols) != 1 || config.LimitTunnelProtocols[0] != "FRONTED-MEEK-OSSH" {
+		t.Fatal("cached tactics can replace the HTTPS carrier")
+	}
 	logger := log.NewNOPFactory().Logger()
 	controller, err := NewPsiphon(ctx, logger, config, "reserve")
 	if err != nil {
