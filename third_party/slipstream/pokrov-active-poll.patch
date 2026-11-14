@@ -1,0 +1,31 @@
+diff --git a/crates/slipstream-client/src/runtime.rs b/crates/slipstream-client/src/runtime.rs
+--- a/crates/slipstream-client/src/runtime.rs
++++ b/crates/slipstream-client/src/runtime.rs
+@@ -318,7 +318,26 @@ pub async fn run_client(config: &ClientConfig<'_>) -> Result<i32, ClientError> {
+                         }
+                     }
+                 }
+-                _ = sleep(timeout) => {}
++                _ = sleep(timeout) => {
++                    if ready && streams_len_for_sleep > 0 && timeout_us == DNS_POLL_SLICE_US {
++                        let (_, last_enqueue_at) = unsafe { (*state_ptr).debug_snapshot() };
++                        let active_window_us = config.keep_alive_interval as u64 * 1000;
++                        let now = unsafe { picoquic_current_time() };
++                        // An empty recursive reply can exhaust the poll chain
++                        // before the target has produced its response. Probe
++                        // promptly after a request, then return to keep-alive
++                        // pacing when the stream becomes quiet.
++                        if last_enqueue_at > 0
++                            && now.saturating_sub(last_enqueue_at) < active_window_us
++                        {
++                            for resolver in resolvers.iter_mut() {
++                                if resolver.added && resolver.mode == ResolverMode::Recursive {
++                                    resolver.pending_polls = resolver.pending_polls.max(1);
++                                }
++                            }
++                        }
++                    }
++                }
+             }
+ 
+             drain_commands(cnx, state_ptr, &mut command_rx);

@@ -134,6 +134,9 @@ func TestSlipstreamProtectedWireEchoAndClose(t *testing.T) {
 				if err != nil || request.UUID != testUUID || request.Command != 1 || request.Flow != "" {
 					return
 				}
+				// Let the DNS poll finish before the target produces a response.
+				// The client must refill that empty poll chain after this request.
+				time.Sleep(20 * time.Millisecond)
 				if _, err := conn.Write([]byte{vless.Version, 0}); err != nil {
 					return
 				}
@@ -257,7 +260,8 @@ func TestSlipstreamProtectedWireEchoAndClose(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer second.Close()
-	second.SetDeadline(time.Now().Add(5 * time.Second))
+	// A response must not wait for the native client's 400 ms idle keep-alive.
+	second.SetDeadline(time.Now().Add(250 * time.Millisecond))
 	second.Write(payload[:32])
 	if _, err := io.ReadFull(second, reply[:32]); err != nil || !bytes.Equal(payload[:32], reply[:32]) || network.protected.Load() != 1 {
 		t.Fatal("concurrent streams did not share the protected client session:", err)
