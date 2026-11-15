@@ -41,7 +41,7 @@ func (h *Outbound) resolverPool() []netip.AddrPort {
 	}
 	if manager := service.FromContext[adapter.NetworkManager](h.ctx); manager != nil {
 		if network := manager.DefaultNetworkInterface(); network != nil {
-			for _, raw := range network.DNSServers {
+			for _, raw := range interfaceDNSServers(network) {
 				switch raw {
 				case "1.1.1.1", "1.0.0.1", "8.8.8.8", "8.8.4.4":
 					continue
