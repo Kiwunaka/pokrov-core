@@ -23,11 +23,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/miekg/dns"
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing-vmess/vless"
 	"github.com/sagernet/sing/common/control"
 	M "github.com/sagernet/sing/common/metadata"
+	N "github.com/sagernet/sing/common/network"
 	"github.com/sagernet/sing/service"
 	"github.com/sagernet/sing/service/filemanager"
 )
@@ -107,6 +109,63 @@ func TestResolverPoolUsesCurrentPhysicalDNS(t *testing.T) {
 	network.dnsServers = []string{"192.0.2.54"}
 	if pool = h.resolverPool(); len(pool) != 3 || pool[2].String() != "192.0.2.54:53" {
 		t.Fatal("resolver pool retained the previous network's DNS")
+	}
+}
+
+type probeTestDialer struct {
+	N.Dialer
+	connection net.Conn
+}
+
+func (d *probeTestDialer) DialContext(context.Context, string, M.Socksaddr) (net.Conn, error) {
+	return d.connection, nil
+}
+
+func TestResolverProbeTimeoutRetainsPathButRefusedDoesNot(t *testing.T) {
+	for _, refused := range []bool{false, true} {
+		t.Run(strconv.FormatBool(refused), func(t *testing.T) {
+			client, server := net.Pipe()
+			defer client.Close()
+			defer server.Close()
+			go func() {
+				buffer := make([]byte, 4096)
+				n, err := server.Read(buffer)
+				if err != nil {
+					return
+				}
+				if refused {
+					var query dns.Msg
+					if query.Unpack(buffer[:n]) != nil {
+						return
+					}
+					reply, _ := new(dns.Msg).SetRcode(&query, dns.RcodeRefused).Pack()
+					server.Write(reply)
+					return
+				}
+				io.Copy(server, server)
+			}()
+			h := &Outbound{ctx: context.Background(),
+				tunnelConfig: &tunnelConfig{domain: "t.example.test", resolvers: []netip.AddrPort{netip.MustParseAddrPort("192.0.2.53:53")}},
+				dialer:       &probeTestDialer{connection: client}}
+			connections, err := h.openResolvers(context.Background())
+			if refused {
+				if err == nil || len(connections) != 0 {
+					t.Fatal("refused resolver was retained")
+				}
+				return
+			}
+			if err != nil || len(connections) != 1 {
+				t.Fatal("negative A timeout discarded a potentially working TXT path", err)
+			}
+			connections[0].SetReadDeadline(time.Now().Add(time.Second))
+			if _, err := connections[0].Write([]byte("carrier")); err != nil {
+				t.Fatal("retained path is not writable", err)
+			}
+			got := make([]byte, 7)
+			if _, err := io.ReadFull(connections[0], got); err != nil || string(got) != "carrier" {
+				t.Fatal("retained path is not usable after the probe", err)
+			}
+		})
 	}
 }
 func (*protectedTestNetwork) DefaultOptions() adapter.NetworkOptions   { return adapter.NetworkOptions{} }

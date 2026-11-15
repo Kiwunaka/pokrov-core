@@ -72,8 +72,13 @@ func (h *Outbound) openResolvers(ctx context.Context) ([]net.Conn, error) {
 				err = probeResolver(ctx, connection, h.domain)
 				stop()
 				if err != nil {
-					connection.Close()
-					connection = nil
+					// Some ISP resolvers forward tunnel TXT packets but suppress
+					// the negative A reply. Let pinned QUIC validate that path.
+					var timeout net.Error
+					if !errors.As(err, &timeout) || !timeout.Timeout() {
+						connection.Close()
+						connection = nil
+					}
 				}
 			}
 			results <- result{connection, time.Since(started)}
@@ -134,8 +139,11 @@ func probeResolver(ctx context.Context, connection net.Conn, domain string) erro
 		var reply dns.Msg
 		if reply.Unpack(buffer[:size]) == nil && reply.Response && reply.Id == query.Id &&
 			len(reply.Question) == 1 && strings.EqualFold(reply.Question[0].Name, query.Question[0].Name) &&
-			reply.Question[0].Qtype == dns.TypeA && (reply.Rcode == dns.RcodeSuccess || reply.Rcode == dns.RcodeNameError) {
-			return nil
+			reply.Question[0].Qtype == dns.TypeA {
+			if reply.Rcode == dns.RcodeSuccess || reply.Rcode == dns.RcodeNameError {
+				return nil
+			}
+			return errors.New("DNS resolver rejected the tunnel query")
 		}
 	}
 }
