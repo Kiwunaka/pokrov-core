@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"io"
 	"net"
 	"net/netip"
 	"sort"
@@ -56,9 +57,9 @@ func (h *Outbound) resolverPool() []netip.AddrPort {
 	return pool
 }
 
-func (h *Outbound) openResolvers(ctx context.Context) ([]net.Conn, error) {
+func (h *Outbound) openResolvers(ctx context.Context) ([]io.ReadWriteCloser, error) {
 	type result struct {
-		connection net.Conn
+		connection io.ReadWriteCloser
 		elapsed    time.Duration
 	}
 	pool := h.resolverPool()
@@ -66,6 +67,11 @@ func (h *Outbound) openResolvers(ctx context.Context) ([]net.Conn, error) {
 	for _, address := range pool {
 		go func() {
 			started := time.Now()
+			if connection, err := h.openTCPResolver(ctx, address); err == nil {
+				results <- result{connection, time.Since(started)}
+				return
+			}
+			started = time.Now()
 			connection, err := h.dialer.DialContext(ctx, N.NetworkUDP, M.SocksaddrFromNetIP(address))
 			if err == nil {
 				stop := context.AfterFunc(ctx, func() { connection.Close() })
@@ -100,11 +106,32 @@ func (h *Outbound) openResolvers(ctx context.Context) ([]net.Conn, error) {
 		return nil, errors.New("no DNS resolver answered the tunnel query")
 	}
 	sort.SliceStable(ready, func(i, j int) bool { return ready[i].elapsed < ready[j].elapsed })
-	connections := make([]net.Conn, len(ready))
+	connections := make([]io.ReadWriteCloser, len(ready))
 	for index, reply := range ready {
 		connections[index] = reply.connection
 	}
 	return connections, nil
+}
+
+func (h *Outbound) openTCPResolver(ctx context.Context, address netip.AddrPort) (io.ReadWriteCloser, error) {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	destination := M.SocksaddrFromNetIP(address)
+	connection, err := h.dialer.DialContext(ctx, N.NetworkTCP, destination)
+	if err != nil {
+		return nil, err
+	}
+	stop := context.AfterFunc(ctx, func() { connection.Close() })
+	err = probeResolver(ctx, framedDNSConn{connection}, h.domain)
+	stopped := stop()
+	if err != nil || !stopped {
+		connection.Close()
+		if err == nil {
+			err = ctx.Err()
+		}
+		return nil, err
+	}
+	return newTCPDNSPool(h.ctx, h.dialer, destination, connection), nil
 }
 
 func probeResolver(ctx context.Context, connection net.Conn, domain string) error {

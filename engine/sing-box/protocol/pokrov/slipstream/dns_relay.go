@@ -1,6 +1,7 @@
 package slipstream
 
 import (
+	"io"
 	"net"
 	"net/netip"
 	"sync"
@@ -11,7 +12,7 @@ import (
 // Core's protected/bound dialer, including when the client runs as a subprocess.
 type dnsRelay struct {
 	local    *net.UDPConn
-	remotes  []net.Conn
+	remotes  []io.ReadWriteCloser
 	failed   []atomic.Bool
 	left     atomic.Int32
 	sequence atomic.Uint64
@@ -24,7 +25,7 @@ type dnsRelay struct {
 	done     chan struct{}
 }
 
-func newDNSRelay(remotes []net.Conn, auth localAuth) (*dnsRelay, error) {
+func newDNSRelay(remotes []io.ReadWriteCloser, auth localAuth) (*dnsRelay, error) {
 	local, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
 	if err != nil {
 		for _, remote := range remotes {

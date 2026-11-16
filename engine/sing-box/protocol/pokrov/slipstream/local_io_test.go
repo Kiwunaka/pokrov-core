@@ -112,7 +112,7 @@ func TestDNSRelayRejectsFirstSenderForgeryReplayAndOldGeneration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	relay, err := newDNSRelay([]net.Conn{remote}, auth)
+	relay, err := newDNSRelay([]io.ReadWriteCloser{remote}, auth)
 	if err != nil {
 		t.Fatal(err)
 	}

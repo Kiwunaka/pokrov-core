@@ -117,7 +117,10 @@ type probeTestDialer struct {
 	connection net.Conn
 }
 
-func (d *probeTestDialer) DialContext(context.Context, string, M.Socksaddr) (net.Conn, error) {
+func (d *probeTestDialer) DialContext(_ context.Context, network string, _ M.Socksaddr) (net.Conn, error) {
+	if network == N.NetworkTCP {
+		return nil, N.ErrUnknownNetwork
+	}
 	return d.connection, nil
 }
 
@@ -157,7 +160,7 @@ func TestResolverProbeTimeoutRetainsPathButRefusedDoesNot(t *testing.T) {
 			if err != nil || len(connections) != 1 {
 				t.Fatal("negative A timeout discarded a potentially working TXT path", err)
 			}
-			connections[0].SetReadDeadline(time.Now().Add(time.Second))
+			connections[0].(net.Conn).SetReadDeadline(time.Now().Add(time.Second))
 			if _, err := connections[0].Write([]byte("carrier")); err != nil {
 				t.Fatal("retained path is not writable", err)
 			}
@@ -335,7 +338,7 @@ func TestSlipstreamProtectedWireEchoAndClose(t *testing.T) {
 	if _, err := io.ReadFull(conn, reply); err != nil || !bytes.Equal(payload, reply) {
 		t.Fatal("Slipstream QUIC/DNS echo failed:", err)
 	}
-	if network.protected.Load() != 3 {
+	if network.protected.Load() != 6 {
 		t.Fatal("remote DNS socket did not use the protected dialer")
 	}
 	before := backendStreams.Load()
@@ -385,7 +388,7 @@ func TestSlipstreamProtectedWireEchoAndClose(t *testing.T) {
 	// A response must not wait for the native client's 400 ms idle keep-alive.
 	second.SetDeadline(time.Now().Add(250 * time.Millisecond))
 	second.Write(payload[:32])
-	if _, err := io.ReadFull(second, reply[:32]); err != nil || !bytes.Equal(payload[:32], reply[:32]) || network.protected.Load() != 3 {
+	if _, err := io.ReadFull(second, reply[:32]); err != nil || !bytes.Equal(payload[:32], reply[:32]) || network.protected.Load() != 6 {
 		t.Fatal("concurrent streams did not share the protected client session:", err)
 	}
 	oldSession := h.session
@@ -406,7 +409,7 @@ func TestSlipstreamProtectedWireEchoAndClose(t *testing.T) {
 	defer restarted.Close()
 	restarted.SetDeadline(time.Now().Add(5 * time.Second))
 	restarted.Write(payload[:32])
-	if _, err := io.ReadFull(restarted, reply[:32]); err != nil || !bytes.Equal(payload[:32], reply[:32]) || network.protected.Load() != 6 {
+	if _, err := io.ReadFull(restarted, reply[:32]); err != nil || !bytes.Equal(payload[:32], reply[:32]) || network.protected.Load() != 12 {
 		t.Fatal("interface reset did not create a fresh protected session:", err)
 	}
 	stale, err := net.DialTimeout("tcp", h.session.address, time.Second)
