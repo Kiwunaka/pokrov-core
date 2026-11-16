@@ -103,11 +103,16 @@ func TestResolverPoolUsesCurrentPhysicalDNS(t *testing.T) {
 		tunnelConfig: &tunnelConfig{resolvers: []netip.AddrPort{netip.MustParseAddrPort("77.88.8.8:53")}},
 	}
 	pool := h.resolverPool()
-	if len(pool) != 3 || pool[1].String() != "77.88.8.1:53" || pool[2].String() != "192.0.2.53:53" {
-		t.Fatal("resolver pool did not preserve allowed public and physical DNS paths")
+	if len(pool) != 4 || pool[1].String() != "77.88.8.1:53" || pool[2].String() != "77.88.8.88:53" || pool[3].String() != "77.88.8.2:53" {
+		t.Fatal("resolver pool did not include the published basic and safe Yandex paths")
+	}
+	h.resolvers = []netip.AddrPort{netip.MustParseAddrPort("192.0.2.1:53")}
+	pool = h.resolverPool()
+	if len(pool) != 3 || pool[1].String() != "77.88.8.8:53" || pool[2].String() != "192.0.2.53:53" {
+		t.Fatal("resolver pool did not preserve the explicit provider and physical DNS paths")
 	}
 	network.dnsServers = []string{"192.0.2.54"}
-	if pool = h.resolverPool(); len(pool) != 3 || pool[2].String() != "192.0.2.54:53" {
+	if pool = h.resolverPool(); len(pool) != 2 || pool[1].String() != "192.0.2.54:53" {
 		t.Fatal("resolver pool retained the previous network's DNS")
 	}
 }

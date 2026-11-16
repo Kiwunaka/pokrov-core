@@ -46,9 +46,9 @@ type tcpDNSPool struct {
 func newTCPDNSPool(ctx context.Context, dialer N.Dialer, destination M.Socksaddr, seed net.Conn) *tcpDNSPool {
 	ctx, cancel := context.WithCancel(ctx)
 	// ISP resolvers can close the entire pool when too many connections open.
-	// The larger budget is verified on the two supported public Yandex resolvers.
+	// The larger budget is verified on the supported public Yandex resolvers.
 	maxWorkers := tcpDNSProviderWorkers
-	if destination.Port == 53 && (destination.Addr == netip.MustParseAddr("77.88.8.8") || destination.Addr == netip.MustParseAddr("77.88.8.1")) {
+	if destination.Port == 53 && (destination.Addr == netip.MustParseAddr("77.88.8.8") || destination.Addr == netip.MustParseAddr("77.88.8.1") || destination.Addr == netip.MustParseAddr("77.88.8.88") || destination.Addr == netip.MustParseAddr("77.88.8.2")) {
 		maxWorkers = tcpDNSMaxWorkers
 	}
 	p := &tcpDNSPool{ctx: ctx, cancel: cancel, dialer: dialer, destination: destination,

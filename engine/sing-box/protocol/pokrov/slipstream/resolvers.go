@@ -38,6 +38,8 @@ func (h *Outbound) resolverPool() []netip.AddrPort {
 		if address == primary || address == secondary {
 			add(primary)
 			add(secondary)
+			add(netip.MustParseAddrPort("77.88.8.88:53"))
+			add(netip.MustParseAddrPort("77.88.8.2:53"))
 		}
 	}
 	if manager := service.FromContext[adapter.NetworkManager](h.ctx); manager != nil {
