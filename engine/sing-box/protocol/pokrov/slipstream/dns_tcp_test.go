@@ -39,7 +39,7 @@ func (d *tcpProbeDialer) DialContext(ctx context.Context, network string, _ M.So
 func TestTCPDNSParallelRequestsReconnectAndRestoreIDs(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
 	defer cancel()
-	const requests = 16
+	const requests = 32
 	var dropped atomic.Bool
 	var pending atomic.Int32
 	var maximum atomic.Int32
@@ -63,7 +63,7 @@ func TestTCPDNSParallelRequestsReconnectAndRestoreIDs(t *testing.T) {
 						break
 					}
 				}
-				if active == requests {
+				if active == tcpDNSProviderWorkers {
 					gateOnce.Do(func() { close(gate) })
 				}
 				select {
@@ -126,8 +126,8 @@ func TestTCPDNSParallelRequestsReconnectAndRestoreIDs(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal("parallel requests did not complete")
 	}
-	if maximum.Load() != requests || !dropped.Load() {
-		t.Fatal("parallelism or reconnect was not exercised")
+	if maximum.Load() != tcpDNSProviderWorkers || !dropped.Load() {
+		t.Fatal("provider connection limit or reconnect was not exercised")
 	}
 	if err := pool.Close(); err != nil {
 		t.Fatal(err)

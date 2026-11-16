@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"net"
+	"net/netip"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -18,8 +19,9 @@ import (
 )
 
 const (
-	tcpDNSInitialWorkers = 8
-	tcpDNSMaxWorkers     = 112
+	tcpDNSInitialWorkers  = 8
+	tcpDNSMaxWorkers      = 112
+	tcpDNSProviderWorkers = 16
 )
 
 // Each connection owns one outstanding request. A resolver closing or limiting
@@ -35,6 +37,7 @@ type tcpDNSPool struct {
 	inflight    atomic.Int32
 	mu          sync.Mutex
 	workers     int
+	maxWorkers  int
 	closed      bool
 	connections map[net.Conn]struct{}
 	wait        sync.WaitGroup
@@ -42,8 +45,14 @@ type tcpDNSPool struct {
 
 func newTCPDNSPool(ctx context.Context, dialer N.Dialer, destination M.Socksaddr, seed net.Conn) *tcpDNSPool {
 	ctx, cancel := context.WithCancel(ctx)
+	// ISP resolvers can close the entire pool when too many connections open.
+	// The larger budget is verified on the two supported public Yandex resolvers.
+	maxWorkers := tcpDNSProviderWorkers
+	if destination.Port == 53 && (destination.Addr == netip.MustParseAddr("77.88.8.8") || destination.Addr == netip.MustParseAddr("77.88.8.1")) {
+		maxWorkers = tcpDNSMaxWorkers
+	}
 	p := &tcpDNSPool{ctx: ctx, cancel: cancel, dialer: dialer, destination: destination,
-		jobs: make(chan []byte, 2*tcpDNSMaxWorkers), replies: make(chan []byte, tcpDNSMaxWorkers),
+		jobs: make(chan []byte, 2*maxWorkers), replies: make(chan []byte, maxWorkers), maxWorkers: maxWorkers,
 		done: make(chan struct{}), connections: map[net.Conn]struct{}{seed: {}}}
 	p.startWorker(seed)
 	for range tcpDNSInitialWorkers - 1 {
@@ -74,8 +83,8 @@ func (p *tcpDNSPool) Write(packet []byte) (int, error) {
 		p.mu.Unlock()
 		return 0, net.ErrClosed
 	}
-	if int(p.inflight.Load())+len(p.jobs) > p.workers && p.workers < tcpDNSMaxWorkers {
-		additional := min(p.workers, tcpDNSMaxWorkers-p.workers)
+	if int(p.inflight.Load())+len(p.jobs) > p.workers && p.workers < p.maxWorkers {
+		additional := min(p.workers, p.maxWorkers-p.workers)
 		for range additional {
 			p.startWorker(nil)
 		}
