@@ -3,6 +3,7 @@ package slipstream
 import (
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"net/netip"
 	"sync"
@@ -159,5 +160,69 @@ func TestTCPDNSRejectsAReplyForAnotherQuestion(t *testing.T) {
 	packet, _ := query.Pack()
 	if _, err := exchangeTCPDNS(client, packet); err == nil {
 		t.Fatal("accepted a reply for another question")
+	}
+}
+
+func TestTCPDNSFullQueueDoesNotBlockOtherResolver(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	// All TCP workers can be waiting for a slow resolver while its queue fills.
+	blocked := &tcpDNSPool{ctx: ctx, cancel: cancel, done: make(chan struct{}), jobs: make(chan []byte, 1)}
+	blocked.jobs <- []byte("already queued")
+	server, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer server.Close()
+	remote, err := net.DialUDP("udp4", nil, server.LocalAddr().(*net.UDPAddr))
+	if err != nil {
+		t.Fatal(err)
+	}
+	auth, err := newLocalAuth()
+	if err != nil {
+		remote.Close()
+		t.Fatal(err)
+	}
+	relay, err := newDNSRelay([]io.ReadWriteCloser{blocked, remote}, auth)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer relay.Close()
+	child, err := net.DialUDP("udp4", nil, relay.local.LocalAddr().(*net.UDPAddr))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer child.Close()
+	relay.setPeer(child.LocalAddr().(*net.UDPAddr).AddrPort())
+	query := new(dns.Msg)
+	query.SetQuestion("bulk.t.example.test.", dns.TypeTXT)
+	packet, _ := query.Pack()
+	for index := range 2 {
+		if _, err := child.Write(auth.sealDNS(dnsQuery, uint64(index+1), append([]byte{byte(index)}, packet...))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	server.SetReadDeadline(time.Now().Add(time.Second))
+	buffer := make([]byte, 4096)
+	size, peer, err := server.ReadFromUDP(buffer)
+	if err != nil {
+		t.Fatal("a saturated TCP resolver blocked the healthy DNS path:", err)
+	}
+	var received dns.Msg
+	if received.Unpack(buffer[:size]) != nil || received.Question[0].Name != query.Question[0].Name {
+		t.Fatal("healthy resolver did not receive the original query")
+	}
+	reply, _ := new(dns.Msg).SetReply(&received).Pack()
+	if _, err := server.WriteToUDP(reply, peer); err != nil {
+		t.Fatal(err)
+	}
+	child.SetReadDeadline(time.Now().Add(time.Second))
+	size, err = child.Read(buffer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, _, valid := auth.openDNS(dnsReply, buffer[:size])
+	if !valid || len(payload) < 2 || payload[0] != 1 {
+		t.Fatal("healthy path reply lost its authenticated path identity")
 	}
 }

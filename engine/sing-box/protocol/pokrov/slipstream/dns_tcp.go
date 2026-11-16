@@ -77,6 +77,10 @@ func (p *tcpDNSPool) Write(packet []byte) (int, error) {
 	case <-p.done:
 		return 0, net.ErrClosed
 	case p.jobs <- append([]byte(nil), packet...):
+	default:
+		// This bridge carries datagrams; QUIC retries a dropped query.
+		// One saturated resolver must not block queries to the other paths.
+		return len(packet), nil
 	}
 	p.mu.Lock()
 	if p.closed {
