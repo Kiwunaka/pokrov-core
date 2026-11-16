@@ -18,14 +18,18 @@ import (
 
 type tcpProbeDialer struct {
 	N.Dialer
-	handle func(net.Conn)
-	wait   sync.WaitGroup
-	udp    atomic.Int32
+	handle        func(net.Conn)
+	udpConnection net.Conn
+	wait          sync.WaitGroup
+	udp           atomic.Int32
 }
 
 func (d *tcpProbeDialer) DialContext(ctx context.Context, network string, _ M.Socksaddr) (net.Conn, error) {
 	if network != N.NetworkTCP {
 		d.udp.Add(1)
+		if d.udpConnection != nil {
+			return d.udpConnection, nil
+		}
 		return nil, N.ErrUnknownNetwork
 	}
 	if err := ctx.Err(); err != nil {
@@ -35,6 +39,58 @@ func (d *tcpProbeDialer) DialContext(ctx context.Context, network string, _ M.So
 	d.wait.Add(1)
 	go func() { defer d.wait.Done(); defer server.Close(); d.handle(server) }()
 	return client, nil
+}
+
+func TestTCPDNSRequiresConnectionReuse(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	client, server := net.Pipe()
+	defer server.Close()
+	go func() {
+		buffer := make([]byte, 4096)
+		size, err := server.Read(buffer)
+		if err != nil {
+			return
+		}
+		var query dns.Msg
+		if query.Unpack(buffer[:size]) != nil {
+			return
+		}
+		reply, _ := new(dns.Msg).SetReply(&query).Pack()
+		if _, err := server.Write(reply); err != nil {
+			return
+		}
+		io.Copy(server, server)
+	}()
+	dialer := &tcpProbeDialer{udpConnection: client, handle: func(connection net.Conn) {
+		wire := &dns.Conn{Conn: connection}
+		query, err := wire.ReadMsg()
+		if err == nil {
+			wire.WriteMsg(new(dns.Msg).SetReply(query))
+		}
+		// Router resolvers can close TCP after their first successful reply.
+	}}
+	h := &Outbound{ctx: ctx, dialer: dialer, tunnelConfig: &tunnelConfig{
+		domain: "t.example.test", resolvers: []netip.AddrPort{netip.MustParseAddrPort("192.0.2.53:53")}}}
+	connections, err := h.openResolvers(ctx)
+	defer func() {
+		for _, connection := range connections {
+			connection.Close()
+		}
+		client.Close()
+		dialer.wait.Wait()
+	}()
+	if err != nil || len(connections) != 1 || connections[0] != client || dialer.udp.Load() != 1 {
+		t.Fatal("a resolver closing TCP after one reply was selected as a persistent TCP pool", err)
+	}
+	client.SetDeadline(time.Now().Add(time.Second))
+	if _, err := client.Write([]byte("carrier")); err != nil {
+		t.Fatal(err)
+	}
+	buffer := make([]byte, 7)
+	if _, err := io.ReadFull(client, buffer); err != nil || string(buffer) != "carrier" {
+		t.Fatal("UDP fallback did not carry traffic", err)
+	}
 }
 
 func TestTCPDNSParallelRequestsReconnectAndRestoreIDs(t *testing.T) {

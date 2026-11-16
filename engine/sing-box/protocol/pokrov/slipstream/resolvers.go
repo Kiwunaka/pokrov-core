@@ -123,6 +123,10 @@ func (h *Outbound) openTCPResolver(ctx context.Context, address netip.AddrPort) 
 	}
 	stop := context.AfterFunc(ctx, func() { connection.Close() })
 	err = probeResolver(ctx, framedDNSConn{connection}, h.domain)
+	if err == nil {
+		// Some routers answer once, then close TCP. Their DNS path stays on UDP.
+		err = probeResolver(ctx, framedDNSConn{connection}, h.domain)
+	}
 	stopped := stop()
 	if err != nil || !stopped {
 		connection.Close()
