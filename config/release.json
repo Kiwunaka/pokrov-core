@@ -23,21 +23,21 @@
       "android_min_api": 23,
       "android_features": "openssl-vendored,picoquic-minimal-build",
       "windows_amd64": {
-        "size": 5696000,
-        "sha256": "05e3ee81e3fca4a90c79dd20d7000ca8e0da15eb0a039778c5eae14160c838f6"
+        "size": 5696512,
+        "sha256": "d058d4b5a073d5d674c6ecbcb742e19b5c8b4794eeb786f5f2ba3ffdc9f1be41"
       },
       "android": {
         "armeabi-v7a": {
-          "size": 4140264,
-          "sha256": "11b89d35d528f0d6eb69c0b6a7c9f6d94ce26974d3d85de950da1804fe1ed183"
+          "size": 4144488,
+          "sha256": "368d1cbe79fba4eb4d85fa38270515ac729e9f9cfd3b356fd880c4ffc8916618"
         },
         "arm64-v8a": {
           "size": 6153112,
-          "sha256": "dfe01bea3eea50b68e37e7f2318f46a2abbdb4b18f97560545f77aff81b1fcdd"
+          "sha256": "67f57480f902331fb58193a583aba460f4a3e8633c8c1975e67d67ae71103258"
         },
         "x86_64": {
-          "size": 6794464,
-          "sha256": "2c5169b06a7d865662296773061901438a9bc955c1f5606249c3f52b746754d9"
+          "size": 6794656,
+          "sha256": "2e625792a94e7ea141b3867b63cf24269798a8314d61d61f946ad3c0ab150bc8"
         }
       }
     },

@@ -1,0 +1,28 @@
+diff --git a/vendor/picoquic/picoquic/loss_recovery.c b/vendor/picoquic/picoquic/loss_recovery.c
+index 4567d8e0..064af486 100644
+--- a/vendor/picoquic/picoquic/loss_recovery.c
++++ b/vendor/picoquic/picoquic/loss_recovery.c
+@@ -573,6 +573,23 @@ static int picoquic_is_packet_probably_lost(picoquic_cnx_t* cnx,
+             if (retransmit_time > rack_timer_min) {
+                 retransmit_time = rack_timer_min;
+             }
++            if (cnx->client_mode && old_p->pc == picoquic_packet_context_application &&
++                old_p->send_path->slipstream_path_mode == 1) {
++                /* Recursive DNS replies can overtake each other by hundreds of
++                 * packets. Keep the RFC 9002 time threshold before retrying. */
++                uint64_t dns_rtt = old_p->send_path->smoothed_rtt;
++                if (dns_rtt < old_p->send_path->rtt_sample) {
++                    dns_rtt = old_p->send_path->rtt_sample;
++                }
++                uint64_t dns_delay = dns_rtt + dns_rtt / 8;
++                if (dns_delay < 1000) {
++                    dns_delay = 1000;
++                }
++                uint64_t dns_reorder_time = old_p->send_time + dns_delay;
++                if (retransmit_time < dns_reorder_time) {
++                    retransmit_time = dns_reorder_time;
++                }
++            }
+             if (retransmit_time <= current_time || old_p->is_ack_trap) {
+                 is_probably_lost = 1;
+             }
