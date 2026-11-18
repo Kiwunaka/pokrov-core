@@ -77,6 +77,7 @@ func OutboundRegistry() *outbound.Registry {
 	protocolDNS.RegisterOutbound(registry)
 	group.RegisterSelector(registry)
 	group.RegisterURLTest(registry)
+	group.RegisterYouTube(registry)
 	socks.RegisterOutbound(registry)
 	http.RegisterOutbound(registry)
 	shadowsocks.RegisterOutbound(registry)
