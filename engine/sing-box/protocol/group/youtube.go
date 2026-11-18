@@ -10,6 +10,7 @@ import (
 
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/adapter/outbound"
+	"github.com/sagernet/sing-box/common/interrupt"
 	"github.com/sagernet/sing-box/log"
 	M "github.com/sagernet/sing/common/metadata"
 	N "github.com/sagernet/sing/common/network"
@@ -24,11 +25,12 @@ func RegisterYouTube(registry *outbound.Registry) {
 	outbound.Register[youtubeOptions](registry, "pokrov-youtube", newYouTube)
 }
 
-// The client supplies concrete protected routes admitted for the same country.
-// Each stream keeps its original socket. Only new YouTube connections can move.
+// The client supplies the protected routes admitted by the country selection.
+// The player's control and media sockets must share the same egress.
 type youtubeOutbound struct {
 	outbound.Adapter
 	manager       adapter.OutboundManager
+	flows         *interrupt.Group
 	paths         []adapter.Outbound
 	mu            sync.Mutex
 	generation    uint64
@@ -85,23 +87,48 @@ func (g *youtubeOutbound) healthy(gen uint64) {
 
 func (g *youtubeOutbound) failed(gen uint64, since time.Time, definite bool) {
 	g.mu.Lock()
-	defer g.mu.Unlock()
 	if gen != g.generation || g.lastMedia.After(since) {
+		g.mu.Unlock()
 		return
 	}
 	g.shortFailures++
 	if !definite && g.shortFailures < 2 {
+		g.mu.Unlock()
 		return
 	}
 	now := time.Now()
 	if gen%uint64(len(g.paths)) == 0 {
 		if now.Sub(g.lastCycle) < time.Minute {
+			g.mu.Unlock()
 			return
 		}
 		g.lastCycle = now
 	}
 	g.generation++
 	g.shortFailures = 0
+	previous := g.flows
+	g.flows = nil
+	g.mu.Unlock()
+	if previous != nil {
+		// Reopen the player API on the same exit as its new media requests.
+		// Old signed media URLs may be bound to the previous exit address.
+		previous.Interrupt(true)
+	}
+}
+
+// Register before releasing the generation lock. A dial that finished after
+// a switch must never supply an old control connection to the player.
+func (g *youtubeOutbound) track(gen uint64, attach func(*interrupt.Group)) bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if gen != g.generation {
+		return false
+	}
+	if g.flows == nil {
+		g.flows = interrupt.NewGroup()
+	}
+	attach(g.flows)
+	return true
 }
 
 func youtubeName(ctx context.Context, dest M.Socksaddr) string {
@@ -145,8 +172,15 @@ func (g *youtubeOutbound) DialContext(ctx context.Context, network string, dest 
 			conn, err = next.DialContext(ctx, network, dest)
 		}
 	}
-	if err != nil || !youtubeMedia(name) {
-		return conn, err
+	if err != nil {
+		return nil, err
+	}
+	if !g.track(gen, func(group *interrupt.Group) { conn = group.NewConn(conn, true) }) {
+		conn.Close()
+		return nil, net.ErrClosed
+	}
+	if !youtubeMedia(name) {
+		return conn, nil
 	}
 	return &youtubeConn{Conn: conn, flow: youtubeFlow{owner: g, generation: gen, stopSocket: conn.Close}}, nil
 }
@@ -166,8 +200,15 @@ func (g *youtubeOutbound) ListenPacket(ctx context.Context, dest M.Socksaddr) (n
 			conn, err = next.ListenPacket(ctx, dest)
 		}
 	}
-	if err != nil || !youtubeMedia(name) {
-		return conn, err
+	if err != nil {
+		return nil, err
+	}
+	if !g.track(gen, func(group *interrupt.Group) { conn = group.NewPacketConn(conn, true) }) {
+		conn.Close()
+		return nil, net.ErrClosed
+	}
+	if !youtubeMedia(name) {
+		return conn, nil
 	}
 	return &youtubePacket{PacketConn: conn, flow: youtubeFlow{owner: g, generation: gen, stopSocket: conn.Close}}, nil
 }

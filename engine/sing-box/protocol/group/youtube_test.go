@@ -61,6 +61,8 @@ func TestYouTubeStallMovesOnlyNewServiceFlows(t *testing.T) {
 	}
 	ordinary := open("example.org")
 	echo(ordinary)
+	control := open("www.youtube.com")
+	echo(control)
 	bad := open("r.example.googlevideo.com")
 	if _, err := bad.Write(make([]byte, 256)); err != nil {
 		t.Fatal(err)
@@ -74,6 +76,9 @@ func TestYouTubeStallMovesOnlyNewServiceFlows(t *testing.T) {
 		t.Fatal("media path did not change")
 	}
 	echo(open("r.example.googlevideo.com"))
+	if _, err := control.Read(make([]byte, 1)); err == nil {
+		t.Fatal("player retained the previous egress")
+	}
 	echo(ordinary)
 	// Lookalike domains still go through the original path.
 	c := open("googlevideo.com.example.org")

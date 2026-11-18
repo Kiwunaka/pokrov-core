@@ -31,6 +31,6 @@ An isolated candidate probe has its own Core instance, captured network binding,
 
 Runtime endpoint probes and selector-group probes capture the current instance and selected proxy leaf. Direct, block, DNS and unsupported or cyclic groups cannot provide egress proof. A result from a different generation or selected leaf is discarded. The URL-test cache is diagnostic data and cannot complete an egress probe.
 
-The YouTube outbound sends new service connections through an admitted reserve after a failed dial or stalled media exchange. It observes byte counts and timeouts on the media connection. Existing connections on other services keep their route. The client supplies the exits permitted by the country selection.
+The YouTube outbound observes byte counts and timeouts on media connections. On a failed route it closes YouTube control and media sockets together so the player can request fresh media URLs through the reserve. Connections to other services keep their route. The client supplies the exits permitted by the country selection.
 
 Failed probes expose closed operation and cause fields, the observed OS error or HTTP status when present and stage timing. When both owned targets fail, the reserve's verdict includes the primary target's bounded diagnostic. Addresses, response bodies, profile material and raw command errors stay local. The public event envelope is defined by [core-event-abi.json](../config/core-event-abi.json).
