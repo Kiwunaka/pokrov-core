@@ -60,8 +60,9 @@ const (
 )
 
 const (
-	TypeSelector = "selector"
-	TypeURLTest  = "urltest"
+	TypeSelector      = "selector"
+	TypeURLTest       = "urltest"
+	TypePokrovYouTube = "pokrov-youtube"
 )
 
 func ProxyDisplayName(proxyType string) string {

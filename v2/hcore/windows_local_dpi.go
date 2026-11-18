@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/daemon"
 	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing-box/protocol/naive"
@@ -199,7 +200,7 @@ func PrepareWindowsLocalDpiProfile(configJSON, publicKeysJSON, audience, bindInt
 				}
 				vpn := windowsDpiString(rule["outbound"])
 				matchesFinal := vpn == finalTag
-				if windowsDpiString(byTag[vpn]["type"]) == "pokrov-youtube" {
+				if windowsDpiString(byTag[vpn]["type"]) == C.TypePokrovYouTube {
 					var paths []string
 					if serviceID != "youtube" || json.Unmarshal(byTag[vpn]["outbounds"], &paths) != nil || len(paths) < 2 {
 						return "", errWindowsDpiScope
@@ -353,7 +354,7 @@ func windowsDpiProtectedVPN(byTag map[string]map[string]json.RawMessage, tag str
 	case "pokrov-ats-lease":
 		// Validate the encrypted upstream without bypassing the lease gate.
 		return windowsDpiProtectedVPN(byTag, windowsDpiString(outbound["upstream_tag"]), visiting)
-	case "selector", "urltest", "pokrov-youtube":
+	case "selector", "urltest", C.TypePokrovYouTube:
 		var children []string
 		if json.Unmarshal(outbound["outbounds"], &children) != nil || len(children) == 0 {
 			return false

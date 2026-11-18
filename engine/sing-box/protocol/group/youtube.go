@@ -11,6 +11,7 @@ import (
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/adapter/outbound"
 	"github.com/sagernet/sing-box/common/interrupt"
+	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/log"
 	M "github.com/sagernet/sing/common/metadata"
 	N "github.com/sagernet/sing/common/network"
@@ -22,7 +23,7 @@ type youtubeOptions struct {
 }
 
 func RegisterYouTube(registry *outbound.Registry) {
-	outbound.Register[youtubeOptions](registry, "pokrov-youtube", newYouTube)
+	outbound.Register[youtubeOptions](registry, C.TypePokrovYouTube, newYouTube)
 }
 
 // The client supplies the protected routes admitted by the country selection.
@@ -44,7 +45,7 @@ func newYouTube(ctx context.Context, _ adapter.Router, _ log.ContextLogger, tag 
 	if len(options.Outbounds) < 2 {
 		return nil, errors.New("YouTube needs two protected routes")
 	}
-	return &youtubeOutbound{Adapter: outbound.NewAdapter("pokrov-youtube", tag, []string{N.NetworkTCP, N.NetworkUDP}, options.Outbounds),
+	return &youtubeOutbound{Adapter: outbound.NewAdapter(C.TypePokrovYouTube, tag, []string{N.NetworkTCP, N.NetworkUDP}, options.Outbounds),
 		manager: service.FromContext[adapter.OutboundManager](ctx), stall: 12 * time.Second}, nil
 }
 

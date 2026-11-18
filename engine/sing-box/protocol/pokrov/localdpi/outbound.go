@@ -260,7 +260,7 @@ func protectedFallback(manager adapter.OutboundManager, target adapter.Outbound,
 		return ok && protected.IsProtectedH2()
 	case C.TypeVLESS, C.TypeHysteria2, C.TypeWireGuard, C.TypeAwg:
 		// A protected exit can itself use an encrypted bridge detour.
-	case C.TypeSelector, C.TypeURLTest, atslease.Type:
+	case C.TypeSelector, C.TypeURLTest, C.TypePokrovYouTube, atslease.Type:
 		if len(target.Dependencies()) == 0 {
 			return false
 		}

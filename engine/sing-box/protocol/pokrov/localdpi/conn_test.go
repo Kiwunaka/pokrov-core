@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/sagernet/sing-box/adapter"
+	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/route"
 	M "github.com/sagernet/sing/common/metadata"
@@ -40,6 +41,42 @@ func (c *packetTestConn) HandshakeFailure(err error) error { c.failed = err; ret
 type packetTestManager struct {
 	adapter.ConnectionManager
 	dials atomic.Int32
+}
+
+type fallbackTestManager struct {
+	adapter.OutboundManager
+	routes map[string]adapter.Outbound
+}
+
+func (m *fallbackTestManager) Outbound(tag string) (adapter.Outbound, bool) {
+	r, ok := m.routes[tag]
+	return r, ok
+}
+
+type fallbackTestRoute struct {
+	adapter.Outbound
+	kind, name string
+	paths      []string
+}
+
+func (r *fallbackTestRoute) Type() string           { return r.kind }
+func (r *fallbackTestRoute) Tag() string            { return r.name }
+func (r *fallbackTestRoute) Dependencies() []string { return r.paths }
+
+func TestLocalDpiStartsWithProtectedYouTubeReserve(t *testing.T) {
+	manager := &fallbackTestManager{routes: map[string]adapter.Outbound{
+		"video":   &fallbackTestRoute{kind: C.TypePokrovYouTube, name: "video", paths: []string{"primary", "reserve"}},
+		"primary": &fallbackTestRoute{kind: C.TypeVLESS, name: "primary"},
+		"reserve": &fallbackTestRoute{kind: C.TypeVLESS, name: "reserve"},
+	}}
+	route := &Outbound{manager: manager, vpnTag: "video"}
+	if err := route.Start(); err != nil {
+		t.Fatalf("protected YouTube reserve rejected: %v", err)
+	}
+	manager.routes["reserve"] = &fallbackTestRoute{kind: C.TypeDirect, name: "reserve"}
+	if err := route.Start(); err == nil {
+		t.Fatal("direct child accepted as a VPN reserve")
+	}
 }
 
 func (m *packetTestManager) NewPacketConnection(_ context.Context, _ N.Dialer, _ N.PacketConn, _ adapter.InboundContext, _ N.CloseHandlerFunc) {
