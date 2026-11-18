@@ -49,7 +49,7 @@ func verifyLocalDpiCatalog(envelopeJSON, publicKeysJSON, audience, expectedPaylo
 
 func verifyLocalDpiCatalogPlatform(envelopeJSON, publicKeysJSON, audience, expectedPayloadSHA256 string,
 	expectedRevision, expectedSecurityRevision int64, serviceID, controlHost, accessState, platform, mode string, now time.Time) bool {
-	if (mode != "selective" && mode != "smart_safe") || !localDpiCatalogHost(controlHost) {
+	if (mode != "selective" && mode != "smart_safe" && mode != "full") || !localDpiCatalogHost(controlHost) {
 		return false
 	}
 	verified := verifiedRoutingCatalogService(envelopeJSON, publicKeysJSON, audience, expectedPayloadSHA256,
@@ -213,6 +213,10 @@ func localDpiCatalogService(service map[string]json.RawMessage, serviceID, host,
 			intentHost, _ := localDpiCatalogString(rawHost)
 			switch mode {
 			case "selective":
+			case "full":
+				if serviceID != "youtube" && serviceID != "discord" {
+					return false
+				}
 			case "smart_safe":
 				switch serviceID {
 				case "youtube", "discord", "instagram", "threads":

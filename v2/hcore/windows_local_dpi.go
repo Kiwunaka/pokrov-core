@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 
@@ -69,7 +70,7 @@ func PrepareWindowsLocalDpiProfile(configJSON, publicKeysJSON, audience, bindInt
 	if json.Unmarshal([]byte(configJSON), &config) != nil || config == nil ||
 		json.Unmarshal(config["_meta"], &hostMeta) != nil ||
 		json.Unmarshal(hostMeta["local_dpi"], &metadata) != nil ||
-		(metadata.Mode != "selective" && metadata.Mode != "smart_safe") || metadata.Platform != "windows" || len(metadata.Services) == 0 || len(metadata.Services) > 256 {
+		(metadata.Mode != "selective" && metadata.Mode != "smart_safe" && metadata.Mode != "full") || metadata.Platform != "windows" || len(metadata.Services) == 0 || len(metadata.Services) > 256 {
 		return "", errWindowsDpiScope
 	}
 	var envelope struct {
@@ -197,8 +198,16 @@ func PrepareWindowsLocalDpiProfile(configJSON, publicKeysJSON, audience, bindInt
 					continue
 				}
 				vpn := windowsDpiString(rule["outbound"])
+				matchesFinal := vpn == finalTag
+				if windowsDpiString(byTag[vpn]["type"]) == "pokrov-youtube" {
+					var paths []string
+					if serviceID != "youtube" || json.Unmarshal(byTag[vpn]["outbounds"], &paths) != nil || len(paths) < 2 {
+						return "", errWindowsDpiScope
+					}
+					matchesFinal = windowsDpiPrimaryPath(byTag, finalTag) == paths[0]
+				}
 				if !windowsDpiProtectedVPN(byTag, vpn, make(map[string]bool)) || (fallback != "" && fallback != vpn) ||
-					(metadata.Mode == "smart_safe" && vpn != finalTag) {
+					(metadata.Mode != "selective" && !matchesFinal) {
 					return "", errWindowsDpiScope
 				}
 				fallback = vpn
@@ -277,6 +286,29 @@ func windowsDpiString(raw json.RawMessage) string {
 	return value
 }
 
+// Match the client's selected, protected leaf, including a selector's default.
+func windowsDpiPrimaryPath(byTag map[string]map[string]json.RawMessage, tag string) string {
+	for steps := 0; steps < len(byTag); steps++ {
+		row := byTag[tag]
+		switch windowsDpiString(row["type"]) {
+		case "selector", "urltest":
+			var paths []string
+			if json.Unmarshal(row["outbounds"], &paths) != nil || len(paths) == 0 {
+				return ""
+			}
+			tag = windowsDpiString(row["default"])
+			if tag == "" {
+				tag = paths[0]
+			} else if !slices.Contains(paths, tag) {
+				return ""
+			}
+		default:
+			return tag
+		}
+	}
+	return ""
+}
+
 func windowsDpiProtectedVPN(byTag map[string]map[string]json.RawMessage, tag string, visiting map[string]bool) bool {
 	outbound := byTag[tag]
 	if outbound == nil || visiting[tag] {
@@ -321,7 +353,7 @@ func windowsDpiProtectedVPN(byTag map[string]map[string]json.RawMessage, tag str
 	case "pokrov-ats-lease":
 		// Validate the encrypted upstream without bypassing the lease gate.
 		return windowsDpiProtectedVPN(byTag, windowsDpiString(outbound["upstream_tag"]), visiting)
-	case "selector", "urltest":
+	case "selector", "urltest", "pokrov-youtube":
 		var children []string
 		if json.Unmarshal(outbound["outbounds"], &children) != nil || len(children) == 0 {
 			return false

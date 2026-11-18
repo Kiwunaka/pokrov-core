@@ -221,6 +221,17 @@ func TestLocalDpiCatalogModeBindsSignedDiscordIntent(t *testing.T) {
 		verify("discord", "smart.example", "full") {
 		t.Fatal("admission escaped its signed mode and host")
 	}
+	full := map[string]any{"mode": "full", "action": "vpn", "local_dpi_control_host": "smart.example"}
+	service["route_intents"] = []any{selective, smart, full}
+	if !verify("discord", "smart.example", "full") || verify("discord", "control.example", "full") {
+		t.Fatal("Full did not use its own signed control host")
+	}
+	service["service_id"] = "instagram"
+	if verify("instagram", "smart.example", "full") {
+		t.Fatal("Full admitted a service outside YouTube and Discord")
+	}
+	service["service_id"] = "discord"
+	service["route_intents"] = []any{selective, smart}
 	smart["action"] = "direct"
 	if verify("discord", "smart.example", "smart_safe") {
 		t.Fatal("Smart Safe admitted a non-VPN intent")
