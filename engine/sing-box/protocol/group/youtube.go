@@ -3,6 +3,7 @@ package group
 import (
 	"context"
 	"errors"
+	"io"
 	"net"
 	"strings"
 	"sync"
@@ -298,7 +299,10 @@ func (f *youtubeFlow) read(n int, err error) {
 		f.done = true
 		if f.timer != nil {
 			f.timer.Stop()
-			f.owner.failed(f.generation, f.pending, false)
+			// EOF can be the normal end of a short response.
+			if !errors.Is(err, io.EOF) || f.received == 0 {
+				f.owner.failed(f.generation, f.pending, false)
+			}
 		}
 	}
 }
@@ -312,9 +316,6 @@ func (f *youtubeFlow) close() {
 	f.done = true
 	if f.timer != nil {
 		f.timer.Stop()
-		if f.received > 0 {
-			f.owner.failed(f.generation, f.pending, false)
-		}
 	}
 }
 

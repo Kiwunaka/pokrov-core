@@ -105,3 +105,29 @@ func TestYouTubeCompletedSmallResponseCanStayIdle(t *testing.T) {
 		t.Fatal("pause changed the media route")
 	}
 }
+
+func TestYouTubeClassifiesMediaConnectionEnd(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		end  func(*youtubeFlow)
+		want uint64
+	}{
+		{"short response then EOF", func(f *youtubeFlow) { f.read(1600, io.EOF) }, 0},
+		{"caller closes after response", func(f *youtubeFlow) { f.read(1600, nil); f.close() }, 0},
+		{"EOF without response", func(f *youtubeFlow) { f.read(0, io.EOF) }, 1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			g := &youtubeOutbound{paths: make([]adapter.Outbound, 2), stall: time.Minute}
+			for range 2 {
+				f := youtubeFlow{owner: g}
+				f.wrote(256)
+				f.read(3000, nil)
+				f.wrote(256)
+				test.end(&f)
+			}
+			if _, gen := g.current(); gen != test.want {
+				t.Fatalf("egress generation = %d, want %d", gen, test.want)
+			}
+		})
+	}
+}
