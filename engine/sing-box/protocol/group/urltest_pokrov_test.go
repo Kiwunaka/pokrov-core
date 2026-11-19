@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/sagernet/sing-box/adapter"
+	"github.com/sagernet/sing-box/common/interrupt"
 	"github.com/sagernet/sing-box/common/urltest"
 )
 
@@ -29,13 +30,13 @@ func TestURLTestFailureDoesNotReplaceHealthyOutbound(t *testing.T) {
 	if current := (&URLTest{group: group}).Now(); current != fallback.Tag() {
 		t.Fatal("cold current tag did not match the TCP dial fallback")
 	}
-	if group.selectedOutboundTCP != nil || group.selectedOutboundUDP != nil ||
+	if selection := group.selection.Load(); selection.tcp != nil || selection.udp != nil ||
 		history.LoadURLTestHistory(healthy.Tag()) != nil {
 		t.Fatal("reading the cold current tag published selection or probe history")
 	}
 	history.StoreURLTestHistory(healthy.Tag(), &adapter.URLTestHistory{Delay: 100})
 	history.DeleteURLTestHistory(failed.Tag())
-	group.selectedOutboundTCP = healthy
+	group.selection.Store(urlTestSelection{tcp: healthy})
 	assertHealthy := func() {
 		t.Helper()
 		selected, live := group.Select("tcp")
@@ -44,7 +45,7 @@ func TestURLTestFailureDoesNotReplaceHealthyOutbound(t *testing.T) {
 		}
 	}
 	assertHealthy()
-	group.selectedOutboundTCP = failed
+	group.selection.Store(urlTestSelection{tcp: failed})
 	assertHealthy()
 }
 
@@ -58,8 +59,8 @@ func TestURLTestPreferredDirectSurvivesFasterBridgeAndRecovers(t *testing.T) {
 	history.StoreURLTestHistory(bridge.Tag(), &adapter.URLTestHistory{Delay: 100})
 	group := &URLTestGroup{
 		outbounds: []adapter.Outbound{bridge, direct, directAlt}, history: history, tolerance: 50,
-		selectedOutboundTCP: bridge,
 	}
+	group.selection.Store(urlTestSelection{tcp: bridge})
 	if selected, live := group.Select("tcp"); !live || selected.Tag() != bridge.Tag() {
 		t.Fatal("unannotated group lost its latency selection")
 	}
@@ -70,7 +71,7 @@ func TestURLTestPreferredDirectSurvivesFasterBridgeAndRecovers(t *testing.T) {
 		if !live || selected == nil || selected.Tag() != expected {
 			t.Fatalf("wrong live tier selection, expected %s", expected)
 		}
-		group.selectedOutboundTCP = selected
+		group.selection.Store(urlTestSelection{tcp: selected})
 	}
 	assertSelected(direct.Tag())
 	// The slightly faster direct sibling stays within the existing hysteresis.
@@ -80,4 +81,39 @@ func TestURLTestPreferredDirectSurvivesFasterBridgeAndRecovers(t *testing.T) {
 	assertSelected(bridge.Tag())
 	history.StoreURLTestHistory(direct.Tag(), &adapter.URLTestHistory{Delay: 300})
 	assertSelected(direct.Tag())
+}
+
+func TestURLTestPublishesSelectionDuringConcurrentReads(t *testing.T) {
+	first := selectionTestOutbound{tag: "first-path"}
+	second := selectionTestOutbound{tag: "second-path"}
+	history := urltest.NewHistoryStorage()
+	group := &URLTestGroup{
+		outbounds: []adapter.Outbound{first, second}, history: history, tolerance: 50,
+		interruptGroup: interrupt.NewGroup(),
+	}
+	current := &URLTest{group: group}
+	history.StoreURLTestHistory(first.Tag(), &adapter.URLTestHistory{Delay: 10})
+	group.performUpdateCheck()
+	finished := make(chan struct{})
+	go func() {
+		defer close(finished)
+		for range 32 {
+			history.DeleteURLTestHistory(first.Tag())
+			history.StoreURLTestHistory(second.Tag(), &adapter.URLTestHistory{Delay: 10})
+			group.performUpdateCheck()
+			history.DeleteURLTestHistory(second.Tag())
+			history.StoreURLTestHistory(first.Tag(), &adapter.URLTestHistory{Delay: 10})
+			group.performUpdateCheck()
+		}
+	}()
+	for range 64 {
+		if tag := current.Now(); tag != first.Tag() && tag != second.Tag() {
+			t.Errorf("current outbound has an unexpected tag %q", tag)
+		}
+		group.Select("tcp")
+	}
+	<-finished
+	if tag := current.Now(); tag != first.Tag() {
+		t.Fatalf("final outbound is %q, want %q", tag, first.Tag())
+	}
 }
